@@ -5,12 +5,24 @@
 #include <chrono>
 #include <cstdint>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <vector>
 
 namespace shogi {
 
 namespace {
+
+constexpr int kDefaultMultiPv = 1;
+constexpr int kMaxMultiPv = 32;
+constexpr int kDefaultMinimumThinkingTimeMs = 0;
+constexpr int kDefaultNetworkDelayMs = 0;
+constexpr int kDefaultNetworkDelay2Ms = 0;
+constexpr int kDefaultSlowMover = 100;
+constexpr int kDefaultResignValue = 99999;
+constexpr int kMaxOptionMillis = 600000;
+constexpr int kMaxSlowMover = 1000;
+constexpr int kMaxResignValue = 99999;
 
 std::vector<std::string> split_tokens(const std::string& line) {
     std::istringstream iss(line);
@@ -38,6 +50,38 @@ std::uint64_t parse_uint64(const std::string& token, std::uint64_t fallback = 0)
     }
 }
 
+bool parse_bool_option(const std::string& token, bool fallback = false) {
+    if (token == "true" || token == "1") {
+        return true;
+    }
+    if (token == "false" || token == "0") {
+        return false;
+    }
+    return fallback;
+}
+
+std::optional<EnteringKingRule> parse_entering_king_rule(const std::string& token) {
+    if (token == "NoEnteringKing") {
+        return EnteringKingRule::NoEnteringKing;
+    }
+    if (token == "CSARule24") {
+        return EnteringKingRule::CSARule24;
+    }
+    if (token == "CSARule24H") {
+        return EnteringKingRule::CSARule24H;
+    }
+    if (token == "CSARule27") {
+        return EnteringKingRule::CSARule27;
+    }
+    if (token == "CSARule27H") {
+        return EnteringKingRule::CSARule27H;
+    }
+    if (token == "TryRule") {
+        return EnteringKingRule::TryRule;
+    }
+    return std::nullopt;
+}
+
 const char* terminal_reason_text(const TerminalStatus& status) {
     switch (status.reason) {
         case TerminalReason::DeclarationWin:
@@ -48,6 +92,10 @@ const char* terminal_reason_text(const TerminalStatus& status) {
             return "perpetual_check";
         case TerminalReason::Impasse:
             return "impasse";
+        case TerminalReason::MoveLimit:
+            return "move_limit";
+        case TerminalReason::TryRule:
+            return "try_rule";
         case TerminalReason::None:
         default:
             return "none";
@@ -242,6 +290,26 @@ void UsiEngine::handle_line(const std::string& line) {
     if (line == "usi") {
         std::cout << "id name Hayanagi" << std::endl;
         std::cout << "id author OpenAI" << std::endl;
+        std::cout << "option name MultiPV type spin default " << kDefaultMultiPv << " min 1 max "
+                  << kMaxMultiPv << std::endl;
+        std::cout << "option name MinimumThinkingTime type spin default "
+                  << kDefaultMinimumThinkingTimeMs << " min 0 max " << kMaxOptionMillis
+                  << std::endl;
+        std::cout << "option name NetworkDelay type spin default " << kDefaultNetworkDelayMs
+                  << " min 0 max " << kMaxOptionMillis << std::endl;
+        std::cout << "option name NetworkDelay2 type spin default " << kDefaultNetworkDelay2Ms
+                  << " min 0 max " << kMaxOptionMillis << std::endl;
+        std::cout << "option name SlowMover type spin default " << kDefaultSlowMover << " min 1 max "
+                  << kMaxSlowMover << std::endl;
+        std::cout << "option name ResignValue type spin default " << kDefaultResignValue
+                  << " min 0 max " << kMaxResignValue << std::endl;
+        std::cout << "option name MaxMovesToDraw type spin default " << position_rules_.max_moves_to_draw
+                  << " min 0 max " << kMaxOptionMillis << std::endl;
+        std::cout << "option name EnteringKingRule type combo default CSARule24"
+                  << " var NoEnteringKing var CSARule24 var CSARule24H var CSARule27"
+                  << " var CSARule27H var TryRule" << std::endl;
+        std::cout << "option name GenerateAllLegalMoves type check default "
+                  << (position_rules_.generate_all_legal_moves ? "true" : "false") << std::endl;
         std::cout << "usiok" << std::endl;
         return;
     }
@@ -280,11 +348,67 @@ void UsiEngine::handle_line(const std::string& line) {
         return;
     }
     if (line.rfind("setoption ", 0) == 0) {
+        set_option(line);
         return;
     }
     if (line == "quit") {
         stop_search();
     }
+}
+
+void UsiEngine::set_option(const std::string& line) {
+    const auto tokens = split_tokens(line);
+    if (tokens.size() < 3 || tokens[0] != "setoption" || tokens[1] != "name") {
+        return;
+    }
+
+    std::string value_token;
+    for (std::size_t i = 3; i + 1 < tokens.size(); ++i) {
+        if (tokens[i] == "value") {
+            value_token = tokens[i + 1];
+            break;
+        }
+    }
+
+    bool rules_changed = false;
+    if (tokens[2] == "MultiPV") {
+        multi_pv_.store(std::clamp(parse_int(value_token, kDefaultMultiPv), 1, kMaxMultiPv));
+    } else if (tokens[2] == "MinimumThinkingTime") {
+        minimum_thinking_time_ms_ =
+            std::clamp(parse_int(value_token, kDefaultMinimumThinkingTimeMs), 0, kMaxOptionMillis);
+    } else if (tokens[2] == "NetworkDelay") {
+        network_delay_ms_ =
+            std::clamp(parse_int(value_token, kDefaultNetworkDelayMs), 0, kMaxOptionMillis);
+    } else if (tokens[2] == "NetworkDelay2") {
+        network_delay2_ms_ =
+            std::clamp(parse_int(value_token, kDefaultNetworkDelay2Ms), 0, kMaxOptionMillis);
+    } else if (tokens[2] == "SlowMover") {
+        slow_mover_ = std::clamp(parse_int(value_token, kDefaultSlowMover), 1, kMaxSlowMover);
+    } else if (tokens[2] == "ResignValue") {
+        resign_value_ = std::clamp(parse_int(value_token, kDefaultResignValue), 0, kMaxResignValue);
+    } else if (tokens[2] == "MaxMovesToDraw") {
+        position_rules_.max_moves_to_draw =
+            std::clamp(parse_int(value_token, position_rules_.max_moves_to_draw), 0, kMaxOptionMillis);
+        rules_changed = true;
+    } else if (tokens[2] == "EnteringKingRule") {
+        if (const auto rule = parse_entering_king_rule(value_token); rule.has_value()) {
+            position_rules_.entering_king_rule = *rule;
+            rules_changed = true;
+        }
+    } else if (tokens[2] == "GenerateAllLegalMoves") {
+        position_rules_.generate_all_legal_moves =
+            parse_bool_option(value_token, position_rules_.generate_all_legal_moves);
+        rules_changed = true;
+    }
+
+    if (rules_changed) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        apply_position_rules(position_);
+    }
+}
+
+void UsiEngine::apply_position_rules(Position& position) const {
+    position.set_rules(position_rules_);
 }
 
 void UsiEngine::stop_search() {
@@ -305,9 +429,10 @@ void UsiEngine::start_search(const std::string& line) {
         snapshot = position_;
     }
     const SearchOptions options = parse_go_options(line);
+    const int resign_value = resign_value_;
     searching_.store(true);
 
-    search_thread_ = std::thread([this, snapshot, options]() mutable {
+    search_thread_ = std::thread([this, snapshot, options, resign_value]() mutable {
         const SearchResult result =
             search_.find_best_move(snapshot, options, stop_requested_, [&](const SearchInfo& info) {
                 print_info(info);
@@ -320,7 +445,11 @@ void UsiEngine::start_search(const std::string& line) {
                       << terminal_outcome_text(result.terminal) << std::endl;
             std::cout << "bestmove resign" << std::endl;
         } else if (result.has_best_move) {
-            std::cout << "bestmove " << snapshot.move_to_usi(result.best_move) << std::endl;
+            if (result.score_cp <= -resign_value) {
+                std::cout << "bestmove resign" << std::endl;
+            } else {
+                std::cout << "bestmove " << snapshot.move_to_usi(result.best_move) << std::endl;
+            }
         } else {
             std::cout << "bestmove resign" << std::endl;
         }
@@ -369,6 +498,7 @@ void UsiEngine::run_bench(const std::string& line) {
     } else {
         for (const BenchCase& entry : bench_suite()) {
             Position position;
+            apply_position_rules(position);
             if (!load_position_from_command(entry.position_command, position)) {
                 std::cout << "info string bench setup_failed " << entry.name << std::endl;
                 continue;
@@ -488,6 +618,7 @@ bool UsiEngine::set_position(const std::string& line) {
     }
 
     Position next;
+    apply_position_rules(next);
     if (!load_position_from_tokens(tokens, 1, next)) {
         return false;
     }
@@ -499,6 +630,7 @@ bool UsiEngine::set_position(const std::string& line) {
 
 SearchOptions UsiEngine::parse_go_options(const std::string& line) const {
     SearchOptions options;
+    options.multi_pv = std::clamp(multi_pv_.load(), 1, kMaxMultiPv);
     const auto tokens = split_tokens(line);
 
     int movetime = 0;
@@ -535,13 +667,30 @@ SearchOptions UsiEngine::parse_go_options(const std::string& line) const {
     if (movetime > 0) {
         options.time_limit_ms = movetime;
     } else if (!options.infinite) {
-        const bool black_to_move = position_.side_to_move() == Color::Black;
-        const int remaining = black_to_move ? black_time : white_time;
-        const int increment = black_to_move ? black_inc : white_inc;
+        bool black_to_move = true;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            black_to_move = position_.side_to_move() == Color::Black;
+        }
+        const int remaining = std::max(0, black_to_move ? black_time : white_time);
+        const int increment = std::max(0, black_to_move ? black_inc : white_inc);
+        const int safe_byoyomi = std::max(0, byoyomi);
         if (remaining > 0 || increment > 0 || byoyomi > 0) {
             const int slice = remaining > 0 ? std::max(remaining / 30, 50) : 0;
-            options.time_limit_ms =
-                std::max(100, std::min(slice + increment + byoyomi, 5000));
+            const int slowed_slice = slice * slow_mover_ / 100;
+            const int soft_target =
+                std::max(0, slowed_slice + increment + safe_byoyomi - network_delay_ms_);
+            const int hard_cap =
+                std::max(0, remaining + increment + safe_byoyomi - network_delay2_ms_);
+            const int minimum_time = std::max(
+                0, minimum_thinking_time_ms_ - network_delay_ms_ - network_delay2_ms_);
+            int time_limit = std::max(soft_target, minimum_time);
+            if (hard_cap > 0) {
+                time_limit = std::min(time_limit, hard_cap);
+            } else {
+                time_limit = 1;
+            }
+            options.time_limit_ms = std::max(1, time_limit);
         }
     }
 
@@ -549,8 +698,12 @@ SearchOptions UsiEngine::parse_go_options(const std::string& line) const {
 }
 
 void UsiEngine::print_info(const SearchInfo& info) const {
-    std::cout << "info depth " << info.depth << " score cp " << info.score_cp << " nodes "
-              << info.nodes << " time " << info.elapsed_ms << " pv " << info.pv << std::endl;
+    std::cout << "info depth " << info.depth;
+    if (info.show_multipv) {
+        std::cout << " multipv " << info.multipv;
+    }
+    std::cout << " score cp " << info.score_cp << " nodes " << info.nodes << " time "
+              << info.elapsed_ms << " pv " << info.pv << std::endl;
 }
 
 }  // namespace shogi

@@ -349,11 +349,12 @@ SearchResult Search::find_best_move(const Position& root,
         return result;
     }
 
-    auto legal_moves = root.generate_legal_moves();
+    auto legal_moves = root.generate_search_legal_moves();
     if (legal_moves.empty()) {
         result.elapsed_ms = elapsed_ms();
         return result;
     }
+    const int multi_pv = std::max(1, std::min(options.multi_pv, static_cast<int>(legal_moves.size())));
 
     std::vector<Move> mating_line;
     if ((options.infinite || options.max_depth >= 3 || options.time_limit_ms >= 200) &&
@@ -365,13 +366,15 @@ SearchResult Search::find_best_move(const Position& root,
         result.nodes = nodes_;
         result.elapsed_ms = elapsed_ms();
         result.hashfull_permille = hashfull_permille();
-        on_info(SearchInfo{
-            kMateSearchMaxPly,
-            result.score_cp,
-            result.nodes,
-            result.elapsed_ms,
-            format_pv(root, mating_line),
-        });
+        SearchInfo info;
+        info.depth = kMateSearchMaxPly;
+        info.score_cp = result.score_cp;
+        info.nodes = result.nodes;
+        info.elapsed_ms = result.elapsed_ms;
+        info.multipv = 1;
+        info.show_multipv = multi_pv > 1;
+        info.pv = format_pv(root, mating_line);
+        on_info(info);
         return result;
     }
 
@@ -396,7 +399,10 @@ SearchResult Search::find_best_move(const Position& root,
             if (same_move(move, previous_best)) {
                 score += 2000000;
             }
-            root_moves.push_back(RootMove{move, score});
+            RootMove root_move;
+            root_move.move = move;
+            root_move.order_score = score;
+            root_moves.push_back(root_move);
         }
         std::sort(root_moves.begin(), root_moves.end(), [](const RootMove& lhs, const RootMove& rhs) {
             return lhs.order_score > rhs.order_score;
@@ -408,34 +414,57 @@ SearchResult Search::find_best_move(const Position& root,
         int alpha = -kInfinity;
         const int beta = kInfinity;
 
-        for (std::size_t move_index = 0; move_index < root_moves.size(); ++move_index) {
-            if (should_stop()) {
-                aborted_ = true;
-                break;
-            }
+        if (multi_pv == 1) {
+            for (std::size_t move_index = 0; move_index < root_moves.size(); ++move_index) {
+                if (should_stop()) {
+                    aborted_ = true;
+                    break;
+                }
 
-            Position child = root;
-            child.do_move(root_moves[move_index].move);
+                Position child = root;
+                child.do_move(root_moves[move_index].move);
 
-            int score = 0;
-            if (move_index == 0) {
-                score = -negamax(child, depth - 1, 1, -beta, -alpha);
-            } else {
-                score = -negamax(child, depth - 1, 1, -alpha - 1, -alpha);
-                if (!aborted_ && score > alpha && score < beta) {
+                int score = 0;
+                if (move_index == 0) {
                     score = -negamax(child, depth - 1, 1, -beta, -alpha);
+                } else {
+                    score = -negamax(child, depth - 1, 1, -alpha - 1, -alpha);
+                    if (!aborted_ && score > alpha && score < beta) {
+                        score = -negamax(child, depth - 1, 1, -beta, -alpha);
+                    }
+                }
+
+                if (aborted_) {
+                    break;
+                }
+                if (!found_move || score > best_score) {
+                    found_move = true;
+                    best_score = score;
+                    best_move = root_moves[move_index].move;
+                }
+                alpha = std::max(alpha, best_score);
+            }
+        } else {
+            for (RootMove& root_move : root_moves) {
+                if (should_stop()) {
+                    aborted_ = true;
+                    break;
+                }
+
+                Position child = root;
+                child.do_move(root_move.move);
+                root_move.score = -negamax(child, depth - 1, 1, -kInfinity, kInfinity);
+                if (aborted_) {
+                    break;
+                }
+
+                root_move.pv = build_pv(root, root_move.move, depth);
+                if (!found_move || root_move.score > best_score) {
+                    found_move = true;
+                    best_score = root_move.score;
+                    best_move = root_move.move;
                 }
             }
-
-            if (aborted_) {
-                break;
-            }
-            if (!found_move || score > best_score) {
-                found_move = true;
-                best_score = score;
-                best_move = root_moves[move_index].move;
-            }
-            alpha = std::max(alpha, best_score);
         }
 
         if (aborted_ || !found_move) {
@@ -454,13 +483,37 @@ SearchResult Search::find_best_move(const Position& root,
         result.elapsed_ms = elapsed_ms();
         result.hashfull_permille = hashfull_permille();
 
-        on_info(SearchInfo{
-            depth,
-            best_score,
-            nodes_,
-            result.elapsed_ms,
-            pv,
-        });
+        if (multi_pv == 1) {
+            SearchInfo info;
+            info.depth = depth;
+            info.score_cp = best_score;
+            info.nodes = nodes_;
+            info.elapsed_ms = result.elapsed_ms;
+            info.pv = pv;
+            on_info(info);
+        } else {
+            std::sort(root_moves.begin(), root_moves.end(), [](const RootMove& lhs, const RootMove& rhs) {
+                if (lhs.score != rhs.score) {
+                    return lhs.score > rhs.score;
+                }
+                return lhs.order_score > rhs.order_score;
+            });
+
+            result.best_move = root_moves.front().move;
+            result.score_cp = root_moves.front().score;
+
+            for (int pv_index = 0; pv_index < multi_pv; ++pv_index) {
+                SearchInfo info;
+                info.depth = depth;
+                info.score_cp = root_moves[pv_index].score;
+                info.nodes = nodes_;
+                info.elapsed_ms = result.elapsed_ms;
+                info.multipv = pv_index + 1;
+                info.show_multipv = true;
+                info.pv = root_moves[pv_index].pv;
+                on_info(info);
+            }
+        }
 
         if (options.infinite) {
             continue;
@@ -531,7 +584,7 @@ int Search::negamax(const Position& position, int depth, int ply, int alpha, int
         }
     }
 
-    auto legal_moves = position.generate_legal_moves();
+    auto legal_moves = position.generate_search_legal_moves();
     if (legal_moves.empty()) {
         if (in_check) {
             return -kMateScore + ply;
@@ -616,7 +669,7 @@ int Search::quiescence(const Position& position, int ply, int alpha, int beta) {
         alpha = std::max(alpha, stand_pat);
     }
 
-    auto legal_moves = position.generate_legal_moves();
+    auto legal_moves = position.generate_search_legal_moves();
     if (legal_moves.empty()) {
         if (in_check) {
             return -kMateScore + ply;
@@ -842,7 +895,7 @@ bool Search::mate_search_attack(const Position& position,
         return false;
     }
 
-    auto legal_moves = position.generate_legal_moves();
+    auto legal_moves = position.generate_search_legal_moves();
     std::vector<Move> checking_moves;
     checking_moves.reserve(legal_moves.size());
     for (const Move& move : legal_moves) {
@@ -892,7 +945,7 @@ bool Search::mate_search_defense(const Position& position,
     }
     ++nodes_;
 
-    auto legal_moves = position.generate_legal_moves();
+    auto legal_moves = position.generate_search_legal_moves();
     if (legal_moves.empty()) {
         return position.is_in_check(position.side_to_move());
     }

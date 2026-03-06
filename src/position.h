@@ -11,6 +11,21 @@
 
 namespace shogi {
 
+enum class EnteringKingRule : int {
+    NoEnteringKing = 0,
+    CSARule24,
+    CSARule24H,
+    CSARule27,
+    CSARule27H,
+    TryRule,
+};
+
+struct PositionRules {
+    int max_moves_to_draw = 500;
+    EnteringKingRule entering_king_rule = EnteringKingRule::CSARule24;
+    bool generate_all_legal_moves = true;
+};
+
 class Position {
 public:
     Position();
@@ -18,9 +33,12 @@ public:
     void set_startpos();
     bool set_sfen(const std::string& sfen);
     bool apply_usi_move(const std::string& move_text);
+    void set_rules(const PositionRules& rules) { rules_ = rules; }
+    const PositionRules& rules() const { return rules_; }
 
     std::vector<Move> generate_legal_moves() const;
     std::vector<Move> generate_legal_moves(bool include_drops, bool enforce_pawn_drop_mate) const;
+    std::vector<Move> generate_search_legal_moves() const;
     bool do_move(const Move& move);
     TerminalStatus terminal_status() const;
     bool can_declare_win() const;
@@ -55,6 +73,7 @@ private:
     Color side_to_move_ = Color::Black;
     int ply_count_ = 0;
     std::shared_ptr<const HistoryNode> history_;
+    PositionRules rules_{};
 
     void clear();
     void add_piece(int square, Color color, PieceType type);
@@ -68,8 +87,13 @@ private:
                               const Bitboard& move_mask,
                               const Bitboard& pinned,
                               const std::array<Bitboard, kSquareCount>& pin_lines,
+                              bool generate_all_legal_moves,
                               std::vector<Move>& moves) const;
-    void add_move_variants(int from, int to, PieceType piece, std::vector<Move>& moves) const;
+    void add_move_variants(int from,
+                           int to,
+                           PieceType piece,
+                           bool generate_all_legal_moves,
+                           std::vector<Move>& moves) const;
     void add_drop_moves(Color color,
                         const Bitboard& move_mask,
                         bool enforce_pawn_drop_mate,
@@ -92,9 +116,16 @@ private:
     void rebuild_history();
     void append_history();
     std::uint64_t repetition_key() const;
+    std::vector<Move> generate_legal_moves(bool include_drops,
+                                           bool enforce_pawn_drop_mate,
+                                           bool generate_all_legal_moves) const;
     bool is_repetition_draw() const;
+    bool is_try_rule_win(Color color) const;
     bool is_perpetual_check_loss_for_opponent() const;
     bool is_impasse_position() const;
+    int handicap_entering_king_bonus(Color color) const;
+    int declaration_threshold(Color color) const;
+    int impasse_threshold(Color color) const;
     int impasse_points(Color color) const;
     int declaration_points(Color color) const;
     int pieces_in_opponent_camp(Color color) const;

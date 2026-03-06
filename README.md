@@ -45,6 +45,7 @@ quit
 ```text
 id name Hayanagi
 id author OpenAI
+option name MultiPV type spin default 1 min 1 max 32
 usiok
 ```
 
@@ -64,8 +65,8 @@ usiok
 - 千日手
 - 連続王手の千日手
 - 持将棋の点数判定
-- 500 手到達の持将棋
-- 入玉宣言勝ち
+- 手数上限による引き分け判定（`MaxMovesToDraw`）
+- 入玉ルール切り替え（`EnteringKingRule`）
 
 ### USI / 追加コマンド
 
@@ -78,6 +79,15 @@ usiok
 - `go movetime N`
 - `go nodes N`
 - `go wtime ... btime ... byoyomi ...`
+- `setoption name MultiPV value N`
+- `setoption name MinimumThinkingTime value N`
+- `setoption name NetworkDelay value N`
+- `setoption name NetworkDelay2 value N`
+- `setoption name SlowMover value N`
+- `setoption name ResignValue value N`
+- `setoption name MaxMovesToDraw value N`
+- `setoption name EnteringKingRule value <rule>`
+- `setoption name GenerateAllLegalMoves value <bool>`
 - `stop`
 - `quit`
 - `bench depth N`
@@ -86,7 +96,19 @@ usiok
 - `perft N`
 - `perft depth N divide`
 
-`setoption` は現状では受け付けますが、オプション反映は行いません。
+実装済みの主要オプションは次のとおりです。
+
+- `MultiPV`
+- `MinimumThinkingTime`
+- `NetworkDelay`
+- `NetworkDelay2`
+- `SlowMover`
+- `ResignValue`
+- `MaxMovesToDraw`
+- `EnteringKingRule`
+- `GenerateAllLegalMoves`
+
+`MultiPV` を有効にすると、`info ... multipv N pv ...` を順位ごとに出力します。`GenerateAllLegalMoves` は探索時の合法手生成にだけ反映し、`position` / `perft` の入力互換性は維持します。
 
 ## 実装概要
 

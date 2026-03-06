@@ -241,6 +241,8 @@ enum class TerminalReason : int {
     Repetition,
     PerpetualCheck,
     Impasse,
+    MoveLimit,
+    TryRule,
 };
 
 struct TerminalStatus {

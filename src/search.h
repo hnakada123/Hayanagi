@@ -18,6 +18,7 @@ struct SearchOptions {
     int time_limit_ms = 0;
     bool infinite = false;
     std::uint64_t node_limit = 0;
+    int multi_pv = 1;
 };
 
 struct SearchInfo {
@@ -25,6 +26,8 @@ struct SearchInfo {
     int score_cp = 0;
     std::uint64_t nodes = 0;
     int elapsed_ms = 0;
+    int multipv = 1;
+    bool show_multipv = false;
     std::string pv;
 };
 
@@ -52,6 +55,8 @@ private:
     struct RootMove {
         Move move;
         int order_score = 0;
+        int score = -kInfinity;
+        std::string pv;
     };
 
     enum class BoundType : std::uint8_t {

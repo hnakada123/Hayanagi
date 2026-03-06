@@ -26,6 +26,9 @@ constexpr int kStepDirections[][2] = {
     {-1, -1}, {-1, 0}, {-1, 1}, {0, -1},
     {0, 1},   {1, -1}, {1, 0},  {1, 1},
 };
+constexpr int kBlackTrySquare = 4;
+constexpr int kWhiteTrySquare = 8 * kBoardSize + 4;
+constexpr std::array<int, kHandPieceKinds> kFullPieceCounts = {0, 9, 2, 2, 2, 2, 1, 1};
 
 int orientation(Color color) {
     return color == Color::Black ? 1 : -1;
@@ -505,32 +508,58 @@ TerminalStatus Position::terminal_status() const {
     if (is_perpetual_check_loss_for_opponent()) {
         return TerminalStatus{TerminalOutcome::Win, TerminalReason::PerpetualCheck};
     }
+    if (rules_.entering_king_rule == EnteringKingRule::TryRule) {
+        if (is_try_rule_win(Color::Black)) {
+            return TerminalStatus{
+                side_to_move_ == Color::Black ? TerminalOutcome::Win : TerminalOutcome::Loss,
+                TerminalReason::TryRule,
+            };
+        }
+        if (is_try_rule_win(Color::White)) {
+            return TerminalStatus{
+                side_to_move_ == Color::White ? TerminalOutcome::Win : TerminalOutcome::Loss,
+                TerminalReason::TryRule,
+            };
+        }
+    }
     if (is_repetition_draw()) {
         return TerminalStatus{TerminalOutcome::Draw, TerminalReason::Repetition};
     }
-    if (ply_count_ >= 500 && !is_in_check(side_to_move_)) {
-        return TerminalStatus{TerminalOutcome::Draw, TerminalReason::Impasse};
+    if (rules_.max_moves_to_draw > 0 && ply_count_ >= rules_.max_moves_to_draw &&
+        !is_in_check(side_to_move_)) {
+        return TerminalStatus{TerminalOutcome::Draw, TerminalReason::MoveLimit};
     }
-    if (can_declare_win()) {
-        return TerminalStatus{TerminalOutcome::Win, TerminalReason::DeclarationWin};
-    }
-    if (is_impasse_position()) {
-        const int own_points = impasse_points(side_to_move_);
-        const int opponent_points = impasse_points(opposite(side_to_move_));
-        if (own_points >= 24 && opponent_points >= 24) {
-            return TerminalStatus{TerminalOutcome::Draw, TerminalReason::Impasse};
+    if (rules_.entering_king_rule != EnteringKingRule::NoEnteringKing &&
+        rules_.entering_king_rule != EnteringKingRule::TryRule) {
+        if (can_declare_win()) {
+            return TerminalStatus{TerminalOutcome::Win, TerminalReason::DeclarationWin};
         }
-        if (own_points < 24 && opponent_points >= 24) {
-            return TerminalStatus{TerminalOutcome::Loss, TerminalReason::Impasse};
-        }
-        if (own_points >= 24 && opponent_points < 24) {
-            return TerminalStatus{TerminalOutcome::Win, TerminalReason::Impasse};
+        if (is_impasse_position()) {
+            const int own_points =
+                impasse_points(side_to_move_) + handicap_entering_king_bonus(side_to_move_);
+            const int opponent_points = impasse_points(opposite(side_to_move_)) +
+                                        handicap_entering_king_bonus(opposite(side_to_move_));
+            const int own_threshold = impasse_threshold(side_to_move_);
+            const int opponent_threshold = impasse_threshold(opposite(side_to_move_));
+            if (own_points >= own_threshold && opponent_points >= opponent_threshold) {
+                return TerminalStatus{TerminalOutcome::Draw, TerminalReason::Impasse};
+            }
+            if (own_points < own_threshold && opponent_points >= opponent_threshold) {
+                return TerminalStatus{TerminalOutcome::Loss, TerminalReason::Impasse};
+            }
+            if (own_points >= own_threshold && opponent_points < opponent_threshold) {
+                return TerminalStatus{TerminalOutcome::Win, TerminalReason::Impasse};
+            }
         }
     }
     return TerminalStatus{};
 }
 
 bool Position::can_declare_win() const {
+    if (rules_.entering_king_rule == EnteringKingRule::NoEnteringKing ||
+        rules_.entering_king_rule == EnteringKingRule::TryRule) {
+        return false;
+    }
     const Color color = side_to_move_;
     const int king_square = find_king(color);
     if (king_square == -1 || !is_in_promotion_zone(color, square_row(king_square))) {
@@ -542,7 +571,7 @@ bool Position::can_declare_win() const {
     if (pieces_in_opponent_camp(color) < 10) {
         return false;
     }
-    if (declaration_points(color) < 31) {
+    if (declaration_points(color) + handicap_entering_king_bonus(color) < declaration_threshold(color)) {
         return false;
     }
     return !opponent_has_mate_in_one(color);
@@ -639,10 +668,6 @@ bool Position::apply_usi_move(const std::string& move_text) {
     }
     do_move_unchecked(*it);
     return true;
-}
-
-std::vector<Move> Position::generate_legal_moves() const {
-    return generate_legal_moves(true, true);
 }
 
 Bitboard Position::rook_attacks(int from, const Bitboard& occupied) const {
@@ -865,6 +890,7 @@ void Position::generate_piece_moves(Color color,
                                     const Bitboard& move_mask,
                                     const Bitboard& pinned,
                                     const std::array<Bitboard, kSquareCount>& pin_lines,
+                                    bool generate_all_legal_moves,
                                     std::vector<Move>& moves) const {
     while (pieces.any()) {
         const int from = pieces.pop_lsb();
@@ -877,12 +903,16 @@ void Position::generate_piece_moves(Color color,
 
         while (targets.any()) {
             const int to = targets.pop_lsb();
-            add_move_variants(from, to, type, moves);
+            add_move_variants(from, to, type, generate_all_legal_moves, moves);
         }
     }
 }
 
-void Position::add_move_variants(int from, int to, PieceType piece, std::vector<Move>& moves) const {
+void Position::add_move_variants(int from,
+                                 int to,
+                                 PieceType piece,
+                                 bool generate_all_legal_moves,
+                                 std::vector<Move>& moves) const {
     const int target = board_[to];
     if (!is_empty(target) && piece_type(target) == PieceType::King) {
         return;
@@ -895,8 +925,11 @@ void Position::add_move_variants(int from, int to, PieceType piece, std::vector<
         can_promote(piece) &&
         (is_in_promotion_zone(color, from_row) || is_in_promotion_zone(color, to_row));
     const bool promotion_required = must_promote(piece, color, to_row);
+    const bool keep_unpromoted =
+        !promotion_available || generate_all_legal_moves || piece == PieceType::Bishop ||
+        piece == PieceType::Rook || !is_in_promotion_zone(color, to_row);
 
-    if (!promotion_required) {
+    if (!promotion_required && keep_unpromoted) {
         moves.push_back(Move{from, to, piece, false, false});
     }
     if (promotion_available) {
@@ -948,8 +981,22 @@ void Position::add_drop_moves(Color color,
     }
 }
 
+std::vector<Move> Position::generate_legal_moves() const {
+    return generate_legal_moves(true, true, true);
+}
+
 std::vector<Move> Position::generate_legal_moves(bool include_drops,
                                                  bool enforce_pawn_drop_mate) const {
+    return generate_legal_moves(include_drops, enforce_pawn_drop_mate, true);
+}
+
+std::vector<Move> Position::generate_search_legal_moves() const {
+    return generate_legal_moves(true, true, rules_.generate_all_legal_moves);
+}
+
+std::vector<Move> Position::generate_legal_moves(bool include_drops,
+                                                 bool enforce_pawn_drop_mate,
+                                                 bool generate_all_legal_moves) const {
     std::vector<Move> moves;
     moves.reserve(256);
     const Color color = side_to_move_;
@@ -988,6 +1035,7 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
+                         generate_all_legal_moves,
                          moves);
     generate_piece_moves(color,
                          PieceType::Lance,
@@ -996,6 +1044,7 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
+                         generate_all_legal_moves,
                          moves);
     generate_piece_moves(color,
                          PieceType::Knight,
@@ -1004,6 +1053,7 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
+                         generate_all_legal_moves,
                          moves);
     generate_piece_moves(color,
                          PieceType::Silver,
@@ -1012,6 +1062,7 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
+                         generate_all_legal_moves,
                          moves);
     generate_piece_moves(color,
                          PieceType::Gold,
@@ -1020,6 +1071,7 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
+                         generate_all_legal_moves,
                          moves);
     generate_piece_moves(color,
                          PieceType::Bishop,
@@ -1028,6 +1080,7 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
+                         generate_all_legal_moves,
                          moves);
     generate_piece_moves(color,
                          PieceType::Rook,
@@ -1036,6 +1089,7 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
+                         generate_all_legal_moves,
                          moves);
     generate_piece_moves(color,
                          PieceType::ProPawn,
@@ -1044,6 +1098,7 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
+                         generate_all_legal_moves,
                          moves);
     generate_piece_moves(color,
                          PieceType::ProLance,
@@ -1052,6 +1107,7 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
+                         generate_all_legal_moves,
                          moves);
     generate_piece_moves(color,
                          PieceType::ProKnight,
@@ -1060,6 +1116,7 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
+                         generate_all_legal_moves,
                          moves);
     generate_piece_moves(color,
                          PieceType::ProSilver,
@@ -1068,6 +1125,7 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
+                         generate_all_legal_moves,
                          moves);
     generate_piece_moves(color,
                          PieceType::Horse,
@@ -1076,6 +1134,7 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
+                         generate_all_legal_moves,
                          moves);
     generate_piece_moves(color,
                          PieceType::Dragon,
@@ -1084,6 +1143,7 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
+                         generate_all_legal_moves,
                          moves);
 
     if (include_drops) {
@@ -1190,6 +1250,14 @@ bool Position::is_repetition_draw() const {
     return false;
 }
 
+bool Position::is_try_rule_win(Color color) const {
+    const int king_square = find_king(color);
+    if (king_square == -1) {
+        return false;
+    }
+    return king_square == (color == Color::Black ? kBlackTrySquare : kWhiteTrySquare);
+}
+
 bool Position::is_perpetual_check_loss_for_opponent() const {
     if (history_ == nullptr || !history_->side_in_check) {
         return false;
@@ -1219,6 +1287,71 @@ bool Position::is_perpetual_check_loss_for_opponent() const {
         }
     }
     return true;
+}
+
+int Position::handicap_entering_king_bonus(Color color) const {
+    if (color != Color::White) {
+        return 0;
+    }
+    if (rules_.entering_king_rule != EnteringKingRule::CSARule24H &&
+        rules_.entering_king_rule != EnteringKingRule::CSARule27H) {
+        return 0;
+    }
+
+    std::array<int, kHandPieceKinds> total_counts{};
+    for (int square = 0; square < kSquareCount; ++square) {
+        const int piece = board_[square];
+        if (is_empty(piece)) {
+            continue;
+        }
+        const PieceType type = unpromote(piece_type(piece));
+        if (type == PieceType::King) {
+            continue;
+        }
+        ++total_counts[hand_index(type)];
+    }
+    for (int owner = 0; owner < 2; ++owner) {
+        for (int index = 1; index < kHandPieceKinds; ++index) {
+            total_counts[index] += hands_[owner][index];
+        }
+    }
+
+    int bonus = 0;
+    for (int index = 1; index < kHandPieceKinds; ++index) {
+        const int missing = std::max(0, kFullPieceCounts[index] - total_counts[index]);
+        bonus += missing * impasse_point_value(static_cast<PieceType>(index));
+    }
+    return bonus;
+}
+
+int Position::declaration_threshold(Color color) const {
+    switch (rules_.entering_king_rule) {
+        case EnteringKingRule::CSARule24:
+        case EnteringKingRule::CSARule24H:
+            return 31;
+        case EnteringKingRule::CSARule27:
+        case EnteringKingRule::CSARule27H:
+            return color == Color::Black ? 28 : 27;
+        case EnteringKingRule::NoEnteringKing:
+        case EnteringKingRule::TryRule:
+        default:
+            return kInfinity;
+    }
+}
+
+int Position::impasse_threshold(Color color) const {
+    switch (rules_.entering_king_rule) {
+        case EnteringKingRule::CSARule24:
+        case EnteringKingRule::CSARule24H:
+            return 24;
+        case EnteringKingRule::CSARule27:
+        case EnteringKingRule::CSARule27H:
+            return color == Color::Black ? 28 : 27;
+        case EnteringKingRule::NoEnteringKing:
+        case EnteringKingRule::TryRule:
+        default:
+            return kInfinity;
+    }
 }
 
 bool Position::is_impasse_position() const {
