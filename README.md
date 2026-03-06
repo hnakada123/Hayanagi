@@ -46,6 +46,7 @@ quit
 id name Hayanagi
 id author OpenAI
 option name MultiPV type spin default 1 min 1 max 32
+option name Threads type spin default 1 min 1 max 128
 usiok
 ```
 
@@ -80,6 +81,7 @@ usiok
 - `go nodes N`
 - `go wtime ... btime ... byoyomi ...`
 - `setoption name MultiPV value N`
+- `setoption name Threads value N`
 - `setoption name MinimumThinkingTime value N`
 - `setoption name NetworkDelay value N`
 - `setoption name NetworkDelay2 value N`
@@ -99,6 +101,7 @@ usiok
 実装済みの主要オプションは次のとおりです。
 
 - `MultiPV`
+- `Threads`
 - `MinimumThinkingTime`
 - `NetworkDelay`
 - `NetworkDelay2`
@@ -123,6 +126,7 @@ usiok
 ### `Search`
 
 - 反復深化付きの `negamax + alpha-beta` 探索を行います。
+- `Threads > 1` のときは root move 単位で並列探索します。
 - 置換表、PVS、quiescence search、SEE ベースの着手順序、killer/history heuristic、LMR、null-move pruning を使って探索効率を上げています。
 - 短手数の詰みは専用の王手限定探索で先に検出します。
 - 評価関数は駒得に加え、駒の前進度、利きの広さ、敵陣進出、手駒価値、玉の安全度を見ます。

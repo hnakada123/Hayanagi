@@ -24,6 +24,7 @@ private:
     std::atomic_bool stop_requested_{false};
     std::atomic_bool searching_{false};
     std::atomic_int multi_pv_{1};
+    std::atomic_int threads_{1};
     PositionRules position_rules_{};
     int minimum_thinking_time_ms_ = 0;
     int network_delay_ms_ = 0;

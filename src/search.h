@@ -19,6 +19,7 @@ struct SearchOptions {
     bool infinite = false;
     std::uint64_t node_limit = 0;
     int multi_pv = 1;
+    int threads = 1;
 };
 
 struct SearchInfo {
@@ -57,6 +58,7 @@ private:
         int order_score = 0;
         int score = -kInfinity;
         std::string pv;
+        std::size_t worker_index = 0;
     };
 
     enum class BoundType : std::uint8_t {
@@ -74,6 +76,7 @@ private:
     };
 
     std::atomic_bool* stop_ = nullptr;
+    std::atomic<std::uint64_t>* shared_nodes_ = nullptr;
     SearchOptions options_{};
     std::chrono::steady_clock::time_point start_time_{};
     std::uint64_t nodes_ = 0;
@@ -100,6 +103,13 @@ private:
     void record_killer(int ply, const Move& move);
     void record_history(Color color, const Move& move, int depth);
     int history_score(Color color, const Move& move) const;
+    void reset_state(const SearchOptions& options,
+                     std::atomic_bool& stop,
+                     std::chrono::steady_clock::time_point start_time,
+                     std::atomic<std::uint64_t>* shared_nodes);
+    void count_node();
+    std::uint64_t current_nodes() const;
+    int search_root_move(const Position& root, const Move& root_move, int depth);
     int hashfull_permille() const;
     std::string format_pv(const Position& root, const std::vector<Move>& moves) const;
     std::string build_pv(const Position& root, const Move& root_move, int max_length) const;

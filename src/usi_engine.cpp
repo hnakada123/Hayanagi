@@ -15,6 +15,8 @@ namespace {
 
 constexpr int kDefaultMultiPv = 1;
 constexpr int kMaxMultiPv = 32;
+constexpr int kDefaultThreads = 1;
+constexpr int kMaxThreads = 128;
 constexpr int kDefaultMinimumThinkingTimeMs = 0;
 constexpr int kDefaultNetworkDelayMs = 0;
 constexpr int kDefaultNetworkDelay2Ms = 0;
@@ -292,6 +294,8 @@ void UsiEngine::handle_line(const std::string& line) {
         std::cout << "id author OpenAI" << std::endl;
         std::cout << "option name MultiPV type spin default " << kDefaultMultiPv << " min 1 max "
                   << kMaxMultiPv << std::endl;
+        std::cout << "option name Threads type spin default " << kDefaultThreads << " min 1 max "
+                  << kMaxThreads << std::endl;
         std::cout << "option name MinimumThinkingTime type spin default "
                   << kDefaultMinimumThinkingTimeMs << " min 0 max " << kMaxOptionMillis
                   << std::endl;
@@ -373,6 +377,8 @@ void UsiEngine::set_option(const std::string& line) {
     bool rules_changed = false;
     if (tokens[2] == "MultiPV") {
         multi_pv_.store(std::clamp(parse_int(value_token, kDefaultMultiPv), 1, kMaxMultiPv));
+    } else if (tokens[2] == "Threads") {
+        threads_.store(std::clamp(parse_int(value_token, kDefaultThreads), 1, kMaxThreads));
     } else if (tokens[2] == "MinimumThinkingTime") {
         minimum_thinking_time_ms_ =
             std::clamp(parse_int(value_token, kDefaultMinimumThinkingTimeMs), 0, kMaxOptionMillis);
@@ -515,6 +521,7 @@ void UsiEngine::run_bench(const std::string& line) {
     SearchOptions options;
     options.max_depth = depth;
     options.node_limit = node_limit;
+    options.threads = std::clamp(threads_.load(), 1, kMaxThreads);
 
     const auto total_start = std::chrono::steady_clock::now();
     std::uint64_t total_nodes = 0;
@@ -631,6 +638,7 @@ bool UsiEngine::set_position(const std::string& line) {
 SearchOptions UsiEngine::parse_go_options(const std::string& line) const {
     SearchOptions options;
     options.multi_pv = std::clamp(multi_pv_.load(), 1, kMaxMultiPv);
+    options.threads = std::clamp(threads_.load(), 1, kMaxThreads);
     const auto tokens = split_tokens(line);
 
     int movetime = 0;
