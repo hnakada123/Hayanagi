@@ -49,6 +49,7 @@ public:
     Position make_null_move() const;
 
     std::string move_to_usi(const Move& move) const;
+    std::string to_sfen() const;
 
     Color side_to_move() const { return side_to_move_; }
     int piece_at(int square) const { return board_[square]; }

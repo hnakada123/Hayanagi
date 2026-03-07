@@ -7,6 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(hayanagi
     src/main.cpp
+    src/book.cpp
     src/position.cpp
     src/search.cpp
     src/usi_engine.cpp

@@ -4,6 +4,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <iostream>
 #include <optional>
 #include <sstream>
@@ -331,10 +332,45 @@ void UsiEngine::handle_line(const std::string& line) {
                   << " var CSARule27H var TryRule" << std::endl;
         std::cout << "option name GenerateAllLegalMoves type check default "
                   << (position_rules_.generate_all_legal_moves ? "true" : "false") << std::endl;
+        std::cout << "option name USI_OwnBook type check default true" << std::endl;
+        std::cout << "option name BookDir type string default book" << std::endl;
+        std::cout << "option name BookFile type combo default standard_book.db"
+                  << " var no_book"
+                  << " var standard_book.db"
+                  << " var yaneura_book1.db"
+                  << " var yaneura_book2.db"
+                  << " var yaneura_book3.db"
+                  << " var yaneura_book4.db"
+                  << " var user_book1.db"
+                  << " var user_book2.db"
+                  << " var user_book3.db" << std::endl;
         std::cout << "usiok" << std::endl;
         return;
     }
     if (line == "isready") {
+        if (!book_loaded_ && usi_own_book_ && book_file_ != "no_book") {
+            namespace fs = std::filesystem;
+            fs::path book_path;
+            fs::path dir(book_dir_);
+            if (dir.is_absolute()) {
+                book_path = dir / book_file_;
+            } else {
+                auto exe_dir = fs::path("/proc/self/exe");
+                std::error_code ec;
+                auto resolved = fs::read_symlink(exe_dir, ec);
+                if (!ec) {
+                    book_path = resolved.parent_path() / dir / book_file_;
+                } else {
+                    book_path = dir / book_file_;
+                }
+            }
+            if (book_.load(book_path.string())) {
+                std::cout << "info string book loaded " << book_path.string() << std::endl;
+            } else {
+                std::cout << "info string book not found " << book_path.string() << std::endl;
+            }
+            book_loaded_ = true;
+        }
         std::cout << "readyok" << std::endl;
         return;
     }
@@ -436,6 +472,18 @@ void UsiEngine::set_option(const std::string& line) {
         position_rules_.generate_all_legal_moves =
             parse_bool_option(value_token, position_rules_.generate_all_legal_moves);
         rules_changed = true;
+    } else if (tokens[2] == "USI_OwnBook") {
+        usi_own_book_ = parse_bool_option(value_token, usi_own_book_);
+    } else if (tokens[2] == "BookDir") {
+        if (!value_token.empty()) {
+            book_dir_ = value_token;
+            book_loaded_ = false;
+        }
+    } else if (tokens[2] == "BookFile") {
+        if (!value_token.empty()) {
+            book_file_ = value_token;
+            book_loaded_ = false;
+        }
     }
 
     if (rules_changed) {
@@ -475,6 +523,23 @@ void UsiEngine::start_search(const std::string& line) {
         snapshot = position_;
     }
     const SearchOptions options = parse_go_options(line);
+
+    if (usi_own_book_ && book_.is_loaded() && !options.ponder) {
+        const std::string sfen = snapshot.to_sfen();
+        const auto* entries = book_.lookup(sfen);
+        if (entries && !entries->empty()) {
+            const BookEntry& entry = (*entries)[0];
+            std::cout << "info string book hit " << entry.best_move << " score " << entry.score
+                      << " depth " << entry.depth << " count " << entry.count << std::endl;
+            std::cout << "bestmove " << entry.best_move;
+            if (usi_ponder_.load() && entry.ponder_move != "none") {
+                std::cout << " ponder " << entry.ponder_move;
+            }
+            std::cout << std::endl;
+            return;
+        }
+    }
+
     {
         std::lock_guard<std::mutex> lock(search_state_mutex_);
         pondering_ = options.ponder;

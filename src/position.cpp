@@ -751,6 +751,71 @@ std::string Position::move_to_usi(const Move& move) const {
     return text;
 }
 
+std::string Position::to_sfen() const {
+    std::string sfen;
+    for (int row = 0; row < kBoardSize; ++row) {
+        if (row > 0) {
+            sfen += '/';
+        }
+        int empty_count = 0;
+        for (int col = 0; col < kBoardSize; ++col) {
+            const int piece = board_[make_square(row, col)];
+            if (is_empty(piece)) {
+                ++empty_count;
+                continue;
+            }
+            if (empty_count > 0) {
+                sfen += static_cast<char>('0' + empty_count);
+                empty_count = 0;
+            }
+            const PieceType type = piece_type(piece);
+            if (is_promoted(type)) {
+                sfen += '+';
+            }
+            char letter = piece_letter(type);
+            if (piece_color(piece) == Color::White) {
+                letter = static_cast<char>(std::tolower(static_cast<unsigned char>(letter)));
+            }
+            sfen += letter;
+        }
+        if (empty_count > 0) {
+            sfen += static_cast<char>('0' + empty_count);
+        }
+    }
+
+    sfen += ' ';
+    sfen += (side_to_move_ == Color::Black) ? 'b' : 'w';
+    sfen += ' ';
+
+    std::string hand_str;
+    static constexpr PieceType kHandOrder[] = {
+        PieceType::Rook, PieceType::Bishop, PieceType::Gold, PieceType::Silver,
+        PieceType::Knight, PieceType::Lance, PieceType::Pawn,
+    };
+    for (Color color : {Color::Black, Color::White}) {
+        for (PieceType type : kHandOrder) {
+            const int count = hand_count(color, type);
+            if (count <= 0) {
+                continue;
+            }
+            if (count > 1) {
+                hand_str += std::to_string(count);
+            }
+            char letter = piece_letter(type);
+            if (color == Color::White) {
+                letter = static_cast<char>(std::tolower(static_cast<unsigned char>(letter)));
+            }
+            hand_str += letter;
+        }
+    }
+    sfen += hand_str.empty() ? "-" : hand_str;
+
+    sfen += ' ';
+    sfen += std::to_string(ply_count_ + 1);
+
+    return sfen;
+}
+
 bool Position::apply_usi_move(const std::string& move_text) {
     const auto legal_moves = generate_legal_moves();
     const auto it = std::find_if(legal_moves.begin(), legal_moves.end(), [&](const Move& move) {

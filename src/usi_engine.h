@@ -6,6 +6,7 @@
 #include <string>
 #include <thread>
 
+#include "book.h"
 #include "search.h"
 
 namespace shogi {
@@ -20,6 +21,7 @@ public:
 private:
     Position position_;
     Search search_;
+    Book book_;
     mutable std::mutex mutex_;
     mutable std::mutex search_state_mutex_;
     std::condition_variable search_state_cv_;
@@ -38,6 +40,10 @@ private:
     int network_delay2_ms_ = 0;
     int slow_mover_ = 100;
     int resign_value_ = 99999;
+    bool usi_own_book_ = true;
+    std::string book_dir_ = "book";
+    std::string book_file_ = "standard_book.db";
+    bool book_loaded_ = false;
 
     void handle_line(const std::string& line);
     void set_option(const std::string& line);

@@ -81,6 +81,9 @@ usiok
 - `go nodes N`
 - `go ponder ...`
 - `go wtime ... btime ... byoyomi ...`
+- `setoption name USI_OwnBook value <bool>`
+- `setoption name BookDir value <path>`
+- `setoption name BookFile value <file>`
 - `setoption name USI_Ponder value <bool>`
 - `setoption name MultiPV value N`
 - `setoption name Threads value N`
@@ -103,6 +106,9 @@ usiok
 
 実装済みの主要オプションは次のとおりです。
 
+- `USI_OwnBook`
+- `BookDir`
+- `BookFile`
 - `MultiPV`
 - `Threads`
 - `Hash`
@@ -115,6 +121,8 @@ usiok
 - `MaxMovesToDraw`
 - `EnteringKingRule`
 - `GenerateAllLegalMoves`
+
+`USI_OwnBook` を有効にすると（デフォルトで有効）、`go` 時に定跡ファイルを参照し、現局面にヒットすれば探索せずに定跡手を返します。定跡ファイルはやねうら王の DB2016 フォーマット（`#YANEURAOU-DB2016 1.00`）に対応しています。`BookDir` で定跡フォルダ（デフォルトは実行ファイルからの相対パス `book`）、`BookFile` で定跡ファイル名（デフォルトは `standard_book.db`）を指定します。`BookFile` に `no_book` を指定すると定跡を無効にできます。
 
 `MultiPV` を有効にすると、`info ... multipv N pv ...` を順位ごとに出力します。`GenerateAllLegalMoves` は互換性維持のため残していますが、現在は探索強度を落とさないよう no-op です。
 
@@ -140,10 +148,16 @@ usiok
 - 短手数の詰みは専用の王手限定探索で先に検出します。
 - 評価関数は駒得に加え、駒の前進度、利きの広さ、敵陣進出、手駒価値、玉の安全度を見ます。
 
+### `Book`
+
+- やねうら王の定跡フォーマット（`#YANEURAOU-DB2016 1.00`）を読み込みます。
+- SFEN 文字列をキーとして定跡手を検索します。
+
 ### `UsiEngine`
 
 - `usi` / `isready` / `position` / `go` / `stop` / `quit` を処理します。
 - 探索はワーカースレッドで実行し、`stop` に反応できる構成にしています。
+- `isready` 時に定跡ファイルを読み込み、`go` 時に定跡を参照します。
 - `bench` と `perft` を内蔵しており、GUI 接続前の自己確認にも使えます。
 
 ## 既知の制約
