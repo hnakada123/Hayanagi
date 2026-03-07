@@ -61,6 +61,21 @@ struct Tables {
     std::array<std::array<Bitboard, kSquareCount>, kSquareCount> between{};
 };
 
+constexpr int kMaxHandCount = 18;
+
+struct ZobristTables {
+    std::array<std::array<std::array<std::uint64_t, kSquareCount>, 15>, 2> board{};
+    std::array<std::array<std::array<std::uint64_t, kMaxHandCount>, kHandPieceKinds>, 2> hand{};
+    std::uint64_t side_to_move = 0;
+};
+
+std::uint64_t splitmix64(std::uint64_t& state) {
+    std::uint64_t value = (state += 0x9E3779B97F4A7C15ULL);
+    value = (value ^ (value >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    value = (value ^ (value >> 27)) * 0x94D049BB133111EBULL;
+    return value ^ (value >> 31);
+}
+
 void add_step_attack(Tables& tables,
                      Color color,
                      PieceType type,
@@ -159,6 +174,32 @@ Tables build_tables() {
 
 const Tables& tables() {
     static const Tables instance = build_tables();
+    return instance;
+}
+
+ZobristTables build_zobrist() {
+    ZobristTables zobrist;
+    std::uint64_t seed = 0x7F4A7C159E3779B9ULL;
+
+    for (int color = 0; color < 2; ++color) {
+        for (int type = 0; type < 15; ++type) {
+            for (int square = 0; square < kSquareCount; ++square) {
+                zobrist.board[color][type][square] = splitmix64(seed);
+            }
+        }
+        for (int index = 0; index < kHandPieceKinds; ++index) {
+            for (int count = 0; count < kMaxHandCount; ++count) {
+                zobrist.hand[color][index][count] = splitmix64(seed);
+            }
+        }
+    }
+
+    zobrist.side_to_move = splitmix64(seed);
+    return zobrist;
+}
+
+const ZobristTables& zobrist() {
+    static const ZobristTables instance = build_zobrist();
     return instance;
 }
 
@@ -341,10 +382,12 @@ void Position::clear() {
     king_square_ = {-1, -1};
     side_to_move_ = Color::Black;
     ply_count_ = 0;
+    position_key_ = 0;
     history_.reset();
 }
 
 void Position::add_piece(int square, Color color, PieceType type) {
+    position_key_ ^= zobrist().board[static_cast<int>(color)][static_cast<int>(type)][square];
     board_[square] = encode_piece(color, type);
     occupied_.set(square);
     color_bb_[static_cast<int>(color)].set(square);
@@ -361,6 +404,7 @@ void Position::remove_piece(int square) {
     }
     const Color color = piece_color(piece);
     const PieceType type = piece_type(piece);
+    position_key_ ^= zobrist().board[static_cast<int>(color)][static_cast<int>(type)][square];
     occupied_.reset(square);
     color_bb_[static_cast<int>(color)].reset(square);
     piece_bb_[static_cast<int>(color)][static_cast<int>(type)].reset(square);
@@ -368,6 +412,20 @@ void Position::remove_piece(int square) {
     if (type == PieceType::King) {
         king_square_[static_cast<int>(color)] = -1;
     }
+}
+
+void Position::add_hand_piece(Color color, PieceType type) {
+    const int index = hand_index(type);
+    int& count = hands_[static_cast<int>(color)][index];
+    position_key_ ^= zobrist().hand[static_cast<int>(color)][index][count];
+    ++count;
+}
+
+void Position::remove_hand_piece(Color color, PieceType type) {
+    const int index = hand_index(type);
+    int& count = hands_[static_cast<int>(color)][index];
+    --count;
+    position_key_ ^= zobrist().hand[static_cast<int>(color)][index][count];
 }
 
 void Position::set_startpos() {
@@ -430,6 +488,7 @@ bool Position::set_sfen(const std::string& sfen) {
         side_to_move_ = Color::Black;
     } else if (tokens[1] == "w") {
         side_to_move_ = Color::White;
+        position_key_ ^= zobrist().side_to_move;
     } else {
         return false;
     }
@@ -447,7 +506,9 @@ bool Position::set_sfen(const std::string& sfen) {
             }
             const Color color =
                 std::isupper(static_cast<unsigned char>(ch)) ? Color::Black : Color::White;
-            hands_[static_cast<int>(color)][hand_index(piece.value())] += std::max(count, 1);
+            for (int remaining = std::max(count, 1); remaining > 0; --remaining) {
+                add_hand_piece(color, piece.value());
+            }
             count = 0;
         }
         if (count != 0) {
@@ -486,14 +547,14 @@ void Position::do_move_unchecked(const Move& move) {
     const Color mover = side_to_move_;
     if (move.drop) {
         add_piece(move.to, mover, move.piece);
-        --hands_[static_cast<int>(mover)][hand_index(move.piece)];
+        remove_hand_piece(mover, move.piece);
     } else {
         const int moving_piece = board_[move.from];
         const PieceType moving_type = piece_type(moving_piece);
         const int captured_piece = board_[move.to];
         if (!is_empty(captured_piece)) {
             const PieceType captured_type = unpromote(piece_type(captured_piece));
-            ++hands_[static_cast<int>(mover)][hand_index(captured_type)];
+            add_hand_piece(mover, captured_type);
             remove_piece(move.to);
         }
         remove_piece(move.from);
@@ -501,7 +562,21 @@ void Position::do_move_unchecked(const Move& move) {
     }
     ++ply_count_;
     side_to_move_ = opposite(side_to_move_);
+    position_key_ ^= zobrist().side_to_move;
     append_history();
+}
+
+int Position::piece_after_move_at(int square,
+                                  const Move& move,
+                                  Color mover,
+                                  PieceType moved_type) const {
+    if (!move.drop && square == move.from) {
+        return 0;
+    }
+    if (square == move.to) {
+        return encode_piece(mover, moved_type);
+    }
+    return board_[square];
 }
 
 TerminalStatus Position::terminal_status() const {
@@ -578,9 +653,26 @@ bool Position::can_declare_win() const {
 }
 
 bool Position::gives_check(const Move& move) const {
-    Position next = *this;
-    next.do_move_unchecked(move);
-    return next.is_in_check(next.side_to_move_);
+    if (!move.is_valid()) {
+        return false;
+    }
+
+    const Color attacker = side_to_move_;
+    const int king_square = find_king(opposite(attacker));
+    if (king_square == -1) {
+        return false;
+    }
+
+    PieceType moved_type = move.piece;
+    if (!move.drop) {
+        const int moving_piece = board_[move.from];
+        if (is_empty(moving_piece) || piece_color(moving_piece) != attacker) {
+            return false;
+        }
+        moved_type = move.promote ? promote(piece_type(moving_piece)) : piece_type(moving_piece);
+    }
+
+    return is_square_attacked_after_move(king_square, attacker, move, moved_type);
 }
 
 int Position::static_exchange_eval(const Move& move) const {
@@ -641,6 +733,7 @@ int Position::static_exchange_eval(const Move& move) const {
 Position Position::make_null_move() const {
     Position next = *this;
     next.side_to_move_ = opposite(next.side_to_move_);
+    next.position_key_ ^= zobrist().side_to_move;
     return next;
 }
 
@@ -745,6 +838,53 @@ Bitboard Position::attackers_to(int square, Color by) const {
     }
 
     return attackers;
+}
+
+bool Position::is_square_attacked_after_move(int square,
+                                             Color by,
+                                             const Move& move,
+                                             PieceType moved_type) const {
+    const auto& t = tables();
+    const int color_index = static_cast<int>(by);
+    const auto attacks_by_step_piece = [&](PieceType type) {
+        Bitboard candidates = t.step_to[color_index][static_cast<int>(type)][square];
+        while (candidates.any()) {
+            const int from = candidates.pop_lsb();
+            const int piece = piece_after_move_at(from, move, by, moved_type);
+            if (!is_empty(piece) && piece_color(piece) == by && piece_type(piece) == type) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    if (attacks_by_step_piece(PieceType::Pawn) || attacks_by_step_piece(PieceType::Knight) ||
+        attacks_by_step_piece(PieceType::Silver) || attacks_by_step_piece(PieceType::Gold) ||
+        attacks_by_step_piece(PieceType::King) || attacks_by_step_piece(PieceType::ProPawn) ||
+        attacks_by_step_piece(PieceType::ProLance) ||
+        attacks_by_step_piece(PieceType::ProKnight) ||
+        attacks_by_step_piece(PieceType::ProSilver) ||
+        attacks_by_step_piece(PieceType::Horse) ||
+        attacks_by_step_piece(PieceType::Dragon)) {
+        return true;
+    }
+
+    for (int dir = 0; dir < 8; ++dir) {
+        for (int index = 0; index < t.ray_lengths[square][dir]; ++index) {
+            const int from = t.ray_squares[square][dir][index];
+            const int piece = piece_after_move_at(from, move, by, moved_type);
+            if (is_empty(piece)) {
+                continue;
+            }
+            if (piece_color(piece) == by &&
+                is_slider_for_direction(piece_type(piece), by, dir)) {
+                return true;
+            }
+            break;
+        }
+    }
+
+    return false;
 }
 
 bool Position::is_square_attacked_after_king_move(int square, Color by, int king_from) const {
@@ -869,7 +1009,10 @@ void Position::compute_pins_and_checks(Color color,
     }
 }
 
-void Position::generate_king_moves(Color color, std::vector<Move>& moves) const {
+void Position::generate_king_moves(Color color,
+                                   MoveSelection selection,
+                                   bool in_check,
+                                   std::vector<Move>& moves) const {
     const int from = find_king(color);
     Bitboard targets = attacks_from(from, PieceType::King, color, occupied_);
     targets &= ~color_bb_[static_cast<int>(color)];
@@ -877,8 +1020,10 @@ void Position::generate_king_moves(Color color, std::vector<Move>& moves) const 
 
     while (targets.any()) {
         const int to = targets.pop_lsb();
-        if (!is_square_attacked_after_king_move(to, enemy, from)) {
-            moves.push_back(Move{from, to, PieceType::King, false, false});
+        const Move move{from, to, PieceType::King, false, false};
+        if (!is_square_attacked_after_king_move(to, enemy, from) &&
+            should_keep_generated_move(move, selection, in_check)) {
+            moves.push_back(move);
         }
     }
 }
@@ -890,7 +1035,8 @@ void Position::generate_piece_moves(Color color,
                                     const Bitboard& move_mask,
                                     const Bitboard& pinned,
                                     const std::array<Bitboard, kSquareCount>& pin_lines,
-                                    bool generate_all_legal_moves,
+                                    MoveSelection selection,
+                                    bool in_check,
                                     std::vector<Move>& moves) const {
     while (pieces.any()) {
         const int from = pieces.pop_lsb();
@@ -903,7 +1049,7 @@ void Position::generate_piece_moves(Color color,
 
         while (targets.any()) {
             const int to = targets.pop_lsb();
-            add_move_variants(from, to, type, generate_all_legal_moves, moves);
+            add_move_variants(from, to, type, selection, in_check, moves);
         }
     }
 }
@@ -911,7 +1057,8 @@ void Position::generate_piece_moves(Color color,
 void Position::add_move_variants(int from,
                                  int to,
                                  PieceType piece,
-                                 bool generate_all_legal_moves,
+                                 MoveSelection selection,
+                                 bool in_check,
                                  std::vector<Move>& moves) const {
     const int target = board_[to];
     if (!is_empty(target) && piece_type(target) == PieceType::King) {
@@ -925,22 +1072,31 @@ void Position::add_move_variants(int from,
         can_promote(piece) &&
         (is_in_promotion_zone(color, from_row) || is_in_promotion_zone(color, to_row));
     const bool promotion_required = must_promote(piece, color, to_row);
-    const bool keep_unpromoted =
-        !promotion_available || generate_all_legal_moves || piece == PieceType::Bishop ||
-        piece == PieceType::Rook || !is_in_promotion_zone(color, to_row);
 
-    if (!promotion_required && keep_unpromoted) {
-        moves.push_back(Move{from, to, piece, false, false});
+    if (!promotion_required) {
+        const Move move{from, to, piece, false, false};
+        if (should_keep_generated_move(move, selection, in_check)) {
+            moves.push_back(move);
+        }
     }
     if (promotion_available) {
-        moves.push_back(Move{from, to, piece, true, false});
+        const Move move{from, to, piece, true, false};
+        if (should_keep_generated_move(move, selection, in_check)) {
+            moves.push_back(move);
+        }
     }
 }
 
 void Position::add_drop_moves(Color color,
                               const Bitboard& move_mask,
                               bool enforce_pawn_drop_mate,
+                              MoveSelection selection,
+                              bool in_check,
                               std::vector<Move>& moves) const {
+    if (selection == MoveSelection::Tactical && !in_check) {
+        return;
+    }
+
     const auto& t = tables();
     Bitboard empty = t.all_squares & ~occupied_;
     empty &= move_mask;
@@ -976,27 +1132,37 @@ void Position::add_drop_moves(Color color,
             if (piece == PieceType::Pawn && enforce_pawn_drop_mate && is_pawn_drop_mate(move)) {
                 continue;
             }
-            moves.push_back(move);
+            if (should_keep_generated_move(move, selection, in_check)) {
+                moves.push_back(move);
+            }
         }
     }
 }
 
 std::vector<Move> Position::generate_legal_moves() const {
-    return generate_legal_moves(true, true, true);
+    return generate_legal_moves(true, true, MoveSelection::All);
 }
 
 std::vector<Move> Position::generate_legal_moves(bool include_drops,
                                                  bool enforce_pawn_drop_mate) const {
-    return generate_legal_moves(include_drops, enforce_pawn_drop_mate, true);
+    return generate_legal_moves(include_drops, enforce_pawn_drop_mate, MoveSelection::All);
 }
 
 std::vector<Move> Position::generate_search_legal_moves() const {
-    return generate_legal_moves(true, true, rules_.generate_all_legal_moves);
+    return generate_legal_moves(true, true, MoveSelection::All);
+}
+
+std::vector<Move> Position::generate_quiescence_moves() const {
+    return generate_legal_moves(true, true, MoveSelection::Tactical);
+}
+
+std::vector<Move> Position::generate_checking_moves() const {
+    return generate_legal_moves(true, true, MoveSelection::Checking);
 }
 
 std::vector<Move> Position::generate_legal_moves(bool include_drops,
                                                  bool enforce_pawn_drop_mate,
-                                                 bool generate_all_legal_moves) const {
+                                                 MoveSelection selection) const {
     std::vector<Move> moves;
     moves.reserve(256);
     const Color color = side_to_move_;
@@ -1008,9 +1174,9 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
     std::array<Bitboard, kSquareCount> pin_lines{};
     compute_pins_and_checks(color, checkers, pinned, pin_lines);
 
-    generate_king_moves(color, moves);
-
     const int check_count = checkers.count();
+    const bool in_check = check_count > 0;
+    generate_king_moves(color, selection, in_check, moves);
     if (check_count >= 2) {
         return moves;
     }
@@ -1035,7 +1201,8 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
-                         generate_all_legal_moves,
+                         selection,
+                         in_check,
                          moves);
     generate_piece_moves(color,
                          PieceType::Lance,
@@ -1044,7 +1211,8 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
-                         generate_all_legal_moves,
+                         selection,
+                         in_check,
                          moves);
     generate_piece_moves(color,
                          PieceType::Knight,
@@ -1053,7 +1221,8 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
-                         generate_all_legal_moves,
+                         selection,
+                         in_check,
                          moves);
     generate_piece_moves(color,
                          PieceType::Silver,
@@ -1062,7 +1231,8 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
-                         generate_all_legal_moves,
+                         selection,
+                         in_check,
                          moves);
     generate_piece_moves(color,
                          PieceType::Gold,
@@ -1071,7 +1241,8 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
-                         generate_all_legal_moves,
+                         selection,
+                         in_check,
                          moves);
     generate_piece_moves(color,
                          PieceType::Bishop,
@@ -1080,7 +1251,8 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
-                         generate_all_legal_moves,
+                         selection,
+                         in_check,
                          moves);
     generate_piece_moves(color,
                          PieceType::Rook,
@@ -1089,7 +1261,8 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
-                         generate_all_legal_moves,
+                         selection,
+                         in_check,
                          moves);
     generate_piece_moves(color,
                          PieceType::ProPawn,
@@ -1098,7 +1271,8 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
-                         generate_all_legal_moves,
+                         selection,
+                         in_check,
                          moves);
     generate_piece_moves(color,
                          PieceType::ProLance,
@@ -1107,7 +1281,8 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
-                         generate_all_legal_moves,
+                         selection,
+                         in_check,
                          moves);
     generate_piece_moves(color,
                          PieceType::ProKnight,
@@ -1116,7 +1291,8 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
-                         generate_all_legal_moves,
+                         selection,
+                         in_check,
                          moves);
     generate_piece_moves(color,
                          PieceType::ProSilver,
@@ -1125,7 +1301,8 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
-                         generate_all_legal_moves,
+                         selection,
+                         in_check,
                          moves);
     generate_piece_moves(color,
                          PieceType::Horse,
@@ -1134,7 +1311,8 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
-                         generate_all_legal_moves,
+                         selection,
+                         in_check,
                          moves);
     generate_piece_moves(color,
                          PieceType::Dragon,
@@ -1143,11 +1321,12 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
                          move_mask,
                          pinned,
                          pin_lines,
-                         generate_all_legal_moves,
+                         selection,
+                         in_check,
                          moves);
 
     if (include_drops) {
-        add_drop_moves(color, move_mask, enforce_pawn_drop_mate, moves);
+        add_drop_moves(color, move_mask, enforce_pawn_drop_mate, selection, in_check, moves);
     }
 
     return moves;
@@ -1155,8 +1334,26 @@ std::vector<Move> Position::generate_legal_moves(bool include_drops,
 
 std::vector<Move> Position::generate_pseudo_legal_moves(Color color, bool include_drops) const {
     Position copy = *this;
+    if (copy.side_to_move_ != color) {
+        copy.position_key_ ^= zobrist().side_to_move;
+    }
     copy.side_to_move_ = color;
-    return copy.generate_legal_moves(include_drops, false);
+    return copy.generate_legal_moves(include_drops, false, MoveSelection::All);
+}
+
+bool Position::should_keep_generated_move(const Move& move,
+                                          MoveSelection selection,
+                                          bool in_check) const {
+    switch (selection) {
+        case MoveSelection::All:
+            return true;
+        case MoveSelection::Tactical:
+            return in_check || board_[move.to] != 0 || move.promote;
+        case MoveSelection::Checking:
+            return gives_check(move);
+        default:
+            return true;
+    }
 }
 
 bool Position::has_pawn_on_file(Color color, int col) const {
@@ -1215,25 +1412,7 @@ void Position::append_history() {
 }
 
 std::uint64_t Position::repetition_key() const {
-    constexpr std::uint64_t kOffset = 1469598103934665603ULL;
-    constexpr std::uint64_t kPrime = 1099511628211ULL;
-
-    std::uint64_t hash = kOffset;
-    const auto mix = [&](std::uint64_t value, std::uint64_t& current) {
-        current ^= value;
-        current *= kPrime;
-    };
-
-    for (int piece : board_) {
-        mix(static_cast<std::uint64_t>(piece + 16), hash);
-    }
-    for (int color = 0; color < 2; ++color) {
-        for (int index = 1; index < kHandPieceKinds; ++index) {
-            mix(static_cast<std::uint64_t>(hands_[color][index] + 32 * color + index), hash);
-        }
-    }
-    mix(static_cast<std::uint64_t>(side_to_move_ == Color::Black ? 1 : 2), hash);
-    return hash;
+    return position_key_;
 }
 
 bool Position::is_repetition_draw() const {
@@ -1420,6 +1599,9 @@ int Position::pieces_in_opponent_camp(Color color) const {
 
 bool Position::opponent_has_mate_in_one(Color defender) const {
     Position attacker_position = *this;
+    if (attacker_position.side_to_move_ != opposite(defender)) {
+        attacker_position.position_key_ ^= zobrist().side_to_move;
+    }
     attacker_position.side_to_move_ = opposite(defender);
 
     const auto checking_moves = attacker_position.generate_legal_moves();

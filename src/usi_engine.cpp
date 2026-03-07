@@ -17,6 +17,8 @@ constexpr int kDefaultMultiPv = 1;
 constexpr int kMaxMultiPv = 32;
 constexpr int kDefaultThreads = 1;
 constexpr int kMaxThreads = 128;
+constexpr std::size_t kMinHashSizeMb = 1;
+constexpr std::size_t kMaxHashSizeMb = 65536;
 constexpr int kDefaultMinimumThinkingTimeMs = 0;
 constexpr int kDefaultNetworkDelayMs = 0;
 constexpr int kDefaultNetworkDelay2Ms = 0;
@@ -296,6 +298,8 @@ void UsiEngine::handle_line(const std::string& line) {
                   << kMaxMultiPv << std::endl;
         std::cout << "option name Threads type spin default " << kDefaultThreads << " min 1 max "
                   << kMaxThreads << std::endl;
+        std::cout << "option name Hash type spin default " << Search::hash_size_mb() << " min "
+                  << kMinHashSizeMb << " max " << kMaxHashSizeMb << std::endl;
         std::cout << "option name MinimumThinkingTime type spin default "
                   << kDefaultMinimumThinkingTimeMs << " min 0 max " << kMaxOptionMillis
                   << std::endl;
@@ -379,6 +383,13 @@ void UsiEngine::set_option(const std::string& line) {
         multi_pv_.store(std::clamp(parse_int(value_token, kDefaultMultiPv), 1, kMaxMultiPv));
     } else if (tokens[2] == "Threads") {
         threads_.store(std::clamp(parse_int(value_token, kDefaultThreads), 1, kMaxThreads));
+    } else if (tokens[2] == "Hash") {
+        const std::size_t hash_size_mb = std::clamp<std::size_t>(
+            parse_uint64(value_token, Search::hash_size_mb()), kMinHashSizeMb, kMaxHashSizeMb);
+        stop_search();
+        if (!Search::set_hash_size_mb(hash_size_mb)) {
+            std::cout << "info string hash resize_failed " << hash_size_mb << std::endl;
+        }
     } else if (tokens[2] == "MinimumThinkingTime") {
         minimum_thinking_time_ms_ =
             std::clamp(parse_int(value_token, kDefaultMinimumThinkingTimeMs), 0, kMaxOptionMillis);

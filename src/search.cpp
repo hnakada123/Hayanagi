@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <memory>
 #include <thread>
 #include <unordered_set>
 
@@ -14,6 +15,8 @@ constexpr int kMateThreshold = kMateScore - 256;
 constexpr int kTempoBonus = 12;
 constexpr int kNullMoveBaseReduction = 2;
 constexpr int kMateSearchMaxPly = 5;
+constexpr std::size_t kTtClusterSize = 4;
+constexpr std::size_t kDefaultHashSizeMb = 16;
 
 constexpr int kKingDirections[][2] = {
     {-1, -1}, {-1, 0}, {-1, 1}, {0, -1},
@@ -63,7 +66,7 @@ int center_bonus(int row, int col) {
 }
 
 int from_bucket(const Move& move) {
-    return move.drop ? kSquareCount : move.from;
+    return move.drop ? kSquareCount + hand_index(move.piece) : move.from;
 }
 
 int score_to_tt(int score, int ply) {
@@ -130,6 +133,232 @@ int camp_bonus(PieceType type) {
         default:
             return 0;
     }
+}
+
+enum class BoundType : std::uint8_t {
+    Exact = 0,
+    Lower,
+    Upper,
+};
+
+struct TTEntry {
+    std::uint64_t key = 0;
+    int depth = -1;
+    int score = 0;
+    BoundType bound = BoundType::Exact;
+    Move best_move;
+    std::uint8_t generation = 0;
+};
+
+struct AtomicTTEntry {
+    std::atomic<std::uint64_t> key{0};
+    std::atomic<std::uint64_t> payload{0};
+};
+
+struct AtomicTTCluster {
+    std::array<AtomicTTEntry, kTtClusterSize> entries{};
+};
+
+struct TTStorage {
+    explicit TTStorage(std::size_t clusters)
+        : cluster_count(clusters), cluster_mask(clusters - 1),
+          data(std::make_unique<AtomicTTCluster[]>(clusters)) {}
+
+    std::size_t cluster_count = 0;
+    std::size_t cluster_mask = 0;
+    std::unique_ptr<AtomicTTCluster[]> data;
+};
+
+std::uint32_t encode_move(const Move& move) {
+    const bool valid = move.is_valid();
+    const std::uint32_t from = valid ? static_cast<std::uint32_t>(move.from + 1) : 0;
+    const std::uint32_t to = valid ? static_cast<std::uint32_t>(move.to) : 0;
+    const std::uint32_t piece = valid ? static_cast<std::uint32_t>(move.piece) : 0;
+    return from | (to << 7) | (piece << 14) |
+           (static_cast<std::uint32_t>(move.promote) << 18) |
+           (static_cast<std::uint32_t>(move.drop) << 19);
+}
+
+Move decode_move(std::uint32_t encoded) {
+    Move move;
+    move.from = static_cast<int>(encoded & 0x7FU) - 1;
+    move.to = static_cast<int>((encoded >> 7) & 0x7FU);
+    move.piece = static_cast<PieceType>((encoded >> 14) & 0x0FU);
+    move.promote = ((encoded >> 18) & 0x01U) != 0;
+    move.drop = ((encoded >> 19) & 0x01U) != 0;
+    return move;
+}
+
+std::uint64_t pack_tt_payload(const TTEntry& entry) {
+    const std::uint16_t score_bits = static_cast<std::uint16_t>(static_cast<std::int16_t>(entry.score));
+    const std::uint8_t depth_bits = static_cast<std::uint8_t>(std::max(entry.depth, -1) + 1);
+    const std::uint64_t move_bits = encode_move(entry.best_move);
+
+    return move_bits | (static_cast<std::uint64_t>(score_bits) << 20) |
+           (static_cast<std::uint64_t>(depth_bits) << 36) |
+           (static_cast<std::uint64_t>(static_cast<std::uint8_t>(entry.bound)) << 44) |
+           (static_cast<std::uint64_t>(entry.generation) << 46);
+}
+
+TTEntry unpack_tt_entry(std::uint64_t key, std::uint64_t payload) {
+    TTEntry entry;
+    entry.key = key;
+    entry.best_move = decode_move(static_cast<std::uint32_t>(payload & ((1ULL << 20) - 1)));
+    entry.score = static_cast<int>(static_cast<std::int16_t>((payload >> 20) & 0xFFFFULL));
+    entry.depth = static_cast<int>((payload >> 36) & 0xFFULL) - 1;
+    entry.bound = static_cast<BoundType>((payload >> 44) & 0x03ULL);
+    entry.generation = static_cast<std::uint8_t>((payload >> 46) & 0xFFULL);
+    return entry;
+}
+
+class SharedTranspositionTable {
+public:
+    SharedTranspositionTable() {
+        resize_mb(kDefaultHashSizeMb);
+    }
+
+    std::uint8_t next_generation() {
+        while (true) {
+            const std::uint64_t next =
+                generation_counter_.fetch_add(1, std::memory_order_relaxed) + 1;
+            const std::uint8_t generation = static_cast<std::uint8_t>(next);
+            if (generation != 0) {
+                return generation;
+            }
+        }
+    }
+
+    std::size_t size_mb() const {
+        return hash_size_mb_.load(std::memory_order_relaxed);
+    }
+
+    bool resize_mb(std::size_t hash_size_mb) {
+        hash_size_mb = std::max<std::size_t>(1, hash_size_mb);
+        const std::size_t requested_bytes = hash_size_mb * 1024ULL * 1024ULL;
+        const std::size_t cluster_bytes = sizeof(AtomicTTCluster);
+        std::size_t cluster_count = std::max<std::size_t>(1, requested_bytes / cluster_bytes);
+        cluster_count = highest_power_of_two(cluster_count);
+
+        try {
+            TTStorage storage(cluster_count);
+            storage_ = std::move(storage);
+            hash_size_mb_.store(hash_size_mb, std::memory_order_relaxed);
+            return true;
+        } catch (const std::bad_alloc&) {
+            return false;
+        }
+    }
+
+    bool probe(std::uint64_t key, TTEntry& out) const {
+        const TTStorage& storage = storage_;
+        const std::size_t cluster_index = index_for(key, storage.cluster_mask);
+        const AtomicTTCluster& cluster = storage.data[cluster_index];
+
+        for (const AtomicTTEntry& atomic_entry : cluster.entries) {
+            const std::uint64_t stored_key = atomic_entry.key.load(std::memory_order_acquire);
+            if (stored_key != key) {
+                continue;
+            }
+            const std::uint64_t payload = atomic_entry.payload.load(std::memory_order_relaxed);
+            if (atomic_entry.key.load(std::memory_order_acquire) == stored_key) {
+                out = unpack_tt_entry(stored_key, payload);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void store(const TTEntry& entry) {
+        const TTStorage& storage = storage_;
+        const std::size_t cluster_index = index_for(entry.key, storage.cluster_mask);
+        AtomicTTCluster& cluster = storage.data[cluster_index];
+        AtomicTTEntry* replacement = &cluster.entries.front();
+        TTEntry replacement_entry;
+        bool replacement_initialized = false;
+
+        for (AtomicTTEntry& atomic_entry : cluster.entries) {
+            const std::uint64_t stored_key = atomic_entry.key.load(std::memory_order_acquire);
+            const TTEntry current = unpack_tt_entry(stored_key,
+                                                    atomic_entry.payload.load(std::memory_order_relaxed));
+            if (stored_key == entry.key) {
+                if (current.depth > entry.depth && current.generation == entry.generation) {
+                    return;
+                }
+                atomic_entry.payload.store(pack_tt_payload(entry), std::memory_order_relaxed);
+                atomic_entry.key.store(entry.key, std::memory_order_release);
+                return;
+            }
+            if (stored_key == 0) {
+                atomic_entry.payload.store(pack_tt_payload(entry), std::memory_order_relaxed);
+                atomic_entry.key.store(entry.key, std::memory_order_release);
+                return;
+            }
+            if (!replacement_initialized ||
+                replacement_score(current, entry.generation) >
+                    replacement_score(replacement_entry, entry.generation)) {
+                replacement = &atomic_entry;
+                replacement_entry = current;
+                replacement_initialized = true;
+            }
+        }
+
+        replacement->payload.store(pack_tt_payload(entry), std::memory_order_relaxed);
+        replacement->key.store(entry.key, std::memory_order_release);
+    }
+
+    int hashfull_permille(std::uint8_t generation) const {
+        if (generation == 0) {
+            return 0;
+        }
+
+        const TTStorage& storage = storage_;
+        constexpr std::size_t kSampleEntries = 1000;
+        int used = 0;
+        for (std::size_t sample = 0; sample < kSampleEntries; ++sample) {
+            const std::size_t entry_index =
+                sample * (storage.cluster_count * kTtClusterSize) / kSampleEntries;
+            const std::size_t cluster_index = entry_index / kTtClusterSize;
+            const std::size_t slot = entry_index % kTtClusterSize;
+            const AtomicTTEntry& atomic_entry = storage.data[cluster_index].entries[slot];
+            const std::uint64_t key = atomic_entry.key.load(std::memory_order_acquire);
+            if (key == 0) {
+                continue;
+            }
+            const TTEntry entry = unpack_tt_entry(key, atomic_entry.payload.load(std::memory_order_relaxed));
+            if (entry.generation == generation) {
+                ++used;
+            }
+        }
+        return used;
+    }
+
+private:
+    static std::size_t highest_power_of_two(std::size_t value) {
+        std::size_t power = 1;
+        while ((power << 1) != 0 && (power << 1) <= value) {
+            power <<= 1;
+        }
+        return power;
+    }
+
+    static std::size_t replacement_score(const TTEntry& entry, std::uint8_t generation) {
+        const std::size_t age_penalty = entry.generation == generation ? 0 : 1024;
+        const int bounded_depth = std::max(entry.depth, -1);
+        return age_penalty + static_cast<std::size_t>(255 - std::min(bounded_depth + 1, 255));
+    }
+
+    static std::size_t index_for(std::uint64_t key, std::size_t cluster_mask) {
+        return static_cast<std::size_t>((key ^ (key >> 32)) & cluster_mask);
+    }
+
+    TTStorage storage_{1};
+    std::atomic<std::uint64_t> generation_counter_{0};
+    std::atomic<std::size_t> hash_size_mb_{kDefaultHashSizeMb};
+};
+
+SharedTranspositionTable& shared_tt() {
+    static SharedTranspositionTable table;
+    return table;
 }
 
 int piece_square_bonus(PieceType type, Color color, int row, int col) {
@@ -319,20 +548,26 @@ int king_safety_score(const Position& position, Color color, int phase) {
 
 }  // namespace
 
+std::size_t Search::hash_size_mb() {
+    return shared_tt().size_mb();
+}
+
+bool Search::set_hash_size_mb(std::size_t hash_size_mb) {
+    return shared_tt().resize_mb(hash_size_mb);
+}
+
 void Search::reset_state(const SearchOptions& options,
                          std::atomic_bool& stop,
                          std::chrono::steady_clock::time_point start_time,
-                         std::atomic<std::uint64_t>* shared_nodes) {
+                         std::atomic<std::uint64_t>* shared_nodes,
+                         std::uint8_t tt_generation) {
     stop_ = &stop;
     shared_nodes_ = shared_nodes;
     options_ = options;
     start_time_ = start_time;
     nodes_ = 0;
+    tt_generation_ = tt_generation;
     aborted_ = false;
-    transposition_table_.clear();
-    if (transposition_table_.bucket_count() < 262144) {
-        transposition_table_.reserve(262144);
-    }
     for (auto& ply_killers : killer_moves_) {
         ply_killers = {Move{}, Move{}};
     }
@@ -372,7 +607,8 @@ SearchResult Search::find_best_move(const Position& root,
                                     const SearchOptions& options,
                                     std::atomic_bool& stop,
                                     const std::function<void(const SearchInfo&)>& on_info) {
-    reset_state(options, stop, std::chrono::steady_clock::now(), nullptr);
+    const std::uint8_t tt_generation = shared_tt().next_generation();
+    reset_state(options, stop, std::chrono::steady_clock::now(), nullptr, tt_generation);
 
     SearchResult result;
     result.terminal = root.terminal_status();
@@ -418,7 +654,7 @@ SearchResult Search::find_best_move(const Position& root,
     if (thread_count > 1) {
         workers.resize(static_cast<std::size_t>(thread_count));
         for (Search& worker : workers) {
-            worker.reset_state(options, stop, start_time_, &shared_nodes);
+            worker.reset_state(options, stop, start_time_, &shared_nodes, tt_generation);
         }
     }
 
@@ -445,17 +681,6 @@ SearchResult Search::find_best_move(const Position& root,
         return false;
     };
 
-    const auto parallel_hashfull = [&workers]() {
-        if (workers.empty()) {
-            return 0;
-        }
-        int sum = 0;
-        for (const Search& worker : workers) {
-            sum += worker.hashfull_permille();
-        }
-        return sum / static_cast<int>(workers.size());
-    };
-
     Move fallback = legal_moves.front();
     Move previous_best = fallback;
     int last_hashfull = hashfull_permille();
@@ -466,11 +691,9 @@ SearchResult Search::find_best_move(const Position& root,
         }
 
         Move tt_move;
-        if (thread_count == 1) {
-            if (const auto it = transposition_table_.find(root.position_key());
-                it != transposition_table_.end()) {
-                tt_move = it->second.best_move;
-            }
+        TTEntry tt_entry;
+        if (shared_tt().probe(root.position_key(), tt_entry)) {
+            tt_move = tt_entry.best_move;
         }
 
         std::vector<RootMove> root_moves;
@@ -583,7 +806,7 @@ SearchResult Search::find_best_move(const Position& root,
                 thread.join();
             }
 
-            last_hashfull = parallel_hashfull();
+            last_hashfull = hashfull_permille();
             if (next_index.load(std::memory_order_relaxed) < root_moves.size()) {
                 aborted_ = true;
             }
@@ -611,9 +834,9 @@ SearchResult Search::find_best_move(const Position& root,
         }
 
         previous_best = best_move;
+        store_tt(root.position_key(), depth, 0, best_score, -kInfinity, kInfinity, best_move);
         std::string pv;
         if (thread_count == 1) {
-            store_tt(root.position_key(), depth, 0, best_score, -kInfinity, kInfinity, best_move);
             pv = build_pv(root, best_move, depth);
         } else {
             pv = workers[root_moves[best_index].worker_index].build_pv(root, best_move, depth);
@@ -697,11 +920,12 @@ int Search::negamax(const Position& position, int depth, int ply, int alpha, int
     const std::uint64_t key = position.position_key();
     Move tt_move;
 
-    if (const auto it = transposition_table_.find(key); it != transposition_table_.end()) {
-        tt_move = it->second.best_move;
-        if (it->second.depth >= depth) {
-            const int tt_score = score_from_tt(it->second.score, ply);
-            switch (it->second.bound) {
+    TTEntry tt_entry;
+    if (shared_tt().probe(key, tt_entry)) {
+        tt_move = tt_entry.best_move;
+        if (tt_entry.depth >= depth) {
+            const int tt_score = score_from_tt(tt_entry.score, ply);
+            switch (tt_entry.bound) {
                 case BoundType::Exact:
                     return tt_score;
                 case BoundType::Lower:
@@ -739,16 +963,13 @@ int Search::negamax(const Position& position, int depth, int ply, int alpha, int
         return 0;
     }
 
-    std::sort(legal_moves.begin(), legal_moves.end(), [&](const Move& lhs, const Move& rhs) {
-        return move_order_score(position, lhs, ply, tt_move) >
-               move_order_score(position, rhs, ply, tt_move);
-    });
+    const auto ordered_moves = score_moves(position, legal_moves, ply, tt_move);
 
     Move best_move;
     int best_score = -kInfinity;
 
-    for (std::size_t move_index = 0; move_index < legal_moves.size(); ++move_index) {
-        const Move& move = legal_moves[move_index];
+    for (std::size_t move_index = 0; move_index < ordered_moves.size(); ++move_index) {
+        const Move& move = ordered_moves[move_index].move;
         Position child = position;
         child.do_move(move);
 
@@ -816,36 +1037,22 @@ int Search::quiescence(const Position& position, int ply, int alpha, int beta) {
         alpha = std::max(alpha, stand_pat);
     }
 
-    auto legal_moves = position.generate_search_legal_moves();
-    if (legal_moves.empty()) {
+    auto tactical_moves = position.generate_quiescence_moves();
+    if (tactical_moves.empty()) {
         if (in_check) {
             return -kMateScore + ply;
         }
         return alpha;
     }
 
-    std::vector<Move> tactical_moves;
-    tactical_moves.reserve(legal_moves.size());
-    for (const Move& move : legal_moves) {
-        const int captured = position.piece_at(move.to);
-        if (in_check || captured != 0 || move.promote) {
-            if (!in_check && captured != 0 && position.static_exchange_eval(move) < -120) {
-                continue;
-            }
-            tactical_moves.push_back(move);
-        }
-    }
-    if (!in_check && tactical_moves.empty()) {
-        return alpha;
-    }
-
     const Move no_tt_move;
-    std::sort(tactical_moves.begin(), tactical_moves.end(), [&](const Move& lhs, const Move& rhs) {
-        return move_order_score(position, lhs, ply, no_tt_move) >
-               move_order_score(position, rhs, ply, no_tt_move);
-    });
-
-    for (const Move& move : tactical_moves) {
+    const auto ordered_moves = score_moves(position, tactical_moves, ply, no_tt_move);
+    for (const OrderedMove& ordered_move : ordered_moves) {
+        const Move& move = ordered_move.move;
+        const int captured = position.piece_at(move.to);
+        if (!in_check && captured != 0 && position.static_exchange_eval(move) < -120) {
+            continue;
+        }
         Position child = position;
         child.do_move(move);
         const int score = -quiescence(child, ply + 1, -beta, -alpha);
@@ -931,7 +1138,7 @@ bool Search::should_stop() {
     if (stop_ != nullptr && stop_->load()) {
         return true;
     }
-    if (options_.node_limit > 0 && nodes_ >= options_.node_limit) {
+    if (options_.node_limit > 0 && current_nodes() >= options_.node_limit) {
         return true;
     }
     if (!options_.infinite && options_.time_limit_ms > 0 && elapsed_ms() >= options_.time_limit_ms) {
@@ -972,15 +1179,34 @@ int Search::move_order_score(const Position& position,
         }
     }
 
-    if (captured == 0 && !move.promote && !move.drop) {
+    if (captured == 0 && !move.promote) {
         score += history_score(position.side_to_move(), move);
     }
 
     return score;
 }
 
+std::vector<Search::OrderedMove> Search::score_moves(const Position& position,
+                                                     const std::vector<Move>& moves,
+                                                     int ply,
+                                                     const Move& tt_move) const {
+    std::vector<OrderedMove> ordered_moves;
+    ordered_moves.reserve(moves.size());
+
+    for (const Move& move : moves) {
+        ordered_moves.push_back(OrderedMove{move, move_order_score(position, move, ply, tt_move)});
+    }
+
+    std::sort(ordered_moves.begin(),
+              ordered_moves.end(),
+              [](const OrderedMove& lhs, const OrderedMove& rhs) {
+                  return lhs.score > rhs.score;
+              });
+    return ordered_moves;
+}
+
 bool Search::is_quiet(const Position& position, const Move& move) const {
-    return !move.drop && !move.promote && position.piece_at(move.to) == 0;
+    return !move.promote && position.piece_at(move.to) == 0;
 }
 
 bool Search::can_try_null_move(const Position& position,
@@ -1042,27 +1268,15 @@ bool Search::mate_search_attack(const Position& position,
         return false;
     }
 
-    auto legal_moves = position.generate_search_legal_moves();
-    std::vector<Move> checking_moves;
-    checking_moves.reserve(legal_moves.size());
-    for (const Move& move : legal_moves) {
-        Position child = position;
-        child.do_move(move);
-        if (child.is_in_check(child.side_to_move())) {
-            checking_moves.push_back(move);
-        }
-    }
+    auto checking_moves = position.generate_checking_moves();
     if (checking_moves.empty()) {
         return false;
     }
 
     const Move no_tt_move;
-    std::sort(checking_moves.begin(), checking_moves.end(), [&](const Move& lhs, const Move& rhs) {
-        return move_order_score(position, lhs, 0, no_tt_move) >
-               move_order_score(position, rhs, 0, no_tt_move);
-    });
-
-    for (const Move& move : checking_moves) {
+    const auto ordered_moves = score_moves(position, checking_moves, 0, no_tt_move);
+    for (const OrderedMove& ordered_move : ordered_moves) {
+        const Move& move = ordered_move.move;
         Position child = position;
         child.do_move(move);
         std::vector<Move> defense_line;
@@ -1101,17 +1315,15 @@ bool Search::mate_search_defense(const Position& position,
     }
 
     const Move no_tt_move;
-    std::sort(legal_moves.begin(), legal_moves.end(), [&](const Move& lhs, const Move& rhs) {
-        return move_order_score(position, lhs, 0, no_tt_move) >
-               move_order_score(position, rhs, 0, no_tt_move);
-    });
+    const auto ordered_moves = score_moves(position, legal_moves, 0, no_tt_move);
 
     Move selected_move;
     std::vector<Move> selected_line;
     std::size_t selected_length = 0;
     bool has_selected = false;
 
-    for (const Move& move : legal_moves) {
+    for (const OrderedMove& ordered_move : ordered_moves) {
+        const Move& move = ordered_move.move;
         Position child = position;
         child.do_move(move);
         std::vector<Move> attack_line;
@@ -1164,12 +1376,7 @@ int Search::history_score(Color color, const Move& move) const {
 }
 
 int Search::hashfull_permille() const {
-    const auto buckets = transposition_table_.bucket_count();
-    if (buckets == 0) {
-        return 0;
-    }
-    return static_cast<int>(std::min<std::uint64_t>(
-        1000, transposition_table_.size() * 1000ULL / buckets));
+    return shared_tt().hashfull_permille(tt_generation_);
 }
 
 std::string Search::format_pv(const Position& root, const std::vector<Move>& moves) const {
@@ -1235,11 +1442,12 @@ std::string Search::build_pv(const Position& root, const Move& root_move, int ma
             break;
         }
 
-        const auto tt_it = transposition_table_.find(position.position_key());
-        if (tt_it == transposition_table_.end()) {
+        TTEntry tt_entry;
+        if (!shared_tt().probe(position.position_key(), tt_entry) ||
+            tt_entry.generation != tt_generation_) {
             break;
         }
-        move = tt_it->second.best_move;
+        move = tt_entry.best_move;
     }
 
     return pv;
@@ -1257,6 +1465,7 @@ void Search::store_tt(std::uint64_t key,
     entry.depth = depth;
     entry.score = score_to_tt(score, ply);
     entry.best_move = best_move;
+    entry.generation = tt_generation_;
     if (score <= alpha) {
         entry.bound = BoundType::Upper;
     } else if (score >= beta) {
@@ -1264,11 +1473,7 @@ void Search::store_tt(std::uint64_t key,
     } else {
         entry.bound = BoundType::Exact;
     }
-
-    const auto it = transposition_table_.find(key);
-    if (it == transposition_table_.end() || depth >= it->second.depth) {
-        transposition_table_[key] = entry;
-    }
+    shared_tt().store(entry);
 }
 
 }  // namespace shogi

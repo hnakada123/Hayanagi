@@ -102,6 +102,7 @@ usiok
 
 - `MultiPV`
 - `Threads`
+- `Hash`
 - `MinimumThinkingTime`
 - `NetworkDelay`
 - `NetworkDelay2`
@@ -111,7 +112,7 @@ usiok
 - `EnteringKingRule`
 - `GenerateAllLegalMoves`
 
-`MultiPV` を有効にすると、`info ... multipv N pv ...` を順位ごとに出力します。`GenerateAllLegalMoves` は探索時の合法手生成にだけ反映し、`position` / `perft` の入力互換性は維持します。
+`MultiPV` を有効にすると、`info ... multipv N pv ...` を順位ごとに出力します。`GenerateAllLegalMoves` は互換性維持のため残していますが、現在は探索強度を落とさないよう no-op です。
 
 通常探索の `info` には `depth` / `score cp` / `nodes` / `time` / `nps` / `pv` を出力します。
 
@@ -129,7 +130,7 @@ usiok
 
 - 反復深化付きの `negamax + alpha-beta` 探索を行います。
 - `Threads > 1` のときは root move 単位で並列探索します。
-- 置換表、PVS、quiescence search、SEE ベースの着手順序、killer/history heuristic、LMR、null-move pruning を使って探索効率を上げています。
+- `Hash` オプションでサイズ変更できる lockless 共有置換表、PVS、quiescence search、SEE ベースの着手順序、killer/history heuristic、LMR、null-move pruning を使って探索効率を上げています。
 - 短手数の詰みは専用の王手限定探索で先に検出します。
 - 評価関数は駒得に加え、駒の前進度、利きの広さ、敵陣進出、手駒価値、玉の安全度を見ます。
 
