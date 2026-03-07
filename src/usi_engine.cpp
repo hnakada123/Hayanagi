@@ -17,6 +17,7 @@ constexpr int kDefaultMultiPv = 1;
 constexpr int kMaxMultiPv = 32;
 constexpr int kDefaultThreads = 1;
 constexpr int kMaxThreads = 128;
+constexpr bool kDefaultUsiPonder = false;
 constexpr std::size_t kMinHashSizeMb = 1;
 constexpr std::size_t kMaxHashSizeMb = 65536;
 constexpr int kDefaultMinimumThinkingTimeMs = 0;
@@ -257,6 +258,16 @@ std::uint64_t compute_nps(std::uint64_t nodes, std::uint64_t elapsed_ms) {
     return nodes * 1000 / elapsed_ms;
 }
 
+std::string extract_ponder_move(const std::string& pv) {
+    std::istringstream iss(pv);
+    std::string bestmove;
+    std::string ponder;
+    if (!(iss >> bestmove) || !(iss >> ponder)) {
+        return {};
+    }
+    return ponder;
+}
+
 const std::array<BenchCase, 6>& bench_suite() {
     static constexpr std::array<BenchCase, 6> kSuite{{
         {"startpos", "position startpos"},
@@ -294,6 +305,8 @@ void UsiEngine::handle_line(const std::string& line) {
     if (line == "usi") {
         std::cout << "id name Hayanagi" << std::endl;
         std::cout << "id author OpenAI" << std::endl;
+        std::cout << "option name USI_Ponder type check default "
+                  << (kDefaultUsiPonder ? "true" : "false") << std::endl;
         std::cout << "option name MultiPV type spin default " << kDefaultMultiPv << " min 1 max "
                   << kMaxMultiPv << std::endl;
         std::cout << "option name Threads type spin default " << kDefaultThreads << " min 1 max "
@@ -349,10 +362,15 @@ void UsiEngine::handle_line(const std::string& line) {
         return;
     }
     if (line == "stop") {
-        stop_search();
+        stop_search(true);
         return;
     }
     if (line == "ponderhit") {
+        std::lock_guard<std::mutex> lock(search_state_mutex_);
+        if (pondering_) {
+            ponderhit_ = true;
+            search_state_cv_.notify_all();
+        }
         return;
     }
     if (line.rfind("setoption ", 0) == 0) {
@@ -379,7 +397,9 @@ void UsiEngine::set_option(const std::string& line) {
     }
 
     bool rules_changed = false;
-    if (tokens[2] == "MultiPV") {
+    if (tokens[2] == "USI_Ponder") {
+        usi_ponder_.store(parse_bool_option(value_token, kDefaultUsiPonder));
+    } else if (tokens[2] == "MultiPV") {
         multi_pv_.store(std::clamp(parse_int(value_token, kDefaultMultiPv), 1, kMaxMultiPv));
     } else if (tokens[2] == "Threads") {
         threads_.store(std::clamp(parse_int(value_token, kDefaultThreads), 1, kMaxThreads));
@@ -428,12 +448,21 @@ void UsiEngine::apply_position_rules(Position& position) const {
     position.set_rules(position_rules_);
 }
 
-void UsiEngine::stop_search() {
+void UsiEngine::stop_search(bool report_bestmove) {
+    {
+        std::lock_guard<std::mutex> lock(search_state_mutex_);
+        suppress_bestmove_ = !report_bestmove;
+    }
     stop_requested_.store(true);
+    search_state_cv_.notify_all();
     if (search_thread_.joinable()) {
         search_thread_.join();
     }
     searching_.store(false);
+    std::lock_guard<std::mutex> lock(search_state_mutex_);
+    pondering_ = false;
+    ponderhit_ = false;
+    suppress_bestmove_ = false;
 }
 
 void UsiEngine::start_search(const std::string& line) {
@@ -446,6 +475,12 @@ void UsiEngine::start_search(const std::string& line) {
         snapshot = position_;
     }
     const SearchOptions options = parse_go_options(line);
+    {
+        std::lock_guard<std::mutex> lock(search_state_mutex_);
+        pondering_ = options.ponder;
+        ponderhit_ = false;
+        suppress_bestmove_ = false;
+    }
     const int resign_value = resign_value_;
     searching_.store(true);
 
@@ -454,24 +489,56 @@ void UsiEngine::start_search(const std::string& line) {
             search_.find_best_move(snapshot, options, stop_requested_, [&](const SearchInfo& info) {
                 print_info(info);
             });
-        if (result.terminal.outcome == TerminalOutcome::Win &&
-            result.terminal.reason == TerminalReason::DeclarationWin) {
-            std::cout << "bestmove win" << std::endl;
-        } else if (result.terminal.is_terminal()) {
-            std::cout << "info string terminal " << terminal_reason_text(result.terminal) << " "
-                      << terminal_outcome_text(result.terminal) << std::endl;
-            std::cout << "bestmove resign" << std::endl;
-        } else if (result.has_best_move) {
-            if (result.score_cp <= -resign_value) {
-                std::cout << "bestmove resign" << std::endl;
-            } else {
-                std::cout << "bestmove " << snapshot.move_to_usi(result.best_move) << std::endl;
+
+        bool emit_bestmove = true;
+        {
+            std::unique_lock<std::mutex> lock(search_state_mutex_);
+            if (options.ponder && !stop_requested_.load() && !ponderhit_ && !suppress_bestmove_) {
+                search_state_cv_.wait(lock, [this]() {
+                    return stop_requested_.load() || ponderhit_ || suppress_bestmove_;
+                });
             }
-        } else {
-            std::cout << "bestmove resign" << std::endl;
+            emit_bestmove = !suppress_bestmove_;
+            pondering_ = false;
+            ponderhit_ = false;
         }
+
+        if (emit_bestmove) {
+            report_bestmove(result, snapshot, resign_value);
+        }
+
         searching_.store(false);
+        search_state_cv_.notify_all();
     });
+}
+
+void UsiEngine::report_bestmove(const SearchResult& result,
+                                const Position& snapshot,
+                                int resign_value) const {
+    if (result.terminal.outcome == TerminalOutcome::Win &&
+        result.terminal.reason == TerminalReason::DeclarationWin) {
+        std::cout << "bestmove win" << std::endl;
+        return;
+    }
+    if (result.terminal.is_terminal()) {
+        std::cout << "info string terminal " << terminal_reason_text(result.terminal) << " "
+                  << terminal_outcome_text(result.terminal) << std::endl;
+        std::cout << "bestmove resign" << std::endl;
+        return;
+    }
+    if (!result.has_best_move || result.score_cp <= -resign_value) {
+        std::cout << "bestmove resign" << std::endl;
+        return;
+    }
+
+    std::cout << "bestmove " << snapshot.move_to_usi(result.best_move);
+    if (usi_ponder_.load()) {
+        const std::string ponder = extract_ponder_move(result.pv);
+        if (!ponder.empty()) {
+            std::cout << " ponder " << ponder;
+        }
+    }
+    std::cout << std::endl;
 }
 
 void UsiEngine::run_bench(const std::string& line) {
@@ -665,6 +732,8 @@ SearchOptions UsiEngine::parse_go_options(const std::string& line) const {
             options.max_depth = std::max(1, parse_int(tokens[++i], options.max_depth));
         } else if (token == "movetime" && i + 1 < tokens.size()) {
             movetime = std::max(1, parse_int(tokens[++i]));
+        } else if (token == "ponder") {
+            options.ponder = true;
         } else if (token == "nodes" && i + 1 < tokens.size()) {
             options.node_limit = std::max<std::uint64_t>(1, parse_uint64(tokens[++i], 0));
         } else if (token == "btime" && i + 1 < tokens.size()) {

@@ -644,6 +644,7 @@ SearchResult Search::find_best_move(const Position& root,
         info.multipv = 1;
         info.show_multipv = multi_pv > 1;
         info.pv = format_pv(root, mating_line);
+        result.pv = info.pv;
         on_info(info);
         return result;
     }
@@ -850,6 +851,7 @@ SearchResult Search::find_best_move(const Position& root,
         result.hashfull_permille = last_hashfull;
 
         if (multi_pv == 1) {
+            result.pv = pv;
             SearchInfo info;
             info.depth = depth;
             info.score_cp = best_score;
@@ -883,6 +885,7 @@ SearchResult Search::find_best_move(const Position& root,
                 info.pv = root_moves[pv_index].pv;
                 on_info(info);
             }
+            result.pv = root_moves.front().pv;
         }
 
         if (options.infinite) {

@@ -79,7 +79,9 @@ usiok
 - `go depth N`
 - `go movetime N`
 - `go nodes N`
+- `go ponder ...`
 - `go wtime ... btime ... byoyomi ...`
+- `setoption name USI_Ponder value <bool>`
 - `setoption name MultiPV value N`
 - `setoption name Threads value N`
 - `setoption name MinimumThinkingTime value N`
@@ -91,6 +93,7 @@ usiok
 - `setoption name EnteringKingRule value <rule>`
 - `setoption name GenerateAllLegalMoves value <bool>`
 - `stop`
+- `ponderhit`
 - `quit`
 - `bench depth N`
 - `bench nodes N`
@@ -103,6 +106,7 @@ usiok
 - `MultiPV`
 - `Threads`
 - `Hash`
+- `USI_Ponder`
 - `MinimumThinkingTime`
 - `NetworkDelay`
 - `NetworkDelay2`
@@ -115,6 +119,8 @@ usiok
 `MultiPV` を有効にすると、`info ... multipv N pv ...` を順位ごとに出力します。`GenerateAllLegalMoves` は互換性維持のため残していますが、現在は探索強度を落とさないよう no-op です。
 
 通常探索の `info` には `depth` / `score cp` / `nodes` / `time` / `nps` / `pv` を出力します。
+
+`USI_Ponder` を有効にすると、通常探索の `bestmove` は `bestmove <move> ponder <move>` を返します。`go ponder` で始めた探索は `ponderhit` または `stop` を受けるまで `bestmove` を返しません。
 
 ## 実装概要
 

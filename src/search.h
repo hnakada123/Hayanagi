@@ -17,6 +17,7 @@ struct SearchOptions {
     int max_depth = kMaxDepth;
     int time_limit_ms = 0;
     bool infinite = false;
+    bool ponder = false;
     std::uint64_t node_limit = 0;
     int multi_pv = 1;
     int threads = 1;
@@ -41,6 +42,7 @@ struct SearchResult {
     std::uint64_t nodes = 0;
     int elapsed_ms = 0;
     int hashfull_permille = 0;
+    std::string pv;
 };
 
 class Search {
