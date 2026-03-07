@@ -113,6 +113,8 @@ usiok
 
 `MultiPV` を有効にすると、`info ... multipv N pv ...` を順位ごとに出力します。`GenerateAllLegalMoves` は探索時の合法手生成にだけ反映し、`position` / `perft` の入力互換性は維持します。
 
+通常探索の `info` には `depth` / `score cp` / `nodes` / `time` / `nps` / `pv` を出力します。
+
 ## 実装概要
 
 ### `Position`

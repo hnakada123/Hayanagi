@@ -711,7 +711,8 @@ void UsiEngine::print_info(const SearchInfo& info) const {
         std::cout << " multipv " << info.multipv;
     }
     std::cout << " score cp " << info.score_cp << " nodes " << info.nodes << " time "
-              << info.elapsed_ms << " pv " << info.pv << std::endl;
+              << info.elapsed_ms << " nps " << compute_nps(info.nodes, info.elapsed_ms) << " pv "
+              << info.pv << std::endl;
 }
 
 }  // namespace shogi
