@@ -18,6 +18,9 @@ bool Book::load(const std::string& path) {
     std::string current_sfen;
 
     while (std::getline(file, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
         if (line.empty() || line[0] == '#') {
             continue;
         }
