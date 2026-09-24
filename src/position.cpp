@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <initializer_list>
+#include <limits>
 #include <sstream>
 
 namespace shogi {
@@ -432,19 +433,21 @@ void Position::set_startpos() {
     set_sfen(kStartposSfen);
 }
 
-bool Position::set_sfen(const std::string& sfen) {
+bool Position::set_sfen(const std::string& sfen, bool tsume) {
     clear();
     const auto tokens = split_tokens(sfen);
-    if (tokens.size() < 4) {
+    if (tokens.size() != 4) {
         return false;
     }
 
     int row = 0;
     int col = 0;
     bool promoted = false;
+    std::array<int, 9> totals{};
+    constexpr std::array<int, 9> limits{0, 18, 4, 4, 4, 4, 2, 2, 2};
     for (char ch : tokens[0]) {
         if (ch == '/') {
-            if (col != kBoardSize) {
+            if (col != kBoardSize || promoted || row >= 8) {
                 return false;
             }
             ++row;
@@ -459,8 +462,8 @@ bool Position::set_sfen(const std::string& sfen) {
             continue;
         }
         if (std::isdigit(static_cast<unsigned char>(ch))) {
+            if (promoted || ch == '0' || col + ch - '0' > 9) return false;
             col += ch - '0';
-            promoted = false;
             continue;
         }
         if (!is_on_board(row, col)) {
@@ -471,16 +474,19 @@ bool Position::set_sfen(const std::string& sfen) {
             return false;
         }
         PieceType type = base.value();
+        if (++totals[static_cast<int>(type)] > limits[static_cast<int>(type)]) return false;
         if (promoted) {
+            if (!can_promote(type)) return false;
             type = promote(type);
         }
         const Color color =
             std::isupper(static_cast<unsigned char>(ch)) ? Color::Black : Color::White;
+        if (type == PieceType::King && find_king(color) != -1) return false;
         add_piece(make_square(row, col), color, type);
         ++col;
         promoted = false;
     }
-    if (row != 8 || col != kBoardSize) {
+    if (row != 8 || col != kBoardSize || promoted) {
         return false;
     }
 
@@ -497,6 +503,7 @@ bool Position::set_sfen(const std::string& sfen) {
         int count = 0;
         for (char ch : tokens[2]) {
             if (std::isdigit(static_cast<unsigned char>(ch))) {
+                if (count > 18 || (count == 0 && ch == '0')) return false;
                 count = count * 10 + (ch - '0');
                 continue;
             }
@@ -504,6 +511,9 @@ bool Position::set_sfen(const std::string& sfen) {
             if (!piece.has_value() || piece.value() == PieceType::King) {
                 return false;
             }
+            const int type_index = static_cast<int>(piece.value());
+            totals[type_index] += std::max(count, 1);
+            if (totals[type_index] > limits[type_index]) return false;
             const Color color =
                 std::isupper(static_cast<unsigned char>(ch)) ? Color::Black : Color::White;
             for (int remaining = std::max(count, 1); remaining > 0; --remaining) {
@@ -516,13 +526,17 @@ bool Position::set_sfen(const std::string& sfen) {
         }
     }
 
-    if (king_square_[static_cast<int>(Color::Black)] == -1 ||
-        king_square_[static_cast<int>(Color::White)] == -1) {
+    const bool black_missing = find_king(Color::Black) == -1;
+    const bool white_missing = find_king(Color::White) == -1;
+    if (tsume ? (black_missing && white_missing) : (black_missing || white_missing)) {
         return false;
     }
 
     try {
-        ply_count_ = std::max(0, std::stoi(tokens[3]) - 1);
+        std::size_t used = 0;
+        const int number = std::stoi(tokens[3], &used);
+        if (used != tokens[3].size() || number < 1) return false;
+        ply_count_ = number - 1;
     } catch (...) {
         return false;
     }
@@ -560,7 +574,7 @@ void Position::do_move_unchecked(const Move& move) {
         remove_piece(move.from);
         add_piece(move.to, mover, move.promote ? promote(moving_type) : moving_type);
     }
-    ++ply_count_;
+    if (ply_count_ < std::numeric_limits<int>::max() - 1) ++ply_count_;
     side_to_move_ = opposite(side_to_move_);
     position_key_ ^= zobrist().side_to_move;
     append_history();
@@ -1041,12 +1055,13 @@ void Position::compute_pins_and_checks(Color color,
     const Color enemy = opposite(color);
     const int king_square = find_king(color);
 
-    checkers = attackers_to(king_square, enemy);
+    checkers = king_square < 0 ? Bitboard{} : attackers_to(king_square, enemy);
     pinned = Bitboard{};
     for (auto& line : pin_lines) {
         line = t.all_squares;
     }
 
+    if (king_square < 0) return;
     for (int dir = 0; dir < 8; ++dir) {
         int candidate = -1;
         for (int index = 0; index < t.ray_lengths[king_square][dir]; ++index) {
@@ -1079,6 +1094,7 @@ void Position::generate_king_moves(Color color,
                                    bool in_check,
                                    std::vector<Move>& moves) const {
     const int from = find_king(color);
+    if (from < 0) return;
     Bitboard targets = attacks_from(from, PieceType::King, color, occupied_);
     targets &= ~color_bb_[static_cast<int>(color)];
     const Color enemy = opposite(color);

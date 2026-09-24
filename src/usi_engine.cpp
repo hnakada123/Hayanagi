@@ -1,4 +1,5 @@
 #include "usi_engine.h"
+#include "tsume.h"
 
 #include <algorithm>
 #include <array>
@@ -146,7 +147,7 @@ struct PerftStats {
 
 bool load_position_from_tokens(const std::vector<std::string>& tokens,
                                std::size_t index,
-                               Position& next) {
+                               Position& next, bool tsume = false) {
     if (tokens.size() <= index) {
         return false;
     }
@@ -161,7 +162,7 @@ bool load_position_from_tokens(const std::vector<std::string>& tokens,
         const std::string sfen =
             tokens[index + 1] + " " + tokens[index + 2] + " " + tokens[index + 3] + " " +
             tokens[index + 4];
-        if (!next.set_sfen(sfen)) {
+        if (!next.set_sfen(sfen, tsume)) {
             return false;
         }
         index += 5;
@@ -169,7 +170,8 @@ bool load_position_from_tokens(const std::vector<std::string>& tokens,
         return false;
     }
 
-    if (index < tokens.size() && tokens[index] == "moves") {
+    if (index < tokens.size()) {
+        if (tokens[index] != "moves") return false;
         ++index;
         for (; index < tokens.size(); ++index) {
             if (!next.apply_usi_move(tokens[index])) {
@@ -344,6 +346,7 @@ void UsiEngine::handle_line(const std::string& line) {
                   << " var user_book1.db"
                   << " var user_book2.db"
                   << " var user_book3.db" << std::endl;
+        std::cout << "option name TsumeMode type check default false" << std::endl;
         std::cout << "usiok" << std::endl;
         return;
     }
@@ -378,11 +381,13 @@ void UsiEngine::handle_line(const std::string& line) {
         stop_search();
         std::lock_guard<std::mutex> lock(mutex_);
         position_.set_startpos();
+        position_valid_ = true;
         return;
     }
     if (line.rfind("position ", 0) == 0) {
         stop_search();
-        set_position(line);
+        position_valid_ = set_position(line);
+        if (!position_valid_) std::cout << "info string invalid position" << std::endl;
         return;
     }
     if (line.rfind("bench", 0) == 0) {
@@ -393,7 +398,16 @@ void UsiEngine::handle_line(const std::string& line) {
         run_perft(line);
         return;
     }
+    if (line.rfind("go tsume ", 0) == 0) {
+        start_tsume(line);
+        return;
+    }
     if (line.rfind("go", 0) == 0) {
+        if (position_.find_king(Color::Black) < 0 || position_.find_king(Color::White) < 0) {
+            std::cout << "info string use go tsume for kingless positions" << std::endl;
+            std::cout << "bestmove resign" << std::endl;
+            return;
+        }
         start_search(line);
         return;
     }
@@ -433,7 +447,10 @@ void UsiEngine::set_option(const std::string& line) {
     }
 
     bool rules_changed = false;
-    if (tokens[2] == "USI_Ponder") {
+    if (tokens[2] == "TsumeMode") {
+        stop_search();
+        tsume_mode_ = parse_bool_option(value_token);
+    } else if (tokens[2] == "USI_Ponder") {
         usi_ponder_.store(parse_bool_option(value_token, kDefaultUsiPonder));
     } else if (tokens[2] == "MultiPV") {
         multi_pv_.store(std::clamp(parse_int(value_token, kDefaultMultiPv), 1, kMaxMultiPv));
@@ -574,6 +591,49 @@ void UsiEngine::start_search(const std::string& line) {
 
         searching_.store(false);
         search_state_cv_.notify_all();
+    });
+}
+
+void UsiEngine::start_tsume(const std::string& line) {
+    stop_search();
+    const auto tokens = split_tokens(line);
+    if (!position_valid_ || tokens.size() < 3 || (tokens[2] != "attack" && tokens[2] != "defense")) {
+        std::cout << "tsume invalid" << std::endl;
+        return;
+    }
+    const Position snapshot = position_;
+    const Color attacker = tokens[2] == "attack" ? snapshot.side_to_move()
+                                                : opposite(snapshot.side_to_move());
+    if (snapshot.find_king(opposite(attacker)) < 0) {
+        std::cout << "tsume invalid" << std::endl;
+        return;
+    }
+    int depth = 31;
+    int millis = 5000;
+    for (std::size_t i = 3; i + 1 < tokens.size(); i += 2) {
+        if (tokens[i] == "depth") depth = std::clamp(parse_int(tokens[i + 1], 31), 1, 63);
+        if (tokens[i] == "movetime") millis = std::clamp(parse_int(tokens[i + 1], 5000), 1, 600000);
+    }
+    stop_requested_.store(false);
+    searching_.store(true);
+    search_thread_ = std::thread([this, snapshot, attacker, depth, millis]() {
+        TsumeSearch solver;
+        const auto result = solver.solve(snapshot, attacker, depth, millis, stop_requested_);
+        std::lock_guard<std::mutex> lock(search_state_mutex_);
+        if (!suppress_bestmove_) {
+            const char* status = "unknown";
+            switch (result.status) {
+            case TsumeStatus::Mate: status = "mate"; break;
+            case TsumeStatus::NoMate: status = "nomate"; break;
+            case TsumeStatus::Limit: status = "depthlimit"; break;
+            case TsumeStatus::Timeout: status = "timeout"; break;
+            case TsumeStatus::Cancelled: status = "cancelled"; break;
+            }
+            std::cout << "tsume " << status << " move "
+                      << (result.move.is_valid() ? snapshot.move_to_usi(result.move) : "none")
+                      << " plies " << result.plies << " nodes " << result.nodes << std::endl;
+        }
+        searching_.store(false);
     });
 }
 
@@ -769,7 +829,7 @@ bool UsiEngine::set_position(const std::string& line) {
 
     Position next;
     apply_position_rules(next);
-    if (!load_position_from_tokens(tokens, 1, next)) {
+    if (!load_position_from_tokens(tokens, 1, next, tsume_mode_)) {
         return false;
     }
 

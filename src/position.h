@@ -31,7 +31,7 @@ public:
     Position();
 
     void set_startpos();
-    bool set_sfen(const std::string& sfen);
+    bool set_sfen(const std::string& sfen, bool tsume = false);
     bool apply_usi_move(const std::string& move_text);
     void set_rules(const PositionRules& rules) { rules_ = rules; }
     const PositionRules& rules() const { return rules_; }

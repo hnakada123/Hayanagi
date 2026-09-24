@@ -166,3 +166,51 @@ usiok
 - USI には引き分けを返す専用の `bestmove` がないため、千日手・持将棋など現在局面でゲーム終了と判定した場合は `info string terminal ...` を出した上で `bestmove resign` を返します。
 - `perft` は `nodes` に加えて `captures` / `promotions` / `checks` / `mates` を出力します。
 - `bench` は各局面と合計について `nodes` / `time` / `nps` / `hashfull` を出力し、`nodes N` 指定で固定ノード数ベンチとして使えます。
+
+## 詰将棋の玉方（ShogiBoardQ連携）
+
+`src/tsume.h` の `TsumeSearch` を追加した。通常の評価値探索と分けて、王手の連続に
+よる強制詰みを探索する。玉方ではすべての合法応手を調べ、詰む場合は最長抵抗、
+不詰の場合は逃れる手を返す。攻め方の玉を省略したSFENも扱える。
+
+単独実行時は以下の独自USI拡張を利用できる（通常USIの `go mate` とは別のコマンド）。
+
+```text
+usi
+setoption name TsumeMode value true
+setoption name USI_OwnBook value false
+isready
+position sfen 9/9/6R1+R/5k3/9/7+S1/9/9/9 b 2b4g3s4n4l18p 1 moves 3c5c+
+go tsume defense depth 4 movetime 5000
+```
+
+応答例:
+
+```text
+tsume mate move 4d4e plies 4 nodes ...
+```
+
+- `attack` は現在手番を攻め方、`defense` は現在手番を玉方として探索する。
+- `depth` は現在局面からの最大手数（既定31、上限63）、`movetime` はミリ秒（既定5000）。
+- 応答の状態は `mate` / `nomate` / `depthlimit` / `timeout` / `cancelled`。
+  不正な局面・コマンドでは `tsume invalid` を返す。
+- `nomate` は不詰の証明。`depthlimit` は指定手数以内に詰みがないという意味で、
+  それより長い詰みの否定ではない。`timeout` / `cancelled` は未判定。
+- `move` は攻め方の詰め手、または玉方の抵抗・逃れの手。着手がない場合は `none`。
+  `plies` は証明された詰みまでの手数で、`mate` の場合に有効。
+- `stop` で中断結果を返し、`position` / `quit` は進行中の探索を破棄する。
+- `TsumeMode` は既定false。通常の `position` では両玉が必要で、片玉局面での
+  通常の `go` は拒否する。ShogiBoardQは同じコアを静的リンクして利用する。
+
+## 回帰テスト
+
+ビルド後、Python 3 の標準ライブラリだけで通常将棋と詰将棋のUSI動作を検証できます。
+
+```bash
+python3 tests/test_engine.py build/hayanagi
+# 変更前の実行ファイルがあれば、通常将棋4局面のperft結果も比較する
+python3 tests/test_engine.py build/hayanagi --baseline /path/to/previous/hayanagi
+```
+
+平手初期局面のperft、通常探索の合法着手、5手詰5問、別解、不詰、手数超過、
+後手攻め、打ち歩詰め、入力不正、時間切れ、中止・局面切替を検証します。

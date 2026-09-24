@@ -20,6 +20,9 @@ public:
 
 private:
     Position position_;
+    bool tsume_mode_ = false;
+    bool position_valid_ = true;
+    void start_tsume(const std::string& line);
     Search search_;
     Book book_;
     mutable std::mutex mutex_;
