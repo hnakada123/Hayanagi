@@ -1,19 +1,34 @@
 # Hayanagi
 
 Hayanagi は、C++17 で実装した USI プロトコル対応の最小構成将棋エンジンです。
+通常対局用の探索に加えて、詰将棋用の詰み探索（`TsumeSearch`）を備え、
+将棋 GUI [ShogiBoardQ](https://github.com/hnakada123/ShogiBoardQ) に静的ライブラリとして組み込まれています。
 
-- 現在のバージョンは 1.0.0（`src/version.h` の `HAYANAGI_VERSION` が唯一の定義元で、CMake の `project(... VERSION)` もここから読む）
-- USI の `id name` は `Hayanagi <バージョン>`（例: `Hayanagi 1.0.0`）。`./build/hayanagi --version` でも表示できる
-- CMake の生成実行ファイル名は `hayanagi`
-- 合法手生成、終局判定、基本的な探索、`bench` / `perft` をひととおり実装
+- 現在のバージョン: **1.0.0**（[変更履歴](#バージョンと変更履歴)）
+- USI の `id name` は `Hayanagi 1.0.0`。`./build/hayanagi --version` でも表示できます
+- CMake の生成実行ファイル名は `hayanagi`、組み込み用の静的ライブラリは `hayanagi_tsume`
+- 合法手生成、終局判定、通常探索、詰み探索、`bench` / `perft` をひととおり実装
 
-GitHub 上で読みやすいように、ビルド手順と実装範囲を先にまとめています。内部構成の詳細は後半に記載しています。
+## 目次
+
+- [動作要件](#動作要件)
+- [ビルド](#ビルド)
+- [実行例](#実行例)
+- [実装範囲](#実装範囲)
+- [実装概要](#実装概要)
+- [既知の制約](#既知の制約)
+- [詰み探索（詰将棋の攻方・玉方）](#詰み探索詰将棋の攻方玉方)
+- [ライブラリとしての組み込み](#ライブラリとしての組み込み)
+- [テストとベンチマーク](#テストとベンチマーク)
+- [ディレクトリ構成](#ディレクトリ構成)
+- [バージョンと変更履歴](#バージョンと変更履歴)
 
 ## 動作要件
 
 - CMake 3.16 以上
 - C++17 対応コンパイラ
-  - GCC / Clang / MSVC を想定
+  - GCC / Clang を想定（`__builtin_ctzll` などの組み込み関数を使います）
+- Python 3（回帰テストとベンチマークスクリプトのみ。標準ライブラリだけで動きます）
 
 ## ビルド
 
@@ -22,12 +37,21 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-生成物は `build/hayanagi` に出力されます。
+生成物は次のとおりです。
+
+| 生成物 | 内容 |
+|---|---|
+| `build/hayanagi` | USI エンジン実行ファイル |
+| `build/libhayanagi_tsume.a` | `Position` と `TsumeSearch` の静的ライブラリ（GUI 組み込み用） |
+| `build/hayanagi_tests` | C++ 単体テスト（Hayanagi を最上位でビルドしたときだけ生成） |
+
+コンパイル警告は `-Wall -Wextra -Wpedantic -Wshadow -Wconversion` を有効にしており、警告なしでビルドできます。
 
 ## 実行例
 
 ```bash
-./build/hayanagi
+./build/hayanagi --version   # Hayanagi 1.0.0
+./build/hayanagi             # USI エンジンとして起動
 ```
 
 ```text
@@ -61,6 +85,7 @@ usiok
 - 行き所のない駒の打ち / 移動の禁止
 - 打ち歩詰めの禁止
 - 王手回避、両王手、ピンされた駒の移動制限を直接生成
+- 王手になる手だけの直接生成（`generate_checking_moves`）
 
 ### 終局判定
 
@@ -82,6 +107,7 @@ usiok
 - `go nodes N`
 - `go ponder ...`
 - `go wtime ... btime ... byoyomi ...`
+- `go tsume <attack|defense> depth N movetime M`（詰み探索。[詳細](#詰み探索詰将棋の攻方玉方)）
 - `setoption name USI_OwnBook value <bool>`
 - `setoption name BookDir value <path>`
 - `setoption name BookFile value <file>`
@@ -96,15 +122,16 @@ usiok
 - `setoption name MaxMovesToDraw value N`
 - `setoption name EnteringKingRule value <rule>`
 - `setoption name GenerateAllLegalMoves value <bool>`
+- `setoption name TsumeMode value <bool>`（片玉の局面を受け付ける）
 - `stop`
 - `ponderhit`
 - `quit`
 - `bench depth N`
 - `bench nodes N`
 - `bench current depth N`
+- `bench tsume [movetime M]`（詰み探索の固定局面ベンチマーク）
 - `perft N`
 - `perft depth N divide`
-- `bench tsume [movetime M]`（詰み探索の固定局面ベンチマーク）
 
 実装済みの主要オプションは次のとおりです。
 
@@ -123,6 +150,7 @@ usiok
 - `MaxMovesToDraw`
 - `EnteringKingRule`
 - `GenerateAllLegalMoves`
+- `TsumeMode`
 
 `USI_OwnBook` を有効にすると（デフォルトで有効）、`go` 時に定跡ファイルを参照し、現局面にヒットすれば探索せずに定跡手を返します。定跡ファイルはやねうら王の DB2016 フォーマット（`#YANEURAOU-DB2016 1.00`）に対応しています。`BookDir` で定跡フォルダ（デフォルトは実行ファイルからの相対パス `book`）、`BookFile` で定跡ファイル名（デフォルトは `standard_book.db`）を指定します。`BookFile` に `no_book` を指定すると定跡を無効にできます。
 
@@ -144,6 +172,10 @@ usiok
 - 王手生成（`generate_checking_moves`）は、移動先に置いた駒が相手玉に利く升と開き王手の候補を先に求め、該当する手だけを列挙します。並び順は全合法手の生成順と同じです。
 - `make_move` / `unmake_move` は履歴を更新しない軽量な着手・待ったで、詰み探索のように千日手判定が不要な探索で局面のコピーを省きます。
 - `has_legal_move` は手を列挙せずに合法手の有無を判定します（王手回避では玉の移動・王手駒の捕獲・合駒の順に調べます）。
+
+### `TsumeSearch`
+
+- 王手の連続による強制詰みを、深さ優先の反復深化で探索します。詳細は[詰み探索](#詰み探索詰将棋の攻方玉方)を参照してください。
 
 ### `Search`
 
@@ -171,23 +203,27 @@ usiok
 - USI には引き分けを返す専用の `bestmove` がないため、千日手・持将棋など現在局面でゲーム終了と判定した場合は `info string terminal ...` を出した上で `bestmove resign` を返します。
 - `perft` は `nodes` に加えて `captures` / `promotions` / `checks` / `mates` を出力します。
 - `bench` は各局面と合計について `nodes` / `time` / `nps` / `hashfull` を出力し、`nodes N` 指定で固定ノード数ベンチとして使えます。
+- 詰み探索は深さ優先なので、長手数の詰将棋（おおむね 15 手以上）の解図には向きません。GUI 側では短手数の判定と選別に使い、長手数は外部の詰将棋エンジンに任せる想定です。
 
-## 詰将棋の玉方（ShogiBoardQ連携）
+## 詰み探索（詰将棋の攻方・玉方）
 
-`src/tsume.h` の `TsumeSearch` は、通常の評価値探索と分けて、王手の連続による
-強制詰みを探索する。玉方ではすべての合法応手を調べ、詰む場合は最長抵抗、
-不詰の場合は逃れる手を返す。攻め方の玉を省略したSFENも扱える。
+`src/tsume.h` の `TsumeSearch` は、通常の評価値探索と分けて、王手の連続による強制詰みを探索します。
+玉方ではすべての合法応手を調べ、詰む場合は最長抵抗、不詰の場合は逃れる手を返します。
+攻方の玉を省略した SFEN も扱えます。
 
-探索は深さ優先の反復深化（深さ 1, 3, 5, …、玉方手番なら 0, 2, 4, …）で、最初に確定した
-結果を返すため、`mate` の `plies` は最短の詰み手数になる。局面は `make_move` /
-`unmake_move` で進めて戻し、置換表には詰み・不詰の証明を深さをまたいで保持する
-（深さ打ち切りは「その深さまで詰みなし」としてだけ再利用し、不詰の証明とは区別する）。
-置換表は 4 エントリのバケットを持つ固定サイズの表で、必要に応じて 2 倍に拡張し、
-最大 32 MB に収まる。同じ `TsumeSearch` を続けて使うと、攻方が同じ間は前回の証明を再利用する。
-`TsumeSearch` と `Position` はグローバルな可変状態を持たないので、スレッドごとに
-別インスタンスを持てば並行して使える。計測結果は `BENCHMARK.md` を参照。
+### 探索の仕組み
 
-単独実行時は以下の独自USI拡張を利用できる（通常USIの `go mate` とは別のコマンド）。
+- 深さ優先の反復深化（攻方手番なら深さ 1, 3, 5, …、玉方手番なら 0, 2, 4, …）で、最初に確定した結果を返します。そのため `mate` の `plies` は最短の詰み手数です。
+- 局面は `make_move` / `unmake_move` で進めて戻し、局面のコピーと履歴の確保をしません。
+- 置換表（局面キーは盤面・持駒・手番を含む）には詰みと不詰の証明を深さをまたいで保持します。深さ打ち切りは「その深さまで詰みなし」としてだけ再利用し、不詰の証明とは区別します。
+- 置換表は 4 エントリのバケットを持つ固定サイズの表で、64 KB から始めて必要に応じて 2 倍に拡張し、最大 32 MB に収まります。
+- 同じ `TsumeSearch` を続けて使うと、攻方が同じ間は前回の証明を再利用します（PV の再構成や別詰の数え上げが速くなります）。
+- `TsumeSearch` と `Position` はグローバルな可変状態を持たないので、スレッドごとに別インスタンスを持てば並行して使えます。
+- 計測結果は [BENCHMARK.md](BENCHMARK.md) を参照してください。
+
+### USI 拡張 `go tsume`
+
+単独実行時は次の独自 USI 拡張を利用できます（通常 USI の `go mate` とは別のコマンドです）。
 
 ```text
 usi
@@ -204,30 +240,45 @@ go tsume defense depth 4 movetime 5000
 tsume mate move 4d4e plies 4 nodes ...
 ```
 
-- `attack` は現在手番を攻め方、`defense` は現在手番を玉方として探索する。
-- `depth` は現在局面からの最大手数（既定31、上限63）、`movetime` はミリ秒（既定5000）。
-- 応答の状態は `mate` / `nomate` / `depthlimit` / `timeout` / `cancelled`。
-  不正な局面・コマンドでは `tsume invalid` を返す。
-- `nomate` は不詰の証明。`depthlimit` は指定手数以内に詰みがないという意味で、
-  それより長い詰みの否定ではない。`timeout` / `cancelled` は未判定。
-- `move` は攻め方の詰め手、または玉方の抵抗・逃れの手。着手がない場合は `none`。
-  `plies` は証明された詰みまでの手数で、`mate` の場合に有効。
-- `stop` で中断結果を返し、`position` / `quit` は進行中の探索を破棄する。
-- `TsumeMode` は既定false。通常の `position` では両玉が必要で、片玉局面での
-  通常の `go` は拒否する。ShogiBoardQは同じコアを静的リンクして利用する。
+- `attack` は現在手番を攻方、`defense` は現在手番を玉方として探索します。
+- `depth` は現在局面からの最大手数（既定 31、上限 63）、`movetime` はミリ秒（既定 5000）です。
+- 応答の状態は `mate` / `nomate` / `depthlimit` / `timeout` / `cancelled` です。不正な局面・コマンドでは `tsume invalid` を返します。
+- `nomate` は不詰の証明です。`depthlimit` は指定手数以内に詰みがないという意味で、それより長い詰みの否定ではありません。`timeout` / `cancelled` は未判定です。
+- `move` は攻方の詰め手、または玉方の抵抗・逃れの手です。着手がない場合は `none` です。`plies` は証明された詰みまでの手数で、`mate` の場合に有効です。
+- `stop` で中断結果を返し、`position` / `quit` は進行中の探索を破棄します。
+- `TsumeMode` は既定 false です。通常の `position` では両玉が必要で、片玉局面での通常の `go` は拒否します。
+
+## ライブラリとしての組み込み
+
+ShogiBoardQ は Hayanagi をサブモジュールとして取り込み、`add_subdirectory` で静的ライブラリ `hayanagi_tsume` をリンクしています。
+
+```cmake
+add_subdirectory(Hayanagi)
+target_link_libraries(my_app PRIVATE hayanagi_tsume)   # include パス（src/）も伝播する
+message(STATUS "Hayanagi ${HAYANAGI_VERSION}")           # 組み込み側からバージョンを参照できる
+```
+
+- `hayanagi_tsume` は `src/position.cpp` と `src/tsume.cpp` だけからなり、Qt などへの依存はありません。
+- 組み込み時は単体テスト `hayanagi_tests` を既定でビルドしません。必要なら `-DHAYANAGI_BUILD_TESTS=ON` を指定します。
+- 主な API（`src/position.h`、`src/tsume.h`）:
+  - `Position::set_sfen(sfen, tsume)`: `tsume=true` で攻方の玉がない局面も受け付け、不正な SFEN では `false` を返します。
+  - `Position::generate_legal_moves()`: 打ち歩詰めを除いた全合法手。`generate_checking_moves()`: 合法な王手だけ（打ち駒を含み、成・不成は別の手）。どちらも生成順は安定しており、組み込み側が依存できます。
+  - `Position::apply_usi_move` / `do_move` / `make_move` / `unmake_move` / `has_legal_move` / `to_sfen` / `move_to_usi`。
+  - `TsumeSearch::solve(position, attacker, max_plies, time_limit_ms, stop)`: `TsumeResult{status, move, plies, nodes}` を返します。`max_plies` は 63 で丸められ、`stop` は他スレッドから立てると速やかに `Cancelled` で戻ります。
+- 探索結果の意味を変える改良をしたときは、組み込み側で結果をキャッシュしているキー（ShogiBoardQ では Hayanagi の版を含む）を更新する必要があります。
 
 ## テストとベンチマーク
 
-ビルド後、Python 3 の標準ライブラリだけで通常将棋と詰将棋のUSI動作を検証できます。
+ビルド後、Python 3 の標準ライブラリだけで通常将棋と詰将棋の USI 動作を検証できます。
 
 ```bash
 python3 tests/test_engine.py build/hayanagi
-# 変更前の実行ファイルがあれば、通常将棋4局面のperft結果も比較する
+# 変更前の実行ファイルがあれば、通常将棋 4 局面の perft 結果も比較する
 python3 tests/test_engine.py build/hayanagi --baseline /path/to/previous/hayanagi
 ```
 
-平手初期局面のperft、通常探索の合法着手、5手詰5問、別解、不詰、手数超過、
-後手攻め、打ち歩詰め、入力不正、時間切れ、中止・局面切替を検証します。
+平手初期局面の perft、通常探索の合法着手、5 手詰 5 問、別解、不詰、手数超過、
+後手攻方、打ち歩詰め、入力不正、時間切れ、中止・局面切替、`id name` の形式を検証します。
 
 C++ の単体テスト `hayanagi_tests` は、Hayanagi 自体をビルドしたときだけ既定で生成されます
 （`add_subdirectory` で組み込んだ場合は `-DHAYANAGI_BUILD_TESTS=ON` で有効化）。
@@ -243,10 +294,44 @@ ctest --test-dir build
 `Limit` と `NoMate` の区別、最短手数、PV の再構成、`stop` と時間切れ、打ち歩詰め、
 玉なし局面、持駒の多い局面、同じ探索器の再利用を検証します。
 
-詰み探索のベンチマークは `BENCHMARK.md` に記録しています。再計測は次のとおりです。
+詰み探索のベンチマークは [BENCHMARK.md](BENCHMARK.md) に記録しています。再計測は次のとおりです。
 
 ```bash
 python3 tests/bench_tsume.py build/hayanagi [--baseline /path/to/previous/hayanagi]
 # USI から直接実行する場合
 ./build/hayanagi <<< $'bench tsume\nquit'
 ```
+
+## ディレクトリ構成
+
+| パス | 内容 |
+|---|---|
+| `src/types.h`, `src/bitboard.h` | 基本型、81 升ビットボード |
+| `src/position.h/.cpp` | 局面、SFEN、合法手・王手生成、終局判定 |
+| `src/tsume.h/.cpp` | 詰み探索 `TsumeSearch` |
+| `src/search.h/.cpp` | 通常対局用の探索と評価 |
+| `src/book.h/.cpp` | 定跡の読み込み |
+| `src/usi_engine.h/.cpp`, `src/main.cpp` | USI プロトコル処理、`bench` / `perft` |
+| `src/version.h` | バージョン定義（`HAYANAGI_VERSION`） |
+| `tests/test_engine.py` | USI 回帰テスト |
+| `tests/test_*.cpp`, `tests/test_support.h` | C++ 単体テスト |
+| `tests/bench_tsume.py` | 詰み探索ベンチマーク |
+| `BENCHMARK.md` | ベンチマークの計測結果 |
+
+## バージョンと変更履歴
+
+バージョンは `src/version.h` の `HAYANAGI_VERSION` が唯一の定義元で、CMake の `project(... VERSION)`、
+USI の `id name`、`--version` はすべてここから読みます。リリース時はこの値と本節を更新し、
+同じ番号のタグ（`v1.0.0` など）を付けます。
+
+### 1.0.0（2026-09-25）
+
+最初の明示的なバージョンです。ShogiBoardQ が参照していたコミット `30cfce5` からの主な変更は次のとおりです。
+
+- 詰み探索を高速化しました。局面のコピーをやめて `make_move` / `unmake_move` で探索し、置換表を深さごとの `std::unordered_map` から、詰み・不詰の証明を深さをまたいで再利用する固定サイズの表に置き換えました。5 手詰の局面で約 15〜18 倍、攻方の持駒が多い不詰局面（深さ 5）で約 24 倍速くなっています（[BENCHMARK.md](BENCHMARK.md)）。
+- 局面処理を高速化しました。飛び利きのビットボード計算、王手判定の同一線上判定、王手の直接列挙、`has_legal_move` を追加し、`perft` も約 2 割速くなっています。`perft` の結果と通常探索のノード数は変わっていません。
+- 玉方の最長抵抗の選択が正確になりました（反復深化の途中結果を深さをまたいで使うため）。同じ探索器を続けて使うと、以前 `depthlimit` だった局面で不詰の証明 `nomate` を返すことがあります。
+- 玉同士が隣接する不正局面で相手玉を取る手を生成しなくなりました。
+- `bench tsume`、`tests/bench_tsume.py`、C++ 単体テスト `hayanagi_tests` を追加しました。
+- `-Wshadow -Wconversion` を有効にしました。
+- バージョン情報（`src/version.h`、`id name Hayanagi 1.0.0`、`--version`）を追加しました。
