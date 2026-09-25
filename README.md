@@ -65,13 +65,27 @@ go nodes 5000
 quit
 ```
 
-`usi` に対しては少なくとも次のように応答します。
+`usi` に対しては次のように応答します（`Hayanagi 1.0.1` の出力）。
 
 ```text
 id name Hayanagi 1.0.1
 id author OpenAI
+option name USI_Ponder type check default false
 option name MultiPV type spin default 1 min 1 max 32
 option name Threads type spin default 1 min 1 max 128
+option name Hash type spin default 16 min 1 max 65536
+option name MinimumThinkingTime type spin default 0 min 0 max 600000
+option name NetworkDelay type spin default 0 min 0 max 600000
+option name NetworkDelay2 type spin default 0 min 0 max 600000
+option name SlowMover type spin default 100 min 1 max 1000
+option name ResignValue type spin default 99999 min 0 max 99999
+option name MaxMovesToDraw type spin default 500 min 0 max 600000
+option name EnteringKingRule type combo default CSARule24 var NoEnteringKing var CSARule24 var CSARule24H var CSARule27 var CSARule27H var TryRule
+option name GenerateAllLegalMoves type check default true
+option name USI_OwnBook type check default true
+option name BookDir type string default book
+option name BookFile type combo default standard_book.db var no_book var standard_book.db var yaneura_book1.db var yaneura_book2.db var yaneura_book3.db var yaneura_book4.db var user_book1.db var user_book2.db var user_book3.db
+option name TsumeMode type check default false
 usiok
 ```
 
@@ -110,17 +124,18 @@ usiok
 - `go tsume <attack|defense> depth N movetime M`（詰み探索。[詳細](#詰み探索詰将棋の攻方玉方)）
 - `setoption name USI_OwnBook value <bool>`
 - `setoption name BookDir value <path>`
-- `setoption name BookFile value <file>`
+- `setoption name BookFile value <file>`（`no_book` / `standard_book.db` / `yaneura_book1.db`〜`yaneura_book4.db` / `user_book1.db`〜`user_book3.db`）
 - `setoption name USI_Ponder value <bool>`
 - `setoption name MultiPV value N`
 - `setoption name Threads value N`
+- `setoption name Hash value N`（MB 単位）
 - `setoption name MinimumThinkingTime value N`
 - `setoption name NetworkDelay value N`
 - `setoption name NetworkDelay2 value N`
 - `setoption name SlowMover value N`
 - `setoption name ResignValue value N`
 - `setoption name MaxMovesToDraw value N`
-- `setoption name EnteringKingRule value <rule>`
+- `setoption name EnteringKingRule value <rule>`（`NoEnteringKing` / `CSARule24` / `CSARule24H` / `CSARule27` / `CSARule27H` / `TryRule`）
 - `setoption name GenerateAllLegalMoves value <bool>`
 - `setoption name TsumeMode value <bool>`（片玉の局面を受け付ける）
 - `stop`
@@ -195,7 +210,7 @@ usiok
 - `usi` / `isready` / `position` / `go` / `stop` / `quit` を処理します。
 - 探索はワーカースレッドで実行し、`stop` に反応できる構成にしています。
 - `isready` 時に定跡ファイルを読み込み、`go` 時に定跡を参照します。
-- `bench` と `perft` を内蔵しており、GUI 接続前の自己確認にも使えます。`bench tsume` は詰み探索の固定局面を順に解き、結果とノード数・時間を出力します。
+- `bench` と `perft` を内蔵しており、GUI 接続前の自己確認にも使えます。`bench tsume` は詰み探索の固定局面を順に解き、結果とノード数・時間を出力します（[出力例](#bench-tsume)）。
 
 ## 既知の制約
 
@@ -247,6 +262,17 @@ tsume mate move 4d4e plies 4 nodes ...
 - `move` は攻方の詰め手、または玉方の抵抗・逃れの手です。着手がない場合は `none` です。`plies` は証明された詰みまでの手数で、`mate` の場合に有効です。
 - `stop` で中断結果を返し、`position` / `quit` は進行中の探索を破棄します。
 - `TsumeMode` は既定 false です。通常の `position` では両玉が必要で、片玉局面での通常の `go` は拒否します。
+
+### `bench tsume`
+
+`bench tsume [movetime M]` は [BENCHMARK.md](BENCHMARK.md) と同じ 8 局面を順に解き、局面ごとの結果と合計を `info string` で出力します（`TsumeMode` の設定は不要です）。
+
+```text
+info string bench tsume 1/8 mate5-1 depth 5 status mate move 3c5c+ plies 5 nodes 646 time 0 nps 646000
+...
+info string bench tsume 8/8 nomate5 depth 5 status depthlimit move R*7i plies 0 nodes 1870972 time 207 nps 9038512
+info string bench tsume total positions 8 nodes 2019874 time 225 nps 8977217
+```
 
 ## ライブラリとしての組み込み
 
@@ -322,11 +348,16 @@ python3 tests/bench_tsume.py build/hayanagi [--baseline /path/to/previous/hayana
 
 バージョンは `src/version.h` の `HAYANAGI_VERSION` が唯一の定義元で、CMake の `project(... VERSION)`、
 USI の `id name`、`--version` はすべてここから読みます。リリース時はこの値と本節を更新し、
-同じ番号のタグ（`v1.0.0` など）を付けます。
+同じ番号のタグ（`v1.0.1` など）を付けます。ShogiBoardQ はタグで指定した版をサブモジュールとして参照します。
+
+| バージョン | タグ | 日付 | 概要 |
+|---|---|---|---|
+| 1.0.1 | [v1.0.1](https://github.com/hnakada123/Hayanagi/releases/tag/v1.0.1) | 2026-09-25 | Clang での `-Wsign-conversion` 警告を解消（ShogiBoardQ が参照中） |
+| 1.0.0 | [v1.0.0](https://github.com/hnakada123/Hayanagi/releases/tag/v1.0.0) | 2026-09-25 | 詰み探索と局面処理の高速化、ベンチマーク、単体テスト、バージョン情報 |
 
 ### 1.0.1（2026-09-25）
 
-- Clang でビルドしたときに `-Wconversion` が `-Wsign-conversion` を含み、ShogiBoardQ の Qt Creator（Clang）ビルドで約 490 件の警告が出ていたのを直しました。`-Wno-sign-conversion` を併記して GCC と同じ警告範囲にし、Clang でも警告ゼロでビルドできることを確認しています。探索や結果の変更はありません。
+- Clang では `-Wconversion` が `-Wsign-conversion` を含むため、Qt Creator の Clang コードモデルが Hayanagi のソースに約 490 件の符号変換警告を報告していました（GCC でのビルドは元から警告なしで、ビルド失敗ではありません）。`-Wno-sign-conversion` を併記して GCC と同じ警告範囲にし、Clang 22 でも警告ゼロでビルドとテストが通ることを確認しています。探索や結果の変更はありません。
 
 ### 1.0.0（2026-09-25）
 
