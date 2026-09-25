@@ -54,6 +54,21 @@ struct Bitboard {
         }
     }
 
+    // 最下位ビットの升（空でないこと）
+    int lsb() const {
+        return lo != 0 ? __builtin_ctzll(lo) : 64 + __builtin_ctzll(hi);
+    }
+
+    // 最上位ビットの升（空でないこと）
+    int msb() const {
+        return hi != 0 ? 64 + (63 - __builtin_clzll(hi)) : 63 - __builtin_clzll(lo);
+    }
+
+    // 2 つ以上のビットが立っているか
+    bool more_than_one() const {
+        return (lo & (lo - 1)) != 0 || (hi & (hi - 1)) != 0 || (lo != 0 && hi != 0);
+    }
+
     int pop_lsb() {
         if (lo != 0) {
             const int bit = __builtin_ctzll(lo);

@@ -23,6 +23,9 @@ enum Direction : int {
 
 constexpr std::array<int, 8> kDirRow = {-1, 1, 0, 0, -1, -1, 1, 1};
 constexpr std::array<int, 8> kDirCol = {0, 0, -1, 1, -1, 1, -1, 1};
+// 方向に進むと升番号が増えるか（飛び利きの最初の遮蔽駒を lsb/msb で求めるため）
+constexpr std::array<bool, 8> kDirIncreasing = {false, true, false, true,
+                                                false, false, true, true};
 constexpr int kStepDirections[][2] = {
     {-1, -1}, {-1, 0}, {-1, 1}, {0, -1},
     {0, 1},   {1, -1}, {1, 0},  {1, 1},
@@ -31,8 +34,31 @@ constexpr int kBlackTrySquare = 4;
 constexpr int kWhiteTrySquare = 8 * kBoardSize + 4;
 constexpr std::array<int, kHandPieceKinds> kFullPieceCounts = {0, 9, 2, 2, 2, 2, 1, 1};
 
+// 玉以外の駒種を生成順に並べたもの（この順序は公開 API の生成順として維持する）
+constexpr std::array<PieceType, 13> kPieceOrder = {
+    PieceType::Pawn,     PieceType::Lance,     PieceType::Knight,   PieceType::Silver,
+    PieceType::Gold,     PieceType::Bishop,    PieceType::Rook,     PieceType::ProPawn,
+    PieceType::ProLance, PieceType::ProKnight, PieceType::ProSilver, PieceType::Horse,
+    PieceType::Dragon,
+};
+
+// 利きが近接 1 升で完結する駒種（step_to テーブルだけで攻撃判定できる）
+constexpr std::array<PieceType, 11> kStepPieces = {
+    PieceType::Pawn,      PieceType::Knight,    PieceType::Silver, PieceType::Gold,
+    PieceType::King,      PieceType::ProPawn,   PieceType::ProLance,
+    PieceType::ProKnight, PieceType::ProSilver, PieceType::Horse,  PieceType::Dragon,
+};
+
 int orientation(Color color) {
     return color == Color::Black ? 1 : -1;
+}
+
+int color_index(Color color) {
+    return static_cast<int>(color);
+}
+
+int type_index(PieceType type) {
+    return static_cast<int>(type);
 }
 
 std::vector<std::string> split_tokens(const std::string& text) {
@@ -57,9 +83,13 @@ struct Tables {
     std::array<std::array<std::array<Bitboard, kSquareCount>, 15>, 2> step_from{};
     std::array<std::array<std::array<Bitboard, kSquareCount>, 15>, 2> step_to{};
     std::array<std::array<Bitboard, 8>, kSquareCount> rays{};
-    std::array<std::array<std::array<int, 8>, 8>, kSquareCount> ray_squares{};
-    std::array<std::array<int, 8>, kSquareCount> ray_lengths{};
     std::array<std::array<Bitboard, kSquareCount>, kSquareCount> between{};
+    // 遮蔽を無視した飛び利きの線（ピン・開き王手の候補検出用）
+    std::array<Bitboard, kSquareCount> rook_lines{};
+    std::array<Bitboard, kSquareCount> bishop_lines{};
+    std::array<std::array<Bitboard, kSquareCount>, 2> lance_lines{};
+    // 行き所のない駒を除いた打てる升（色・駒種別）
+    std::array<std::array<Bitboard, kHandPieceKinds>, 2> drop_masks{};
 };
 
 constexpr int kMaxHandCount = 18;
@@ -90,8 +120,8 @@ void add_step_attack(Tables& tables,
         return;
     }
     const int to = make_square(row, col);
-    tables.step_from[static_cast<int>(color)][static_cast<int>(type)][square].set(to);
-    tables.step_to[static_cast<int>(color)][static_cast<int>(type)][to].set(square);
+    tables.step_from[color_index(color)][type_index(type)][square].set(to);
+    tables.step_to[color_index(color)][type_index(type)][to].set(square);
 }
 
 Tables build_tables() {
@@ -109,27 +139,23 @@ Tables build_tables() {
         for (int dir = 0; dir < 8; ++dir) {
             int next_row = row + kDirRow[dir];
             int next_col = col + kDirCol[dir];
-            int length = 0;
+            Bitboard between;
             while (is_on_board(next_row, next_col)) {
                 const int to = make_square(next_row, next_col);
                 tables.rays[square][dir].set(to);
-                tables.ray_squares[square][dir][length++] = to;
+                tables.between[square][to] = between;
+                between.set(to);
                 next_row += kDirRow[dir];
                 next_col += kDirCol[dir];
             }
-            tables.ray_lengths[square][dir] = length;
         }
-    }
-
-    for (int from = 0; from < kSquareCount; ++from) {
-        for (int dir = 0; dir < 8; ++dir) {
-            Bitboard between;
-            for (int index = 0; index < tables.ray_lengths[from][dir]; ++index) {
-                const int to = tables.ray_squares[from][dir][index];
-                tables.between[from][to] = between;
-                between |= tables.square_bb[to];
-            }
-        }
+        tables.rook_lines[square] = tables.rays[square][North] | tables.rays[square][South] |
+                                    tables.rays[square][West] | tables.rays[square][East];
+        tables.bishop_lines[square] =
+            tables.rays[square][NorthWest] | tables.rays[square][NorthEast] |
+            tables.rays[square][SouthWest] | tables.rays[square][SouthEast];
+        tables.lance_lines[color_index(Color::Black)][square] = tables.rays[square][North];
+        tables.lance_lines[color_index(Color::White)][square] = tables.rays[square][South];
     }
 
     static constexpr int kPawn[][2] = {{-1, 0}};
@@ -139,8 +165,8 @@ Tables build_tables() {
     static constexpr int kRookStep[][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
     static constexpr int kBishopStep[][2] = {{-1, -1}, {-1, 1}, {1, -1}, {1, 1}};
 
-    for (int color_index = 0; color_index < 2; ++color_index) {
-        const Color color = static_cast<Color>(color_index);
+    for (int color_id = 0; color_id < 2; ++color_id) {
+        const Color color = static_cast<Color>(color_id);
         for (int square = 0; square < kSquareCount; ++square) {
             for (const auto& delta : kPawn) {
                 add_step_attack(tables, color, PieceType::Pawn, square, delta[0], delta[1]);
@@ -166,6 +192,18 @@ Tables build_tables() {
             }
             for (const auto& delta : kBishopStep) {
                 add_step_attack(tables, color, PieceType::Dragon, square, delta[0], delta[1]);
+            }
+
+            const int row = square_row(square);
+            for (int index = 1; index < kHandPieceKinds; ++index) {
+                const PieceType type = static_cast<PieceType>(index);
+                const bool forbidden =
+                    ((type == PieceType::Pawn || type == PieceType::Lance) &&
+                     is_last_rank(color, row)) ||
+                    (type == PieceType::Knight && is_last_two_ranks(color, row));
+                if (!forbidden) {
+                    tables.drop_masks[color_id][index].set(square);
+                }
             }
         }
     }
@@ -204,44 +242,32 @@ const ZobristTables& zobrist() {
     return instance;
 }
 
-Bitboard ray_attacks_from(int from,
-                          const Bitboard& occupied,
-                          const std::initializer_list<int>& directions) {
-    const auto& t = tables();
-    Bitboard attacks;
-    for (const int dir : directions) {
-        for (int index = 0; index < t.ray_lengths[from][dir]; ++index) {
-            const int to = t.ray_squares[from][dir][index];
-            attacks.set(to);
-            if (occupied.test(to)) {
-                break;
-            }
-        }
+// from から dir 方向の飛び利き。最初の遮蔽駒の升を含む
+#if defined(__GNUC__)
+[[gnu::always_inline]]
+#endif
+inline Bitboard ray_attack(const Tables& t, int from, int dir, const Bitboard& occupied) {
+    const Bitboard ray = t.rays[from][dir];
+    const Bitboard blockers = ray & occupied;
+    if (blockers.none()) {
+        return ray;
     }
-    return attacks;
+    const int first = kDirIncreasing[dir] ? blockers.lsb() : blockers.msb();
+    return ray ^ t.rays[first][dir];
 }
 
-bool is_slider_for_direction(PieceType type, Color color, int direction) {
-    switch (direction) {
-        case North:
-        case South:
-        case West:
-        case East:
-            if (type == PieceType::Rook || type == PieceType::Dragon) {
-                return true;
-            }
-            if (type == PieceType::Lance) {
-                return direction == (color == Color::Black ? South : North);
-            }
-            return false;
-        case NorthWest:
-        case NorthEast:
-        case SouthWest:
-        case SouthEast:
-            return type == PieceType::Bishop || type == PieceType::Horse;
-        default:
-            return false;
-    }
+inline Bitboard rook_attacks_from(const Tables& t, int from, const Bitboard& occupied) {
+    return ray_attack(t, from, North, occupied) | ray_attack(t, from, South, occupied) |
+           ray_attack(t, from, West, occupied) | ray_attack(t, from, East, occupied);
+}
+
+inline Bitboard bishop_attacks_from(const Tables& t, int from, const Bitboard& occupied) {
+    return ray_attack(t, from, NorthWest, occupied) | ray_attack(t, from, NorthEast, occupied) |
+           ray_attack(t, from, SouthWest, occupied) | ray_attack(t, from, SouthEast, occupied);
+}
+
+inline Bitboard lance_attacks_from(const Tables& t, int from, Color color, const Bitboard& occupied) {
+    return ray_attack(t, from, color == Color::Black ? North : South, occupied);
 }
 
 bool piece_attacks_square_on_board(const std::array<int, kSquareCount>& board,
@@ -557,40 +583,54 @@ bool Position::do_move(const Move& move) {
     return true;
 }
 
-void Position::do_move_unchecked(const Move& move) {
+void Position::make_move(const Move& move, MoveUndo& undo) {
+    undo.captured = 0;
     const Color mover = side_to_move_;
     if (move.drop) {
         add_piece(move.to, mover, move.piece);
         remove_hand_piece(mover, move.piece);
     } else {
-        const int moving_piece = board_[move.from];
-        const PieceType moving_type = piece_type(moving_piece);
+        const PieceType moving_type = piece_type(board_[move.from]);
         const int captured_piece = board_[move.to];
         if (!is_empty(captured_piece)) {
-            const PieceType captured_type = unpromote(piece_type(captured_piece));
-            add_hand_piece(mover, captured_type);
+            undo.captured = captured_piece;
+            add_hand_piece(mover, unpromote(piece_type(captured_piece)));
             remove_piece(move.to);
         }
         remove_piece(move.from);
         add_piece(move.to, mover, move.promote ? promote(moving_type) : moving_type);
     }
-    if (ply_count_ < std::numeric_limits<int>::max() - 1) ++ply_count_;
+    ++ply_count_;
     side_to_move_ = opposite(side_to_move_);
     position_key_ ^= zobrist().side_to_move;
-    append_history();
 }
 
-int Position::piece_after_move_at(int square,
-                                  const Move& move,
-                                  Color mover,
-                                  PieceType moved_type) const {
-    if (!move.drop && square == move.from) {
-        return 0;
+void Position::unmake_move(const Move& move, const MoveUndo& undo) {
+    side_to_move_ = opposite(side_to_move_);
+    position_key_ ^= zobrist().side_to_move;
+    --ply_count_;
+    const Color mover = side_to_move_;
+    if (move.drop) {
+        remove_piece(move.to);
+        add_hand_piece(mover, move.piece);
+        return;
     }
-    if (square == move.to) {
-        return encode_piece(mover, moved_type);
+    PieceType moving_type = piece_type(board_[move.to]);
+    if (move.promote) {
+        moving_type = unpromote(moving_type);
     }
-    return board_[square];
+    remove_piece(move.to);
+    add_piece(move.from, mover, moving_type);
+    if (!is_empty(undo.captured)) {
+        add_piece(move.to, piece_color(undo.captured), piece_type(undo.captured));
+        remove_hand_piece(mover, unpromote(piece_type(undo.captured)));
+    }
+}
+
+void Position::do_move_unchecked(const Move& move) {
+    MoveUndo undo;
+    make_move(move, undo);
+    append_history();
 }
 
 TerminalStatus Position::terminal_status() const {
@@ -843,29 +883,27 @@ bool Position::apply_usi_move(const std::string& move_text) {
 }
 
 Bitboard Position::rook_attacks(int from, const Bitboard& occupied) const {
-    return ray_attacks_from(from, occupied, {North, South, West, East});
+    return rook_attacks_from(tables(), from, occupied);
 }
 
 Bitboard Position::bishop_attacks(int from, const Bitboard& occupied) const {
-    return ray_attacks_from(from, occupied, {NorthWest, NorthEast, SouthWest, SouthEast});
+    return bishop_attacks_from(tables(), from, occupied);
 }
 
 Bitboard Position::lance_attacks(int from, Color color, const Bitboard& occupied) const {
-    return ray_attacks_from(from, occupied, {color == Color::Black ? North : South});
+    return lance_attacks_from(tables(), from, color, occupied);
 }
 
 Bitboard Position::attacks_from(int from, PieceType type, Color color, const Bitboard& occupied) const {
     const auto& t = tables();
-    Bitboard attacks = t.step_from[static_cast<int>(color)][static_cast<int>(type)][from];
+    Bitboard attacks = t.step_from[color_index(color)][type_index(type)][from];
     switch (type) {
         case PieceType::Lance:
             return attacks | lance_attacks(from, color, occupied);
         case PieceType::Bishop:
-            return attacks | bishop_attacks(from, occupied);
-        case PieceType::Rook:
-            return attacks | rook_attacks(from, occupied);
         case PieceType::Horse:
             return attacks | bishop_attacks(from, occupied);
+        case PieceType::Rook:
         case PieceType::Dragon:
             return attacks | rook_attacks(from, occupied);
         default:
@@ -873,50 +911,57 @@ Bitboard Position::attacks_from(int from, PieceType type, Color color, const Bit
     }
 }
 
-Bitboard Position::attackers_to(int square, Color by) const {
+// by の飛び駒（飛・龍・角・馬・香）のうち、occupied を遮蔽として square に利いているもの。
+// 同一線上の飛び駒は少ないので、駒ごとに間の升が空いているかを調べる
+Bitboard Position::slider_attackers_to(int square, Color by, const Bitboard& occupied) const {
     const auto& t = tables();
-    const int color_index = static_cast<int>(by);
+    Bitboard candidates = aligned_sliders(square, by);
     Bitboard attackers;
-
-    attackers |= piece_bb_[color_index][static_cast<int>(PieceType::Pawn)] &
-                 t.step_to[color_index][static_cast<int>(PieceType::Pawn)][square];
-    attackers |= piece_bb_[color_index][static_cast<int>(PieceType::Knight)] &
-                 t.step_to[color_index][static_cast<int>(PieceType::Knight)][square];
-    attackers |= piece_bb_[color_index][static_cast<int>(PieceType::Silver)] &
-                 t.step_to[color_index][static_cast<int>(PieceType::Silver)][square];
-    attackers |= piece_bb_[color_index][static_cast<int>(PieceType::Gold)] &
-                 t.step_to[color_index][static_cast<int>(PieceType::Gold)][square];
-    attackers |= piece_bb_[color_index][static_cast<int>(PieceType::King)] &
-                 t.step_to[color_index][static_cast<int>(PieceType::King)][square];
-    attackers |= piece_bb_[color_index][static_cast<int>(PieceType::ProPawn)] &
-                 t.step_to[color_index][static_cast<int>(PieceType::ProPawn)][square];
-    attackers |= piece_bb_[color_index][static_cast<int>(PieceType::ProLance)] &
-                 t.step_to[color_index][static_cast<int>(PieceType::ProLance)][square];
-    attackers |= piece_bb_[color_index][static_cast<int>(PieceType::ProKnight)] &
-                 t.step_to[color_index][static_cast<int>(PieceType::ProKnight)][square];
-    attackers |= piece_bb_[color_index][static_cast<int>(PieceType::ProSilver)] &
-                 t.step_to[color_index][static_cast<int>(PieceType::ProSilver)][square];
-    attackers |= piece_bb_[color_index][static_cast<int>(PieceType::Horse)] &
-                 t.step_to[color_index][static_cast<int>(PieceType::Horse)][square];
-    attackers |= piece_bb_[color_index][static_cast<int>(PieceType::Dragon)] &
-                 t.step_to[color_index][static_cast<int>(PieceType::Dragon)][square];
-
-    for (int dir = 0; dir < 8; ++dir) {
-        for (int index = 0; index < t.ray_lengths[square][dir]; ++index) {
-            const int from = t.ray_squares[square][dir][index];
-            const int piece = board_[from];
-            if (is_empty(piece)) {
-                continue;
-            }
-            if (piece_color(piece) == by &&
-                is_slider_for_direction(piece_type(piece), by, dir)) {
-                attackers.set(from);
-            }
-            break;
+    while (candidates.any()) {
+        const int from = candidates.pop_lsb();
+        if ((t.between[square][from] & occupied).none()) {
+            attackers.set(from);
         }
     }
-
     return attackers;
+}
+
+Bitboard Position::attackers_to(int square, Color by, const Bitboard& occupied) const {
+    const auto& t = tables();
+    const int c = color_index(by);
+    const auto& bb = piece_bb_[color_index(by)];
+    const auto& step_to = t.step_to[c];
+    // 金と成駒は利きが同じなのでまとめ、玉の利きは馬・龍の近接利きの和として扱う
+    const Bitboard golds = bb[type_index(PieceType::Gold)] | bb[type_index(PieceType::ProPawn)] |
+                           bb[type_index(PieceType::ProLance)] |
+                           bb[type_index(PieceType::ProKnight)] |
+                           bb[type_index(PieceType::ProSilver)];
+    const Bitboard king = bb[type_index(PieceType::King)];
+    Bitboard attackers =
+        (bb[type_index(PieceType::Pawn)] & step_to[type_index(PieceType::Pawn)][square]) |
+        (bb[type_index(PieceType::Knight)] & step_to[type_index(PieceType::Knight)][square]) |
+        (bb[type_index(PieceType::Silver)] & step_to[type_index(PieceType::Silver)][square]) |
+        (golds & step_to[type_index(PieceType::Gold)][square]) |
+        ((bb[type_index(PieceType::Horse)] | king) &
+         step_to[type_index(PieceType::Horse)][square]) |
+        ((bb[type_index(PieceType::Dragon)] | king) &
+         step_to[type_index(PieceType::Dragon)][square]);
+    return attackers | slider_attackers_to(square, by, occupied);
+}
+
+Bitboard Position::attackers_to(int square, Color by) const {
+    return attackers_to(square, by, occupied_);
+}
+
+// 遮蔽を無視して square と同じ線上にある by の飛び駒（ピン・開き王手の候補）
+Bitboard Position::aligned_sliders(int square, Color by) const {
+    const auto& t = tables();
+    const auto& bb = piece_bb_[color_index(by)];
+    return ((bb[type_index(PieceType::Rook)] | bb[type_index(PieceType::Dragon)]) &
+            t.rook_lines[square]) |
+           ((bb[type_index(PieceType::Bishop)] | bb[type_index(PieceType::Horse)]) &
+            t.bishop_lines[square]) |
+           (bb[type_index(PieceType::Lance)] & t.lance_lines[color_index(opposite(by))][square]);
 }
 
 bool Position::is_square_attacked_after_move(int square,
@@ -924,213 +969,254 @@ bool Position::is_square_attacked_after_move(int square,
                                              const Move& move,
                                              PieceType moved_type) const {
     const auto& t = tables();
-    const int color_index = static_cast<int>(by);
-    const auto attacks_by_step_piece = [&](PieceType type) {
-        Bitboard candidates = t.step_to[color_index][static_cast<int>(type)][square];
-        while (candidates.any()) {
-            const int from = candidates.pop_lsb();
-            const int piece = piece_after_move_at(from, move, by, moved_type);
-            if (!is_empty(piece) && piece_color(piece) == by && piece_type(piece) == type) {
-                return true;
-            }
+    const int c = color_index(by);
+    const Bitboard to_bb = t.square_bb[move.to];
+    Bitboard occupied = occupied_ | to_bb;
+    Bitboard removed;
+    if (!move.drop) {
+        removed = t.square_bb[move.from];
+        occupied &= ~removed;
+    }
+    const auto pieces_after = [&](PieceType type) {
+        Bitboard bb = piece_bb_[c][type_index(type)] & ~removed;
+        if (type == moved_type) {
+            bb |= to_bb;
         }
-        return false;
+        return bb;
     };
 
-    if (attacks_by_step_piece(PieceType::Pawn) || attacks_by_step_piece(PieceType::Knight) ||
-        attacks_by_step_piece(PieceType::Silver) || attacks_by_step_piece(PieceType::Gold) ||
-        attacks_by_step_piece(PieceType::King) || attacks_by_step_piece(PieceType::ProPawn) ||
-        attacks_by_step_piece(PieceType::ProLance) ||
-        attacks_by_step_piece(PieceType::ProKnight) ||
-        attacks_by_step_piece(PieceType::ProSilver) ||
-        attacks_by_step_piece(PieceType::Horse) ||
-        attacks_by_step_piece(PieceType::Dragon)) {
-        return true;
-    }
-
-    for (int dir = 0; dir < 8; ++dir) {
-        for (int index = 0; index < t.ray_lengths[square][dir]; ++index) {
-            const int from = t.ray_squares[square][dir][index];
-            const int piece = piece_after_move_at(from, move, by, moved_type);
-            if (is_empty(piece)) {
-                continue;
-            }
-            if (piece_color(piece) == by &&
-                is_slider_for_direction(piece_type(piece), by, dir)) {
-                return true;
-            }
-            break;
+    for (const PieceType type : kStepPieces) {
+        if ((pieces_after(type) & t.step_to[c][type_index(type)][square]).any()) {
+            return true;
         }
     }
-
-    return false;
+    const Bitboard rooks = pieces_after(PieceType::Rook) | pieces_after(PieceType::Dragon);
+    if (rooks.any() && (rooks & rook_attacks(square, occupied)).any()) {
+        return true;
+    }
+    const Bitboard bishops = pieces_after(PieceType::Bishop) | pieces_after(PieceType::Horse);
+    if (bishops.any() && (bishops & bishop_attacks(square, occupied)).any()) {
+        return true;
+    }
+    const Bitboard lances = pieces_after(PieceType::Lance);
+    return lances.any() && (lances & lance_attacks(square, opposite(by), occupied)).any();
 }
 
 bool Position::is_square_attacked_after_king_move(int square, Color by, int king_from) const {
-    const auto& t = tables();
-    const int color_index = static_cast<int>(by);
-
-    if ((piece_bb_[color_index][static_cast<int>(PieceType::Pawn)] &
-         t.step_to[color_index][static_cast<int>(PieceType::Pawn)][square])
-            .any()) {
-        return true;
-    }
-    if ((piece_bb_[color_index][static_cast<int>(PieceType::Knight)] &
-         t.step_to[color_index][static_cast<int>(PieceType::Knight)][square])
-            .any()) {
-        return true;
-    }
-    if ((piece_bb_[color_index][static_cast<int>(PieceType::Silver)] &
-         t.step_to[color_index][static_cast<int>(PieceType::Silver)][square])
-            .any()) {
-        return true;
-    }
-    if ((piece_bb_[color_index][static_cast<int>(PieceType::Gold)] &
-         t.step_to[color_index][static_cast<int>(PieceType::Gold)][square])
-            .any()) {
-        return true;
-    }
-    if ((piece_bb_[color_index][static_cast<int>(PieceType::King)] &
-         t.step_to[color_index][static_cast<int>(PieceType::King)][square])
-            .any()) {
-        return true;
-    }
-    if ((piece_bb_[color_index][static_cast<int>(PieceType::ProPawn)] &
-         t.step_to[color_index][static_cast<int>(PieceType::ProPawn)][square])
-            .any()) {
-        return true;
-    }
-    if ((piece_bb_[color_index][static_cast<int>(PieceType::ProLance)] &
-         t.step_to[color_index][static_cast<int>(PieceType::ProLance)][square])
-            .any()) {
-        return true;
-    }
-    if ((piece_bb_[color_index][static_cast<int>(PieceType::ProKnight)] &
-         t.step_to[color_index][static_cast<int>(PieceType::ProKnight)][square])
-            .any()) {
-        return true;
-    }
-    if ((piece_bb_[color_index][static_cast<int>(PieceType::ProSilver)] &
-         t.step_to[color_index][static_cast<int>(PieceType::ProSilver)][square])
-            .any()) {
-        return true;
-    }
-    if ((piece_bb_[color_index][static_cast<int>(PieceType::Horse)] &
-         t.step_to[color_index][static_cast<int>(PieceType::Horse)][square])
-            .any()) {
-        return true;
-    }
-    if ((piece_bb_[color_index][static_cast<int>(PieceType::Dragon)] &
-         t.step_to[color_index][static_cast<int>(PieceType::Dragon)][square])
-            .any()) {
-        return true;
-    }
-
-    for (int dir = 0; dir < 8; ++dir) {
-        for (int index = 0; index < t.ray_lengths[square][dir]; ++index) {
-            const int from = t.ray_squares[square][dir][index];
-            if (from == king_from) {
-                continue;
-            }
-            const int piece = board_[from];
-            if (is_empty(piece)) {
-                continue;
-            }
-            if (piece_color(piece) == by &&
-                is_slider_for_direction(piece_type(piece), by, dir)) {
-                return true;
-            }
-            break;
-        }
-    }
-
-    return false;
+    return attackers_to(square, by, occupied_ ^ tables().square_bb[king_from]).any();
 }
 
-void Position::compute_pins_and_checks(Color color,
-                                       Bitboard& checkers,
-                                       Bitboard& pinned,
-                                       std::array<Bitboard, kSquareCount>& pin_lines) const {
+void Position::prepare_gen_state(Color color, GenState& state) const {
     const auto& t = tables();
-    const Color enemy = opposite(color);
+    const int c = color_index(color);
+    state.color = color;
+    state.own_occ = color_bb_[c];
+    state.checkers = Bitboard{};
+    state.pinned = Bitboard{};
+    state.pin_count = 0;
+    state.move_mask = t.all_squares;
+    state.in_check = false;
+
     const int king_square = find_king(color);
-
-    checkers = king_square < 0 ? Bitboard{} : attackers_to(king_square, enemy);
-    pinned = Bitboard{};
-    for (auto& line : pin_lines) {
-        line = t.all_squares;
+    if (king_square < 0) {
+        return;
+    }
+    const Color enemy = opposite(color);
+    state.checkers = attackers_to(king_square, enemy);
+    state.in_check = state.checkers.any();
+    if (state.in_check && !state.checkers.more_than_one()) {
+        // 単王手: 玉以外の駒は王手駒を取るか、飛び利きを遮る升にしか動けない
+        const int checker = state.checkers.lsb();
+        state.move_mask = t.square_bb[checker] | t.between[king_square][checker];
     }
 
-    if (king_square < 0) return;
-    for (int dir = 0; dir < 8; ++dir) {
-        int candidate = -1;
-        for (int index = 0; index < t.ray_lengths[king_square][dir]; ++index) {
-            const int sq = t.ray_squares[king_square][dir][index];
-            const int piece = board_[sq];
-            if (is_empty(piece)) {
-                continue;
-            }
-            if (piece_color(piece) == color) {
-                if (candidate != -1) {
-                    break;
-                }
-                candidate = sq;
-                continue;
-            }
-            if (!is_slider_for_direction(piece_type(piece), enemy, dir)) {
-                break;
-            }
-            if (candidate != -1) {
-                pinned.set(candidate);
-                pin_lines[candidate] = t.between[king_square][sq] | t.square_bb[sq];
-            }
-            break;
+    Bitboard snipers = aligned_sliders(king_square, enemy);
+    while (snipers.any()) {
+        const int sniper = snipers.pop_lsb();
+        const Bitboard blockers = t.between[king_square][sniper] & occupied_;
+        if (blockers.none() || blockers.more_than_one()) {
+            continue;
         }
+        const int blocker = blockers.lsb();
+        if (piece_color(board_[blocker]) != color) {
+            continue;
+        }
+        state.pinned.set(blocker);
+        state.pin_squares[state.pin_count] = blocker;
+        state.pin_lines[state.pin_count] = t.between[king_square][sniper] | t.square_bb[sniper];
+        ++state.pin_count;
     }
 }
 
-void Position::generate_king_moves(Color color,
+Bitboard Position::GenState::pin_line(int square) const {
+    for (int i = 0; i < pin_count; ++i) {
+        if (pin_squares[i] == square) {
+            return pin_lines[i];
+        }
+    }
+    return Bitboard{};
+}
+
+Bitboard Position::CheckInfo::discovered_line(int square) const {
+    for (int i = 0; i < discovered_count; ++i) {
+        if (discovered_squares[i] == square) {
+            return discovered_lines[i];
+        }
+    }
+    return Bitboard{};
+}
+
+// landing_type の駒が color 側の駒として置かれたとき、enemy_king に王手となる升
+Bitboard Position::check_targets(PieceType landing_type,
+                                 Color color,
+                                 int enemy_king,
+                                 const Bitboard& occupied) const {
+    const auto& t = tables();
+    const Bitboard steps = t.step_to[color_index(color)][type_index(landing_type)][enemy_king];
+    switch (landing_type) {
+        case PieceType::Lance:
+            return lance_attacks(enemy_king, opposite(color), occupied);
+        case PieceType::Bishop:
+            return bishop_attacks(enemy_king, occupied);
+        case PieceType::Rook:
+            return rook_attacks(enemy_king, occupied);
+        case PieceType::Horse:
+            return steps | bishop_attacks(enemy_king, occupied);
+        case PieceType::Dragon:
+            return steps | rook_attacks(enemy_king, occupied);
+        case PieceType::King:
+            return Bitboard{};
+        default:
+            return steps;
+    }
+}
+
+void Position::prepare_check_info(Color color, CheckInfo& info) const {
+    const auto& t = tables();
+    info.king = find_king(opposite(color));
+    info.filter = false;
+    info.discovered = Bitboard{};
+    info.discovered_count = 0;
+    if (info.king < 0) {
+        return;
+    }
+    // 相手玉に既に王手がかかっている（本来は不正な）局面では従来どおり後段判定にする
+    if (attackers_to(info.king, color).any()) {
+        info.filter = true;
+        return;
+    }
+
+    Bitboard snipers = aligned_sliders(info.king, color);
+    while (snipers.any()) {
+        const int sniper = snipers.pop_lsb();
+        const Bitboard blockers = t.between[info.king][sniper] & occupied_;
+        if (blockers.none() || blockers.more_than_one()) {
+            continue;
+        }
+        const int blocker = blockers.lsb();
+        if (piece_color(board_[blocker]) != color) {
+            continue;
+        }
+        info.discovered.set(blocker);
+        info.discovered_squares[info.discovered_count] = blocker;
+        info.discovered_lines[info.discovered_count] = t.between[info.king][sniper];
+        ++info.discovered_count;
+    }
+
+    for (int index = 1; index < kHandPieceKinds; ++index) {
+        info.drop_targets[index] =
+            check_targets(static_cast<PieceType>(index), color, info.king, occupied_);
+    }
+}
+
+void Position::generate_king_moves(const GenState& state,
                                    MoveSelection selection,
-                                   bool in_check,
+                                   const CheckInfo* check_info,
                                    std::vector<Move>& moves) const {
+    const auto& t = tables();
+    const Color color = state.color;
     const int from = find_king(color);
-    if (from < 0) return;
-    Bitboard targets = attacks_from(from, PieceType::King, color, occupied_);
-    targets &= ~color_bb_[static_cast<int>(color)];
+    if (from < 0) {
+        return;
+    }
     const Color enemy = opposite(color);
+    Bitboard targets = t.step_from[color_index(color)][type_index(PieceType::King)][from];
+    targets &= ~state.own_occ;
+    // 玉同士が隣接する不正局面でも相手玉を取る手は生成しない
+    targets &= ~piece_bb_[color_index(enemy)][type_index(PieceType::King)];
+    const Bitboard occupied_without_king = occupied_ ^ t.square_bb[from];
+    const bool direct_checks = check_info != nullptr && !check_info->filter;
+    Bitboard open_line;
+    if (direct_checks) {
+        if (!check_info->discovered.test(from)) {
+            return;  // 玉自身は直接王手できないので、開き王手にならなければ生成しない
+        }
+        open_line = check_info->discovered_line(from);
+    }
 
     while (targets.any()) {
         const int to = targets.pop_lsb();
+        if (attackers_to(to, enemy, occupied_without_king).any()) {
+            continue;
+        }
         const Move move{from, to, PieceType::King, false, false};
-        if (!is_square_attacked_after_king_move(to, enemy, from) &&
-            should_keep_generated_move(move, selection, in_check)) {
+        if (direct_checks) {
+            if (!open_line.test(to)) {
+                moves.push_back(move);
+            }
+        } else if (should_keep_generated_move(move, selection, state.in_check)) {
             moves.push_back(move);
         }
     }
 }
 
-void Position::generate_piece_moves(Color color,
+void Position::generate_piece_moves(const GenState& state,
                                     PieceType type,
-                                    Bitboard pieces,
-                                    const Bitboard& own_occ,
-                                    const Bitboard& move_mask,
-                                    const Bitboard& pinned,
-                                    const std::array<Bitboard, kSquareCount>& pin_lines,
                                     MoveSelection selection,
-                                    bool in_check,
+                                    const CheckInfo* check_info,
                                     std::vector<Move>& moves) const {
+    const auto& t = tables();
+    const Color color = state.color;
+    const bool direct_checks = check_info != nullptr && !check_info->filter;
+    Bitboard pieces = piece_bb_[color_index(color)][type_index(type)];
     while (pieces.any()) {
         const int from = pieces.pop_lsb();
         Bitboard targets = attacks_from(from, type, color, occupied_);
-        targets &= ~own_occ;
-        targets &= move_mask;
-        if (pinned.test(from)) {
-            targets &= pin_lines[from];
+        targets &= ~state.own_occ;
+        targets &= state.move_mask;
+        if (state.pinned.test(from)) {
+            targets &= state.pin_line(from);
+        }
+        if (targets.none()) {
+            continue;
         }
 
-        while (targets.any()) {
-            const int to = targets.pop_lsb();
-            add_move_variants(from, to, type, selection, in_check, moves);
+        if (!direct_checks) {
+            while (targets.any()) {
+                const int to = targets.pop_lsb();
+                add_move_variants(from, to, type, selection, state.in_check, moves);
+            }
+            continue;
+        }
+
+        // 移動元が空く前提で、移動先に置いた駒が相手玉に利く升と、開き王手を集める
+        const Bitboard occupied_after = occupied_ ^ t.square_bb[from];
+        const Bitboard plain = check_targets(type, color, check_info->king, occupied_after);
+        const Bitboard promoted =
+            can_promote(type)
+                ? check_targets(promote(type), color, check_info->king, occupied_after)
+                : Bitboard{};
+        const bool discovered = check_info->discovered.test(from);
+        const Bitboard open_line = discovered ? check_info->discovered_line(from) : Bitboard{};
+        Bitboard candidates = targets & (plain | promoted);
+        if (discovered) {
+            candidates |= targets & ~open_line;
+        }
+        while (candidates.any()) {
+            const int to = candidates.pop_lsb();
+            const bool opens = discovered && !open_line.test(to);
+            add_checking_variants(from, to, type, plain.test(to) || opens,
+                                  promoted.test(to) || opens, moves);
         }
     }
 }
@@ -1168,52 +1254,72 @@ void Position::add_move_variants(int from,
     }
 }
 
-void Position::add_drop_moves(Color color,
-                              const Bitboard& move_mask,
+// 王手になることが分かっている変化（不成・成）だけを add_move_variants と同じ順で追加する
+void Position::add_checking_variants(int from,
+                                     int to,
+                                     PieceType piece,
+                                     bool plain_checks,
+                                     bool promoted_checks,
+                                     std::vector<Move>& moves) const {
+    const int target = board_[to];
+    if (!is_empty(target) && piece_type(target) == PieceType::King) {
+        return;
+    }
+
+    const Color color = side_to_move_;
+    const int to_row = square_row(to);
+    const bool promotion_available =
+        can_promote(piece) &&
+        (is_in_promotion_zone(color, square_row(from)) || is_in_promotion_zone(color, to_row));
+    if (plain_checks && !must_promote(piece, color, to_row)) {
+        moves.push_back(Move{from, to, piece, false, false});
+    }
+    if (promoted_checks && promotion_available) {
+        moves.push_back(Move{from, to, piece, true, false});
+    }
+}
+
+void Position::add_drop_moves(const GenState& state,
                               bool enforce_pawn_drop_mate,
                               MoveSelection selection,
-                              bool in_check,
+                              const CheckInfo* check_info,
                               std::vector<Move>& moves) const {
-    if (selection == MoveSelection::Tactical && !in_check) {
+    if (selection == MoveSelection::Tactical && !state.in_check) {
         return;
     }
 
     const auto& t = tables();
-    Bitboard empty = t.all_squares & ~occupied_;
-    empty &= move_mask;
+    const Color color = state.color;
+    const int c = color_index(color);
+    const bool direct_checks = check_info != nullptr && !check_info->filter;
+    const Bitboard empty = t.all_squares & ~occupied_ & state.move_mask;
 
-    for (int index = 1; index <= static_cast<int>(PieceType::Rook); ++index) {
+    Bitboard pawn_files;
+    Bitboard pawns = piece_bb_[c][type_index(PieceType::Pawn)];
+    while (pawns.any()) {
+        pawn_files |= t.file_bb[square_col(pawns.pop_lsb())];
+    }
+
+    for (int index = 1; index < kHandPieceKinds; ++index) {
         const PieceType piece = static_cast<PieceType>(index);
-        if (piece == PieceType::King || hand_count(color, piece) == 0) {
+        if (hands_[c][index] == 0) {
             continue;
         }
-
-        Bitboard targets = empty;
-        for (int file = 0; file < kBoardSize; ++file) {
-            if (piece == PieceType::Pawn &&
-                (piece_bb_[static_cast<int>(color)][static_cast<int>(PieceType::Pawn)] &
-                 t.file_bb[file])
-                    .any()) {
-                targets &= ~t.file_bb[file];
-            }
+        Bitboard targets = empty & t.drop_masks[c][index];
+        if (piece == PieceType::Pawn) {
+            targets &= ~pawn_files;  // 二歩
+        }
+        if (direct_checks) {
+            targets &= check_info->drop_targets[index];
         }
 
         while (targets.any()) {
             const int to = targets.pop_lsb();
-            const int row = square_row(to);
-            if ((piece == PieceType::Pawn || piece == PieceType::Lance) &&
-                is_last_rank(color, row)) {
-                continue;
-            }
-            if (piece == PieceType::Knight && is_last_two_ranks(color, row)) {
-                continue;
-            }
-
             const Move move{-1, to, piece, false, true};
             if (piece == PieceType::Pawn && enforce_pawn_drop_mate && is_pawn_drop_mate(move)) {
                 continue;
             }
-            if (should_keep_generated_move(move, selection, in_check)) {
+            if (direct_checks || should_keep_generated_move(move, selection, state.in_check)) {
                 moves.push_back(move);
             }
         }
@@ -1241,176 +1347,52 @@ std::vector<Move> Position::generate_checking_moves() const {
     return generate_legal_moves(true, true, MoveSelection::Checking);
 }
 
+void Position::generate_legal_moves(std::vector<Move>& moves) const {
+    generate_moves(moves, true, true, MoveSelection::All);
+}
+
+void Position::generate_checking_moves(std::vector<Move>& moves) const {
+    generate_moves(moves, true, true, MoveSelection::Checking);
+}
+
 std::vector<Move> Position::generate_legal_moves(bool include_drops,
                                                  bool enforce_pawn_drop_mate,
                                                  MoveSelection selection) const {
     std::vector<Move> moves;
-    moves.reserve(256);
-    const Color color = side_to_move_;
-    const auto& t = tables();
-    const Bitboard own_occ = color_bb_[static_cast<int>(color)];
-
-    Bitboard checkers;
-    Bitboard pinned;
-    std::array<Bitboard, kSquareCount> pin_lines{};
-    compute_pins_and_checks(color, checkers, pinned, pin_lines);
-
-    const int check_count = checkers.count();
-    const bool in_check = check_count > 0;
-    generate_king_moves(color, selection, in_check, moves);
-    if (check_count >= 2) {
-        return moves;
-    }
-
-    Bitboard move_mask = t.all_squares;
-    if (check_count == 1) {
-        Bitboard single = checkers;
-        const int checker_square = single.pop_lsb();
-        move_mask = t.square_bb[checker_square];
-        const PieceType checker_type = piece_type(board_[checker_square]);
-        if (checker_type == PieceType::Lance || checker_type == PieceType::Bishop ||
-            checker_type == PieceType::Rook || checker_type == PieceType::Horse ||
-            checker_type == PieceType::Dragon) {
-            move_mask |= t.between[find_king(color)][checker_square];
-        }
-    }
-
-    generate_piece_moves(color,
-                         PieceType::Pawn,
-                         piece_bb_[static_cast<int>(color)][static_cast<int>(PieceType::Pawn)],
-                         own_occ,
-                         move_mask,
-                         pinned,
-                         pin_lines,
-                         selection,
-                         in_check,
-                         moves);
-    generate_piece_moves(color,
-                         PieceType::Lance,
-                         piece_bb_[static_cast<int>(color)][static_cast<int>(PieceType::Lance)],
-                         own_occ,
-                         move_mask,
-                         pinned,
-                         pin_lines,
-                         selection,
-                         in_check,
-                         moves);
-    generate_piece_moves(color,
-                         PieceType::Knight,
-                         piece_bb_[static_cast<int>(color)][static_cast<int>(PieceType::Knight)],
-                         own_occ,
-                         move_mask,
-                         pinned,
-                         pin_lines,
-                         selection,
-                         in_check,
-                         moves);
-    generate_piece_moves(color,
-                         PieceType::Silver,
-                         piece_bb_[static_cast<int>(color)][static_cast<int>(PieceType::Silver)],
-                         own_occ,
-                         move_mask,
-                         pinned,
-                         pin_lines,
-                         selection,
-                         in_check,
-                         moves);
-    generate_piece_moves(color,
-                         PieceType::Gold,
-                         piece_bb_[static_cast<int>(color)][static_cast<int>(PieceType::Gold)],
-                         own_occ,
-                         move_mask,
-                         pinned,
-                         pin_lines,
-                         selection,
-                         in_check,
-                         moves);
-    generate_piece_moves(color,
-                         PieceType::Bishop,
-                         piece_bb_[static_cast<int>(color)][static_cast<int>(PieceType::Bishop)],
-                         own_occ,
-                         move_mask,
-                         pinned,
-                         pin_lines,
-                         selection,
-                         in_check,
-                         moves);
-    generate_piece_moves(color,
-                         PieceType::Rook,
-                         piece_bb_[static_cast<int>(color)][static_cast<int>(PieceType::Rook)],
-                         own_occ,
-                         move_mask,
-                         pinned,
-                         pin_lines,
-                         selection,
-                         in_check,
-                         moves);
-    generate_piece_moves(color,
-                         PieceType::ProPawn,
-                         piece_bb_[static_cast<int>(color)][static_cast<int>(PieceType::ProPawn)],
-                         own_occ,
-                         move_mask,
-                         pinned,
-                         pin_lines,
-                         selection,
-                         in_check,
-                         moves);
-    generate_piece_moves(color,
-                         PieceType::ProLance,
-                         piece_bb_[static_cast<int>(color)][static_cast<int>(PieceType::ProLance)],
-                         own_occ,
-                         move_mask,
-                         pinned,
-                         pin_lines,
-                         selection,
-                         in_check,
-                         moves);
-    generate_piece_moves(color,
-                         PieceType::ProKnight,
-                         piece_bb_[static_cast<int>(color)][static_cast<int>(PieceType::ProKnight)],
-                         own_occ,
-                         move_mask,
-                         pinned,
-                         pin_lines,
-                         selection,
-                         in_check,
-                         moves);
-    generate_piece_moves(color,
-                         PieceType::ProSilver,
-                         piece_bb_[static_cast<int>(color)][static_cast<int>(PieceType::ProSilver)],
-                         own_occ,
-                         move_mask,
-                         pinned,
-                         pin_lines,
-                         selection,
-                         in_check,
-                         moves);
-    generate_piece_moves(color,
-                         PieceType::Horse,
-                         piece_bb_[static_cast<int>(color)][static_cast<int>(PieceType::Horse)],
-                         own_occ,
-                         move_mask,
-                         pinned,
-                         pin_lines,
-                         selection,
-                         in_check,
-                         moves);
-    generate_piece_moves(color,
-                         PieceType::Dragon,
-                         piece_bb_[static_cast<int>(color)][static_cast<int>(PieceType::Dragon)],
-                         own_occ,
-                         move_mask,
-                         pinned,
-                         pin_lines,
-                         selection,
-                         in_check,
-                         moves);
-
-    if (include_drops) {
-        add_drop_moves(color, move_mask, enforce_pawn_drop_mate, selection, in_check, moves);
-    }
-
+    moves.reserve(128);
+    generate_moves(moves, include_drops, enforce_pawn_drop_mate, selection);
     return moves;
+}
+
+void Position::generate_moves(std::vector<Move>& moves,
+                              bool include_drops,
+                              bool enforce_pawn_drop_mate,
+                              MoveSelection selection) const {
+    moves.clear();
+    const Color color = side_to_move_;
+    GenState state;
+    prepare_gen_state(color, state);
+
+    CheckInfo info;
+    const CheckInfo* check_info = nullptr;
+    if (selection == MoveSelection::Checking) {
+        prepare_check_info(color, info);
+        if (info.king < 0) {
+            return;  // 王手をかける相手玉がない
+        }
+        check_info = &info;
+    }
+
+    generate_king_moves(state, selection, check_info, moves);
+    if (state.checkers.more_than_one()) {
+        return;  // 両王手は玉を動かすしかない
+    }
+    for (const PieceType type : kPieceOrder) {
+        generate_piece_moves(state, type, selection, check_info, moves);
+    }
+    if (include_drops) {
+        add_drop_moves(state, enforce_pawn_drop_mate, selection, check_info, moves);
+    }
 }
 
 std::vector<Move> Position::generate_pseudo_legal_moves(Color color, bool include_drops) const {
@@ -1438,8 +1420,7 @@ bool Position::should_keep_generated_move(const Move& move,
 }
 
 bool Position::has_pawn_on_file(Color color, int col) const {
-    return (piece_bb_[static_cast<int>(color)][static_cast<int>(PieceType::Pawn)] &
-            tables().file_bb[col])
+    return (piece_bb_[color_index(color)][type_index(PieceType::Pawn)] & tables().file_bb[col])
         .any();
 }
 
@@ -1451,15 +1432,110 @@ bool Position::is_legal_move(const Move& move, bool enforce_pawn_drop_mate) cons
 }
 
 bool Position::is_pawn_drop_mate(const Move& move) const {
-    Position next = *this;
-    next.do_move_unchecked(move);
     const Color attacker = side_to_move_;
-    const Color defender = next.side_to_move_;
-    const int king_square = next.find_king(defender);
-    if (king_square == -1 || !next.is_square_attacked(king_square, attacker)) {
+    const Color defender = opposite(attacker);
+    const int king_square = find_king(defender);
+    if (king_square < 0 ||
+        !tables().step_to[color_index(attacker)][type_index(PieceType::Pawn)][king_square].test(
+            move.to)) {
+        return false;  // 王手にならない歩打ちは打ち歩詰めではない
+    }
+    Position next = *this;
+    MoveUndo undo;
+    next.make_move(move, undo);
+    return !next.has_evasion(king_square);
+}
+
+bool Position::has_legal_move() const {
+    const int king_square = find_king(side_to_move_);
+    if (king_square >= 0 && attackers_to(king_square, opposite(side_to_move_)).any()) {
+        return has_evasion(king_square);
+    }
+    return !generate_legal_moves().empty();
+}
+
+// 王手がかかっている手番側に合法な応手があるか（手を列挙せずに判定する）
+bool Position::has_evasion(int king_square) const {
+    const auto& t = tables();
+    const Color color = side_to_move_;
+    const Color enemy = opposite(color);
+    const int c = color_index(color);
+
+    // 玉の移動（王手駒を玉で取る手を含む）
+    Bitboard king_targets = t.step_from[c][type_index(PieceType::King)][king_square];
+    king_targets &= ~color_bb_[c];
+    king_targets &= ~piece_bb_[color_index(enemy)][type_index(PieceType::King)];
+    const Bitboard occupied_without_king = occupied_ ^ t.square_bb[king_square];
+    while (king_targets.any()) {
+        const int to = king_targets.pop_lsb();
+        if (!attackers_to(to, enemy, occupied_without_king).any()) {
+            return true;
+        }
+    }
+
+    const Bitboard checkers = attackers_to(king_square, enemy);
+    if (checkers.more_than_one()) {
         return false;
     }
-    return next.generate_legal_moves(false, false).empty();
+    const int checker = checkers.lsb();
+    if (piece_type(board_[checker]) == PieceType::King) {
+        return false;  // 玉同士が隣接する不正局面: 駒で相手玉は取れない
+    }
+
+    // ピンされた駒は王手駒を取ることも合駒することもできない
+    Bitboard pinned;
+    Bitboard snipers = aligned_sliders(king_square, enemy);
+    while (snipers.any()) {
+        const int sniper = snipers.pop_lsb();
+        const Bitboard blockers = t.between[king_square][sniper] & occupied_;
+        if (blockers.any() && !blockers.more_than_one() &&
+            piece_color(board_[blockers.lsb()]) == color) {
+            pinned |= blockers;
+        }
+    }
+    const Bitboard movers = color_bb_[c] & ~pinned & ~t.square_bb[king_square];
+
+    // 王手駒を取る
+    if ((attackers_to(checker, color) & movers).any()) {
+        return true;
+    }
+
+    // 合駒（移動合い・打ち合い）
+    const Bitboard between = t.between[king_square][checker];
+    if (between.none()) {
+        return false;
+    }
+    Bitboard squares = between;
+    while (squares.any()) {
+        if ((attackers_to(squares.pop_lsb(), color) & movers).any()) {
+            return true;
+        }
+    }
+    Bitboard pawn_files;
+    Bitboard pawns = piece_bb_[c][type_index(PieceType::Pawn)];
+    while (pawns.any()) {
+        pawn_files |= t.file_bb[square_col(pawns.pop_lsb())];
+    }
+    for (int index = 1; index < kHandPieceKinds; ++index) {
+        if (hands_[c][index] == 0) {
+            continue;
+        }
+        Bitboard drops = between & t.drop_masks[c][index];
+        if (index == type_index(PieceType::Pawn)) {
+            drops &= ~pawn_files;
+            while (drops.any()) {
+                const Move move{-1, drops.pop_lsb(), PieceType::Pawn, false, true};
+                if (!is_pawn_drop_mate(move)) {
+                    return true;
+                }
+            }
+            continue;
+        }
+        if (drops.any()) {
+            return true;
+        }
+    }
+    return false;
 }
 
 int Position::find_king(Color color) const {
@@ -1685,14 +1761,14 @@ bool Position::opponent_has_mate_in_one(Color defender) const {
     }
     attacker_position.side_to_move_ = opposite(defender);
 
-    const auto checking_moves = attacker_position.generate_legal_moves();
+    std::vector<Move> checking_moves;
+    attacker_position.generate_checking_moves(checking_moves);
     for (const Move& move : checking_moves) {
-        Position child = attacker_position;
-        child.do_move_unchecked(move);
-        if (!child.is_in_check(defender)) {
-            continue;
-        }
-        if (child.generate_legal_moves().empty()) {
+        MoveUndo undo;
+        attacker_position.make_move(move, undo);
+        const bool mated = !attacker_position.has_legal_move();
+        attacker_position.unmake_move(move, undo);
+        if (mated) {
             return true;
         }
     }
