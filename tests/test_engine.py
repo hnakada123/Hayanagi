@@ -112,6 +112,9 @@ class EngineTests(unittest.TestCase):
 
     def test_usi_and_startpos_perft(self):
         self.assertIn('option name TsumeMode type check default false', self.usi_lines)
+        names = [line for line in self.usi_lines if line.startswith('id name ')]
+        self.assertEqual(len(names), 1, self.usi_lines)
+        self.assertRegex(names[0], r'^id name Hayanagi \d+\.\d+\.\d+$')
         self.engine.send('usinewgame\nposition startpos')
         for depth, nodes in ((1, 30), (2, 900), (3, 25470)):
             with self.subTest(depth=depth):

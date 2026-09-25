@@ -1,5 +1,6 @@
 #include "usi_engine.h"
 #include "tsume.h"
+#include "version.h"
 
 #include <algorithm>
 #include <array>
@@ -340,7 +341,7 @@ void UsiEngine::loop() {
 
 void UsiEngine::handle_line(const std::string& line) {
     if (line == "usi") {
-        std::cout << "id name Hayanagi" << std::endl;
+        std::cout << "id name " << kEngineName << " " << kEngineVersion << std::endl;
         std::cout << "id author OpenAI" << std::endl;
         std::cout << "option name USI_Ponder type check default "
                   << (kDefaultUsiPonder ? "true" : "false") << std::endl;

@@ -15,7 +15,7 @@ python3 tests/bench_tsume.py build/hayanagi --baseline /path/to/previous/hayanag
 - OS: Linux 7.2 (x86_64)、GCC 16.2、`-O3`（`CMAKE_BUILD_TYPE=Release`）
 - シングルスレッド。時間は 5 回計測した最良値（`go tsume ... movetime 600000` の応答までの実時間）
 - 改良前: コミット `30cfce5`（ShogiBoardQ が参照していた版）
-- 改良後: 本ブランチ
+- 改良後: 1.0.0（本ブランチ）
 
 ## 詰み探索（`go tsume`）
 

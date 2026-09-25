@@ -1,5 +1,18 @@
 cmake_minimum_required(VERSION 3.16)
-project(Hayanagi LANGUAGES CXX)
+
+# バージョンは src/version.h の HAYANAGI_VERSION が唯一の定義元
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/src/version.h" HAYANAGI_VERSION_LINE REGEX "^#define HAYANAGI_VERSION \"[0-9.]+\"")
+string(REGEX REPLACE "^#define HAYANAGI_VERSION \"([0-9.]+)\".*$" "\\1" HAYANAGI_VERSION "${HAYANAGI_VERSION_LINE}")
+if(NOT HAYANAGI_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR "src/version.h から HAYANAGI_VERSION を読めません: '${HAYANAGI_VERSION_LINE}'")
+endif()
+
+project(Hayanagi VERSION ${HAYANAGI_VERSION} LANGUAGES CXX)
+
+# add_subdirectory で組み込む側（ShogiBoardQ など）からもバージョンを参照できるようにする
+if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(HAYANAGI_VERSION "${HAYANAGI_VERSION}" PARENT_SCOPE)
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

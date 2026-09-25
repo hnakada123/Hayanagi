@@ -30,6 +30,7 @@ The engine reads USI commands from stdin. Key commands for testing:
 
 All code lives in `src/` under the `shogi` namespace. The main compilation units:
 
+- **version.h** — `HAYANAGI_VERSION` is the single source of the version; CMake reads it for `project(VERSION)`, and `id name` / `--version` print it. Bump it (and the README) when releasing, and tag the commit `v<version>`.
 - **types.h** — Core types (`Color`, `PieceType`, `Move`, `TerminalStatus`), square/piece utilities, piece values. Pieces are encoded as signed ints (positive=Black, negative=White).
 - **bitboard.h** — 81-square bitboard using two `uint64_t` fields (lo: 64 bits, hi: 17 bits). Provides set operations, pop (LSB extraction), and iteration via `BitboardIterator`.
 - **position.h/cpp** — Board state, SFEN parsing, USI move application, legal move generation. Uses color/piece-type bitboards for check detection, pin computation, and direct move generation (no post-filter). Maintains a linked-list history (`HistoryNode`) for repetition detection. Includes SEE, null-move generation, and entering-king (impasse) rule variants.

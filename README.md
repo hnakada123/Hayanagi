@@ -2,7 +2,8 @@
 
 Hayanagi は、C++17 で実装した USI プロトコル対応の最小構成将棋エンジンです。
 
-- USI の `id name` は `Hayanagi`
+- 現在のバージョンは 1.0.0（`src/version.h` の `HAYANAGI_VERSION` が唯一の定義元で、CMake の `project(... VERSION)` もここから読む）
+- USI の `id name` は `Hayanagi <バージョン>`（例: `Hayanagi 1.0.0`）。`./build/hayanagi --version` でも表示できる
 - CMake の生成実行ファイル名は `hayanagi`
 - 合法手生成、終局判定、基本的な探索、`bench` / `perft` をひととおり実装
 
@@ -43,7 +44,7 @@ quit
 `usi` に対しては少なくとも次のように応答します。
 
 ```text
-id name Hayanagi
+id name Hayanagi 1.0.0
 id author OpenAI
 option name MultiPV type spin default 1 min 1 max 32
 option name Threads type spin default 1 min 1 max 128
