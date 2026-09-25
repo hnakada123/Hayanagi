@@ -13,7 +13,7 @@ python3 tests/bench_tsume.py build/hayanagi --baseline /path/to/previous/hayanag
 
 - 計測日: 2026-09-25
 - OS: Linux 7.2 (x86_64)、GCC 16.2、`-O3`（`CMAKE_BUILD_TYPE=Release`）
-- シングルスレッド。時間は 3 回計測した最良値（`go tsume ... movetime 600000` の応答までの実時間）
+- シングルスレッド。時間は 5 回計測した最良値（`go tsume ... movetime 600000` の応答までの実時間）
 - 改良前: コミット `30cfce5`（ShogiBoardQ が参照していた版）
 - 改良後: 本ブランチ
 
@@ -21,14 +21,14 @@ python3 tests/bench_tsume.py build/hayanagi --baseline /path/to/previous/hayanag
 
 | 局面 | 深さ | 結果 | 旧 nodes | 旧 時間(ms) | 新 nodes | 新 時間(ms) | 倍率 |
 |---|---|---|---|---|---|---|---|
-| mate5-1 | 5 | mate 3c5c+ plies 5 | 668 | 2.1 | 646 | 0.3 | 7.4x |
-| mate5-2 | 5 | mate G*9g plies 5 | 34569 | 82.9 | 31840 | 5.2 | 16.1x |
-| mate5-3 | 5 | mate R*1g plies 5 | 38531 | 104.2 | 38319 | 6.2 | 16.8x |
-| mate5-4 | 5 | mate S*3b plies 5 | 12088 | 25.0 | 10544 | 1.5 | 16.6x |
-| mate5-5 | 5 | mate R*9c plies 5 | 30824 | 69.5 | 30129 | 4.5 | 15.4x |
-| defense6 | 6 | mate 4a4b plies 6 (旧 move: 4a5b) | 36882 | 64.6 | 24083 | 3.8 | 17.0x |
-| nomate3 | 3 | depthlimit R*7i plies 0 | 13341 | 32.7 | 13341 | 2.6 | 12.8x |
-| nomate5 | 5 | depthlimit R*7i plies 0 | 1840939 | 4931.8 | 1870972 | 215.2 | 22.9x |
+| mate5-1 | 5 | mate 3c5c+ plies 5 | 668 | 1.1 | 646 | 0.2 | 5.4x |
+| mate5-2 | 5 | mate G*9g plies 5 | 34569 | 77.0 | 31840 | 4.2 | 18.3x |
+| mate5-3 | 5 | mate R*1g plies 5 | 38531 | 94.9 | 38319 | 5.8 | 16.4x |
+| mate5-4 | 5 | mate S*3b plies 5 | 12088 | 23.8 | 10544 | 1.5 | 15.6x |
+| mate5-5 | 5 | mate R*9c plies 5 | 30824 | 65.0 | 30129 | 4.4 | 14.6x |
+| defense6 | 6 | mate 4a4b plies 6 (旧 move: 4a5b) | 36882 | 62.4 | 24083 | 3.6 | 17.3x |
+| nomate3 | 3 | depthlimit R*7i plies 0 | 13341 | 30.9 | 13341 | 1.3 | 24.5x |
+| nomate5 | 5 | depthlimit R*7i plies 0 | 1840939 | 4793.3 | 1870972 | 198.8 | 24.1x |
 
 局面の内容:
 
@@ -42,6 +42,9 @@ python3 tests/bench_tsume.py build/hayanagi --baseline /path/to/previous/hayanag
 | defense6 | `5k3/9/9/3+P1B1N1/9/9/9/9/9 b RSrb4g3s3n4l17p 1 moves S*4b`（玉方、深さ 6） |
 | nomate3 / nomate5 | `9/9/9/9/9/2k6/4r4/9/9 b RBSLb4g3s4n3l18p 1`（攻方の持駒が多い不詰局面、深さ 3 / 5） |
 
+差分検証として、ランダムに生成した 1,500 局面（持駒あり、攻方玉なしを含む）で
+旧実行ファイルと `perft depth 2 divide` の合法手一覧（並び順を含む）と nodes が一致することを確認しました。
+
 `nodes` の数え方は改良前後で少し異なります（改良後は玉方の末端局面も 1 ノードとして数え、
 置換表ヒットも数える）。`defense6` の応手が `4a5b` から `4a4b` に変わったのは、
 `S*4b 4a5b` の後は 3 手で詰み、`S*4b 4a4b` の後は 5 手で詰むため、`4a4b` が本当の最長抵抗だからです
@@ -51,8 +54,8 @@ python3 tests/bench_tsume.py build/hayanagi --baseline /path/to/previous/hayanag
 
 | 計測 | 旧 | 新 |
 |---|---|---|
-| perft depth 4（開始局面） | 719731 nodes, 121.0 ms | 719731 nodes, 103.0 ms |
-| bench nodes 200000 | 761806 nodes, 2678.0 ms | 761806 nodes, 2054.0 ms |
+| perft depth 4（開始局面） | 719731 nodes, 95.0 ms | 719731 nodes, 78.0 ms |
+| bench nodes 200000 | 761806 nodes, 2628.0 ms | 761806 nodes, 2072.0 ms |
 
 perft の nodes と `bench` の探索ノード数は改良前後で一致しており、通常探索の挙動は変わっていません。
 
