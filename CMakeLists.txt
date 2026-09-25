@@ -58,10 +58,13 @@ if(HAYANAGI_BUILD_TESTS)
     list(APPEND HAYANAGI_TARGETS hayanagi_tests)
 endif()
 
+# Clang の -Wconversion は -Wsign-conversion を含む（GCC は含まない）。
+# 盤面や表を int で添字付けする設計なので、符号変換の警告は GCC と同じく無効にする。
 foreach(target IN LISTS HAYANAGI_TARGETS)
     if(MSVC)
         target_compile_options(${target} PRIVATE /W4)
     else()
-        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wshadow -Wconversion)
+        target_compile_options(${target} PRIVATE
+            -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wno-sign-conversion)
     endif()
 endforeach()

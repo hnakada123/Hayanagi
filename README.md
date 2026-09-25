@@ -4,8 +4,8 @@ Hayanagi は、C++17 で実装した USI プロトコル対応の最小構成将
 通常対局用の探索に加えて、詰将棋用の詰み探索（`TsumeSearch`）を備え、
 将棋 GUI [ShogiBoardQ](https://github.com/hnakada123/ShogiBoardQ) に静的ライブラリとして組み込まれています。
 
-- 現在のバージョン: **1.0.0**（[変更履歴](#バージョンと変更履歴)）
-- USI の `id name` は `Hayanagi 1.0.0`。`./build/hayanagi --version` でも表示できます
+- 現在のバージョン: **1.0.1**（[変更履歴](#バージョンと変更履歴)）
+- USI の `id name` は `Hayanagi 1.0.1`。`./build/hayanagi --version` でも表示できます
 - CMake の生成実行ファイル名は `hayanagi`、組み込み用の静的ライブラリは `hayanagi_tsume`
 - 合法手生成、終局判定、通常探索、詰み探索、`bench` / `perft` をひととおり実装
 
@@ -45,12 +45,12 @@ cmake --build build
 | `build/libhayanagi_tsume.a` | `Position` と `TsumeSearch` の静的ライブラリ（GUI 組み込み用） |
 | `build/hayanagi_tests` | C++ 単体テスト（Hayanagi を最上位でビルドしたときだけ生成） |
 
-コンパイル警告は `-Wall -Wextra -Wpedantic -Wshadow -Wconversion` を有効にしており、警告なしでビルドできます。
+コンパイル警告は `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wno-sign-conversion` を有効にしており、GCC と Clang のどちらでも警告なしでビルドできます（Clang の `-Wconversion` は `-Wsign-conversion` を含むため、GCC と同じ意味になるよう明示的に無効にしています）。
 
 ## 実行例
 
 ```bash
-./build/hayanagi --version   # Hayanagi 1.0.0
+./build/hayanagi --version   # Hayanagi 1.0.1
 ./build/hayanagi             # USI エンジンとして起動
 ```
 
@@ -68,7 +68,7 @@ quit
 `usi` に対しては少なくとも次のように応答します。
 
 ```text
-id name Hayanagi 1.0.0
+id name Hayanagi 1.0.1
 id author OpenAI
 option name MultiPV type spin default 1 min 1 max 32
 option name Threads type spin default 1 min 1 max 128
@@ -323,6 +323,10 @@ python3 tests/bench_tsume.py build/hayanagi [--baseline /path/to/previous/hayana
 バージョンは `src/version.h` の `HAYANAGI_VERSION` が唯一の定義元で、CMake の `project(... VERSION)`、
 USI の `id name`、`--version` はすべてここから読みます。リリース時はこの値と本節を更新し、
 同じ番号のタグ（`v1.0.0` など）を付けます。
+
+### 1.0.1（2026-09-25）
+
+- Clang でビルドしたときに `-Wconversion` が `-Wsign-conversion` を含み、ShogiBoardQ の Qt Creator（Clang）ビルドで約 490 件の警告が出ていたのを直しました。`-Wno-sign-conversion` を併記して GCC と同じ警告範囲にし、Clang でも警告ゼロでビルドできることを確認しています。探索や結果の変更はありません。
 
 ### 1.0.0（2026-09-25）
 
