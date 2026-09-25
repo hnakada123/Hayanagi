@@ -5,6 +5,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "book.h"
 #include "search.h"
@@ -54,6 +55,7 @@ private:
     void stop_search(bool report_bestmove = false);
     void start_search(const std::string& line);
     void run_bench(const std::string& line);
+    void run_tsume_bench(const std::vector<std::string>& tokens);
     void run_perft(const std::string& line);
     bool set_position(const std::string& line);
     SearchOptions parse_go_options(const std::string& line) const;

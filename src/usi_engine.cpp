@@ -128,6 +128,40 @@ struct BenchCase {
     const char* position_command;
 };
 
+// bench tsume の固定局面。BENCHMARK.md の計測に使う
+struct TsumeBenchCase {
+    const char* name;
+    const char* sfen;
+    const char* moves;
+    bool attack;
+    int depth;
+};
+
+const std::vector<TsumeBenchCase>& tsume_bench_suite() {
+    static const std::vector<TsumeBenchCase> suite = {
+        {"mate5-1", "9/9/6R1+R/5k3/9/7+S1/9/9/9 b 2b4g3s4n4l18p 1", "", true, 5},
+        {"mate5-2", "9/9/9/R8/9/9/1k2+S4/9/3+N5 b RG2b3g3s3n4l18p 1", "", true, 5},
+        {"mate5-3", "9/9/9/9/9/9/7+S1/5G2k/9 b RSr2b3g2s4n4l18p 1", "", true, 5},
+        {"mate5-4", "5k3/9/9/3+P1B1N1/9/9/9/9/9 b RSrb4g3s3n4l17p 1", "", true, 5},
+        {"mate5-5", "1l7/k8/9/G8/3+R5/9/9/9/9 b R2b3g4s4n3l18p 1", "", true, 5},
+        {"defense6", "5k3/9/9/3+P1B1N1/9/9/9/9/9 b RSrb4g3s3n4l17p 1", "S*4b", false, 6},
+        {"nomate3", "9/9/9/9/9/2k6/4r4/9/9 b RBSLb4g3s4n3l18p 1", "", true, 3},
+        {"nomate5", "9/9/9/9/9/2k6/4r4/9/9 b RBSLb4g3s4n3l18p 1", "", true, 5},
+    };
+    return suite;
+}
+
+const char* tsume_status_text(TsumeStatus status) {
+    switch (status) {
+        case TsumeStatus::Mate: return "mate";
+        case TsumeStatus::NoMate: return "nomate";
+        case TsumeStatus::Limit: return "depthlimit";
+        case TsumeStatus::Timeout: return "timeout";
+        case TsumeStatus::Cancelled: return "cancelled";
+    }
+    return "unknown";
+}
+
 struct PerftStats {
     std::uint64_t nodes = 0;
     std::uint64_t captures = 0;
@@ -621,15 +655,7 @@ void UsiEngine::start_tsume(const std::string& line) {
         const auto result = solver.solve(snapshot, attacker, depth, millis, stop_requested_);
         std::lock_guard<std::mutex> lock(search_state_mutex_);
         if (!suppress_bestmove_) {
-            const char* status = "unknown";
-            switch (result.status) {
-            case TsumeStatus::Mate: status = "mate"; break;
-            case TsumeStatus::NoMate: status = "nomate"; break;
-            case TsumeStatus::Limit: status = "depthlimit"; break;
-            case TsumeStatus::Timeout: status = "timeout"; break;
-            case TsumeStatus::Cancelled: status = "cancelled"; break;
-            }
-            std::cout << "tsume " << status << " move "
+            std::cout << "tsume " << tsume_status_text(result.status) << " move "
                       << (result.move.is_valid() ? snapshot.move_to_usi(result.move) : "none")
                       << " plies " << result.plies << " nodes " << result.nodes << std::endl;
         }
@@ -669,11 +695,16 @@ void UsiEngine::report_bestmove(const SearchResult& result,
 void UsiEngine::run_bench(const std::string& line) {
     stop_search();
 
+    const auto tokens = split_tokens(line);
+    if (tokens.size() >= 2 && tokens[1] == "tsume") {
+        run_tsume_bench(tokens);
+        return;
+    }
+
     int depth = 5;
     bool depth_explicit = false;
     bool current_only = false;
     std::uint64_t node_limit = 0;
-    const auto tokens = split_tokens(line);
     for (std::size_t i = 1; i < tokens.size(); ++i) {
         if (tokens[i] == "depth" && i + 1 < tokens.size()) {
             depth = std::max(1, parse_int(tokens[++i], depth));
@@ -766,6 +797,52 @@ void UsiEngine::run_bench(const std::string& line) {
     }
     std::cout << " hashfull_avg " << (total_hashfull / static_cast<int>(items.size()))
               << " hashfull_max " << max_hashfull << std::endl;
+}
+
+// bench tsume [movetime M]: 固定局面の詰み探索を順に実行し、結果とノード数・時間を出力する
+void UsiEngine::run_tsume_bench(const std::vector<std::string>& tokens) {
+    int millis = 600000;
+    for (std::size_t i = 2; i + 1 < tokens.size(); i += 2) {
+        if (tokens[i] == "movetime") {
+            millis = std::clamp(parse_int(tokens[i + 1], millis), 1, kMaxOptionMillis);
+        }
+    }
+
+    const auto& suite = tsume_bench_suite();
+    std::uint64_t total_nodes = 0;
+    std::uint64_t total_ms = 0;
+    for (std::size_t i = 0; i < suite.size(); ++i) {
+        const TsumeBenchCase& entry = suite[i];
+        Position position;
+        std::string command = std::string("position sfen ") + entry.sfen;
+        if (entry.moves[0] != '\0') {
+            command += std::string(" moves ") + entry.moves;
+        }
+        if (!load_position_from_tokens(split_tokens(command), 1, position, true)) {
+            std::cout << "info string bench tsume setup_failed " << entry.name << std::endl;
+            continue;
+        }
+        const Color attacker =
+            entry.attack ? position.side_to_move() : opposite(position.side_to_move());
+        std::atomic_bool stop{false};
+        TsumeSearch solver;
+        const auto start = std::chrono::steady_clock::now();
+        const TsumeResult result = solver.solve(position, attacker, entry.depth, millis, stop);
+        const auto end = std::chrono::steady_clock::now();
+        const auto elapsed_ms = static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
+        total_nodes += result.nodes;
+        total_ms += elapsed_ms;
+        std::cout << "info string bench tsume " << (i + 1) << "/" << suite.size() << " "
+                  << entry.name << " depth " << entry.depth << " status "
+                  << tsume_status_text(result.status) << " move "
+                  << (result.move.is_valid() ? position.move_to_usi(result.move) : "none")
+                  << " plies " << result.plies << " nodes " << result.nodes << " time "
+                  << elapsed_ms << " nps " << compute_nps(result.nodes, elapsed_ms) << std::endl;
+    }
+    std::cout << "info string bench tsume total positions " << suite.size() << " nodes "
+              << total_nodes << " time " << total_ms << " nps "
+              << compute_nps(total_nodes, total_ms) << std::endl;
 }
 
 void UsiEngine::run_perft(const std::string& line) {
