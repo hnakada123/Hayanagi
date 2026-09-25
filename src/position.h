@@ -175,7 +175,7 @@ private:
     bool has_pawn_on_file(Color color, int col) const;
     bool is_legal_move(const Move& move, bool enforce_pawn_drop_mate) const;
     bool is_pawn_drop_mate(const Move& move) const;
-    bool has_evasion(int king_square) const;
+    bool has_evasion(int king_square, bool allow_drops) const;
     void do_move_unchecked(const Move& move);
     Bitboard attacks_from(int from, PieceType type, Color color, const Bitboard& occupied) const;
     Bitboard rook_attacks(int from, const Bitboard& occupied) const;

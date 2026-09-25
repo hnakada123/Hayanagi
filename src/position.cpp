@@ -1431,31 +1431,39 @@ bool Position::is_legal_move(const Move& move, bool enforce_pawn_drop_mate) cons
     });
 }
 
+// 歩を打った後に相手玉が王手を受けていて、打つ手以外の応手がない（打ち歩詰め）か。
+// 打つ手は元から王手を受けている不正局面でも考慮しない（従来の判定と同じ）
 bool Position::is_pawn_drop_mate(const Move& move) const {
     const Color attacker = side_to_move_;
     const Color defender = opposite(attacker);
     const int king_square = find_king(defender);
-    if (king_square < 0 ||
-        !tables().step_to[color_index(attacker)][type_index(PieceType::Pawn)][king_square].test(
-            move.to)) {
-        return false;  // 王手にならない歩打ちは打ち歩詰めではない
+    if (king_square < 0) {
+        return false;
+    }
+    // 打つ手は利きの線を開かないので、王手になるのは歩自身の利きか元からの王手だけ
+    const bool pawn_checks =
+        tables().step_to[color_index(attacker)][type_index(PieceType::Pawn)][king_square].test(
+            move.to);
+    if (!pawn_checks && !attackers_to(king_square, attacker).any()) {
+        return false;
     }
     Position next = *this;
     MoveUndo undo;
     next.make_move(move, undo);
-    return !next.has_evasion(king_square);
+    return !next.has_evasion(king_square, false);
 }
 
 bool Position::has_legal_move() const {
     const int king_square = find_king(side_to_move_);
     if (king_square >= 0 && attackers_to(king_square, opposite(side_to_move_)).any()) {
-        return has_evasion(king_square);
+        return has_evasion(king_square, true);
     }
     return !generate_legal_moves().empty();
 }
 
-// 王手がかかっている手番側に合法な応手があるか（手を列挙せずに判定する）
-bool Position::has_evasion(int king_square) const {
+// 王手がかかっている手番側に合法な応手があるか（手を列挙せずに判定する）。
+// allow_drops が false なら打ち合いを考慮しない
+bool Position::has_evasion(int king_square, bool allow_drops) const {
     const auto& t = tables();
     const Color color = side_to_move_;
     const Color enemy = opposite(color);
@@ -1510,6 +1518,9 @@ bool Position::has_evasion(int king_square) const {
         if ((attackers_to(squares.pop_lsb(), color) & movers).any()) {
             return true;
         }
+    }
+    if (!allow_drops) {
+        return false;
     }
     Bitboard pawn_files;
     Bitboard pawns = piece_bb_[c][type_index(PieceType::Pawn)];
