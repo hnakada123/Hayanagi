@@ -167,14 +167,13 @@ void TsumeSearch::store(std::uint64_t key, int remaining, const TsumeResult& res
     }
 }
 
-TsumeResult TsumeSearch::solve(const Position& position, Color attacker, int max_plies,
-                              int time_limit_ms, const std::atomic_bool& stop) {
+void TsumeSearch::prepare(Color attacker, const std::atomic_bool& stop,
+                          std::chrono::steady_clock::time_point deadline) {
     attacker_ = attacker;
     stop_ = &stop;
     nodes_ = 0;
-    max_plies = std::clamp(max_plies, 0, kMaxPlies);
-    deadline_ = std::chrono::steady_clock::now() +
-                std::chrono::milliseconds(std::max(1, time_limit_ms));
+    deadline_ = deadline;
+    root_cutoff_ = nullptr;
     if (table_.empty()) {
         table_.assign(kInitialTableSize, Entry{});
         table_attacker_ = attacker;
@@ -183,6 +182,14 @@ TsumeResult TsumeSearch::solve(const Position& position, Color attacker, int max
         table_attacker_ = attacker;
         new_generation();
     }
+}
+
+TsumeResult TsumeSearch::solve(const Position& position, Color attacker, int max_plies,
+                              int time_limit_ms, const std::atomic_bool& stop, int threads) {
+    prepare(attacker, stop, std::chrono::steady_clock::now() +
+                               std::chrono::milliseconds(std::max(1, time_limit_ms)));
+    max_plies = std::clamp(max_plies, 0, kMaxPlies);
+    threads_ = std::clamp(threads, 1, 128);
     position_ = position;
 
     TsumeResult result;
@@ -195,9 +202,69 @@ TsumeResult TsumeSearch::solve(const Position& position, Color attacker, int max
     return result;
 }
 
+TsumeResult TsumeSearch::visit_parallel(int remaining, int ply, const std::vector<Move>& moves) {
+    const int count = std::min(threads_, static_cast<int>(moves.size()));
+    if (!team_ || team_->size() != static_cast<std::size_t>(count)) {
+        team_ = std::make_unique<ParallelTeam>(count);
+        workers_.resize(static_cast<std::size_t>(count));
+        // 浅い反復で得た証明を引き継ぐ。巨大な表の複製は避ける。
+        if (table_.size() <= kInitialTableSize * 4) {
+            for (TsumeSearch& worker : workers_) {
+                worker.table_ = table_;
+                worker.table_attacker_ = table_attacker_;
+                worker.generation_ = generation_;
+                worker.live_entries_ = live_entries_;
+            }
+        }
+    }
+    const bool attack = position_.side_to_move() == attacker_;
+    std::vector<TsumeResult> replies(moves.size());
+    std::atomic_size_t cutoff{moves.size()};
+    for (TsumeSearch& worker : workers_) worker.prepare(attacker_, *stop_, deadline_);
+    team_->run(moves.size(), [&](std::size_t index, std::size_t worker_index) {
+        if (index > cutoff.load(std::memory_order_relaxed)) return;
+        TsumeSearch& worker = workers_[worker_index];
+        worker.position_ = position_;
+        worker.root_cutoff_ = &cutoff;
+        worker.root_index_ = index;
+        MoveUndo undo;
+        worker.position_.make_move(moves[index], undo);
+        replies[index] = worker.visit(remaining - 1, ply + 1);
+        if ((attack && replies[index].status == TsumeStatus::Mate) ||
+            (!attack && replies[index].status == TsumeStatus::NoMate)) {
+            std::size_t previous = cutoff.load(std::memory_order_relaxed);
+            while (index < previous && !cutoff.compare_exchange_weak(
+                       previous, index, std::memory_order_relaxed)) {}
+        }
+    });
+    for (TsumeSearch& worker : workers_) {
+        nodes_ += worker.nodes_;
+        worker.root_cutoff_ = nullptr;
+    }
+    // 元の候補順で集約する。先着順にすると最善手の選択が不安定になる。
+    TsumeResult result{attack ? TsumeStatus::NoMate : TsumeStatus::Mate, {}, 0, 0};
+    for (std::size_t i = 0; i < moves.size(); ++i) {
+        const TsumeResult& reply = replies[i];
+        if (is_abort(reply.status)) return reply;
+        if ((attack && reply.status == TsumeStatus::Mate) ||
+            (!attack && reply.status == TsumeStatus::NoMate)) {
+            return TsumeResult{reply.status, moves[i], reply.plies + 1, 0};
+        }
+        if (reply.status == TsumeStatus::Limit) {
+            result = TsumeResult{TsumeStatus::Limit, moves[i], 0, 0};
+        } else if (!attack && result.status == TsumeStatus::Mate && reply.plies + 1 > result.plies) {
+            result = TsumeResult{TsumeStatus::Mate, moves[i], reply.plies + 1, 0};
+        }
+    }
+    return result;
+}
+
 TsumeResult TsumeSearch::visit(int remaining, int ply) {
     ++nodes_;
     if (stop_->load(std::memory_order_relaxed)) {
+        return TsumeResult{TsumeStatus::Cancelled, {}, 0, 0};
+    }
+    if (root_cutoff_ != nullptr && root_index_ > root_cutoff_->load(std::memory_order_relaxed)) {
         return TsumeResult{TsumeStatus::Cancelled, {}, 0, 0};
     }
     if ((nodes_ & 127) == 0 && std::chrono::steady_clock::now() >= deadline_) {
@@ -235,6 +302,14 @@ TsumeResult TsumeSearch::visit(int remaining, int ply) {
     }
     if (remaining == 0) {
         return TsumeResult{TsumeStatus::Limit, {}, 0, 0};
+    }
+
+    // 小さい木は逐次処理。玉方の応手が少ない場合は次の攻方の王手で分割する。
+    if (threads_ > 1 && (ply == 0 || (ply == 1 && attack)) && remaining >= 3 &&
+        moves.size() >= (attack ? 2U : 4U) && (nodes_ >= 512 || moves.size() >= 24)) {
+        const TsumeResult result = visit_parallel(remaining, ply, moves);
+        if (!is_abort(result.status)) store(key, remaining, result);
+        return result;
     }
 
     TsumeResult result{attack ? TsumeStatus::NoMate : TsumeStatus::Mate, {}, 0, 0};

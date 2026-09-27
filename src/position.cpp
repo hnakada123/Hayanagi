@@ -1589,7 +1589,8 @@ bool Position::is_repetition_draw() const {
     }
 
     int occurrences = 0;
-    for (auto node = history_; node != nullptr; node = node->previous) {
+    // この Position が履歴全体を所有するため、走査中の参照カウント更新は不要。
+    for (const HistoryNode* node = history_.get(); node != nullptr; node = node->previous.get()) {
         if (node->key == history_->key && ++occurrences >= 4) {
             return true;
         }
@@ -1611,8 +1612,8 @@ bool Position::is_perpetual_check_loss_for_opponent() const {
     }
 
     int occurrences = 0;
-    std::shared_ptr<const HistoryNode> earliest;
-    for (auto node = history_; node != nullptr; node = node->previous) {
+    const HistoryNode* earliest = nullptr;
+    for (const HistoryNode* node = history_.get(); node != nullptr; node = node->previous.get()) {
         if (node->key == history_->key) {
             ++occurrences;
             earliest = node;
@@ -1625,7 +1626,7 @@ bool Position::is_perpetual_check_loss_for_opponent() const {
         return false;
     }
 
-    for (auto node = history_; node != nullptr; node = node->previous) {
+    for (const HistoryNode* node = history_.get(); node != nullptr; node = node->previous.get()) {
         if (node->side_to_move == side_to_move_ && !node->side_in_check) {
             return false;
         }

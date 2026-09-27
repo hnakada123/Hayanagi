@@ -90,6 +90,7 @@ class Engine:
 class EngineTests(unittest.TestCase):
     executable = None
     baseline = None
+    threads = 1
 
     def setUp(self):
         self.engine = Engine(self.executable)
@@ -97,6 +98,7 @@ class EngineTests(unittest.TestCase):
         self.engine.send('usi')
         self.usi_lines = self.engine.until('usiok')
         self.engine.send('setoption name USI_OwnBook value false')
+        self.engine.send(f'setoption name Threads value {self.threads}')
         self.engine.ready()
 
     def tsume_mode(self):
@@ -151,6 +153,23 @@ class EngineTests(unittest.TestCase):
                 old.send(position)
                 self.engine.send(position)
                 self.assertEqual(old.perft(3)[1], self.engine.perft(3)[1])
+
+    def test_single_thread_search_matches_baseline(self):
+        if self.baseline is None:
+            self.skipTest('Pass --baseline to compare search results')
+        old = Engine(self.baseline)
+        self.addCleanup(old.close)
+        positions = ['position startpos',
+                     'position startpos moves 7g7f 3c3d 8h2b+ 3a2b 2g2f',
+                     'position sfen 4k4/9/9/9/4R4/9/9/9/4K4 w G2P 1']
+        for position in positions:
+            output = []
+            for engine in (old, self.engine):
+                engine.send('setoption name Threads value 1\nsetoption name Hash value 16\n'
+                            'setoption name USI_OwnBook value false\n' + position + '\ngo depth 4')
+                output.append([re.sub(r' time \d+ nps \d+', '', line)
+                               for line in engine.until('bestmove ')])
+            self.assertEqual(output[0], output[1], position)
 
     def test_five_problems_and_reference_solutions(self):
         self.tsume_mode()
@@ -228,12 +247,74 @@ class EngineTests(unittest.TestCase):
         self.engine.process.wait(timeout=5)
         self.assertEqual(self.engine.process.returncode, 0)
 
+    def test_parallel_perft_preserves_divide_and_statistics(self):
+        for position in ('position startpos',
+                         'position startpos moves 7g7f 3c3d 8h2b+ 3a2b 2g2f',
+                         'position sfen 4k4/9/9/9/4R4/9/9/9/4K4 w G2P 1'):
+            self.engine.send(position)
+            for depth in (0, 1, 3):
+                self.engine.send('setoption name Threads value 1')
+                expected_lines, expected = self.engine.perft(depth, divide=True)
+                for threads in (2, 4, 8, 1):
+                    with self.subTest(position=position, depth=depth, threads=threads):
+                        self.engine.send(f'setoption name Threads value {threads}')
+                        lines, actual = self.engine.perft(depth, divide=True)
+                        self.assertEqual(actual, expected)
+                        self.assertEqual(lines[:-1], expected_lines[:-1])
+                        self.assertEqual(self.engine.perft(depth)[1], expected)
+
+    def test_parallel_search_reuse_multipv_and_stop(self):
+        for threads in (4, 2, 8, 1, 4):
+            self.engine.send(f'setoption name Threads value {threads}\nposition startpos')
+            self.engine.send('setoption name MultiPV value 3\ngo depth 3')
+            lines = self.engine.until('bestmove ')
+            for pv in (1, 2, 3):
+                self.assertTrue(any('depth 3 ' in line and f'multipv {pv} ' in line
+                                    for line in lines), lines)
+            self.engine.send('go infinite')
+            self.engine.until('info depth ')
+            self.engine.send('stop')
+            self.engine.until('bestmove ', timeout=3)
+            self.engine.send('setoption name MultiPV value 1\ngo nodes 1000')
+            self.engine.until('bestmove ')
+        self.engine.send('setoption name USI_Ponder value true\ngo ponder depth 2')
+        self.engine.until('info depth 2 ')
+        self.engine.send('ponderhit')
+        self.engine.until('bestmove ', timeout=3)
+
+    def test_parallel_mate_precheck_preserves_result(self):
+        # 通常探索にも攻方玉を含む詰み局面を渡し、事前の王手探索を通す。
+        for problem, _ in PROBLEMS[:4]:
+            board, rest = problem.split(' ', 1)
+            ranks = board.split('/')
+            ranks[-1] = '4K4' if ranks[-1] == '9' else '3+NK4'
+            self.engine.send('position sfen ' + '/'.join(ranks) + ' ' + rest)
+            reference = None
+            for threads in (1, 4, 2):
+                self.engine.send(f'setoption name Threads value {threads}\ngo depth 5')
+                lines = self.engine.until('bestmove ')
+                self.assertTrue(any('score cp 29999 ' in line for line in lines), lines)
+                if reference is None:
+                    reference = lines[-1]
+                self.assertEqual(lines[-1], reference)
+
+    def test_parallel_node_totals_include_unflushed_batches(self):
+        self.engine.send('setoption name MultiPV value 30\nposition startpos')
+        for threads in (1, 4, 8):
+            self.engine.send(f'setoption name Threads value {threads}\ngo depth 1')
+            lines = self.engine.until('bestmove ')
+            counts = [int(re.search(r' nodes (\d+)', line).group(1))
+                      for line in lines if line.startswith('info depth ')]
+            self.assertEqual(counts, [30] * 30)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('engine', type=Path)
     parser.add_argument('--baseline', type=Path)
+    parser.add_argument('--threads', type=int, default=1)
     args, test_args = parser.parse_known_args()
     EngineTests.executable = args.engine.resolve()
     EngineTests.baseline = args.baseline.resolve() if args.baseline else None
+    EngineTests.threads = args.threads
     unittest.main(argv=['test_engine.py'] + test_args, verbosity=2)

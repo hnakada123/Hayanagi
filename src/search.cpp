@@ -566,6 +566,9 @@ void Search::reset_state(const SearchOptions& options,
     options_ = options;
     start_time_ = start_time;
     nodes_ = 0;
+    pending_nodes_ = 0;
+    next_time_check_ = 0;
+    mate_cutoff_ = nullptr;
     tt_generation_ = tt_generation;
     aborted_ = false;
     for (auto& ply_killers : killer_moves_) {
@@ -581,13 +584,22 @@ void Search::reset_state(const SearchOptions& options,
 void Search::count_node() {
     ++nodes_;
     if (shared_nodes_ != nullptr) {
-        shared_nodes_->fetch_add(1, std::memory_order_relaxed);
+        ++pending_nodes_;
+        // ノード制限がある場合は従来通り即時反映。それ以外はまとめて集計する。
+        if (options_.node_limit > 0 || pending_nodes_ >= 128) flush_nodes();
+    }
+}
+
+void Search::flush_nodes() {
+    if (shared_nodes_ != nullptr && pending_nodes_ != 0) {
+        shared_nodes_->fetch_add(pending_nodes_, std::memory_order_relaxed);
+        pending_nodes_ = 0;
     }
 }
 
 std::uint64_t Search::current_nodes() const {
     if (shared_nodes_ != nullptr) {
-        return shared_nodes_->load(std::memory_order_relaxed);
+        return shared_nodes_->load(std::memory_order_relaxed) + pending_nodes_;
     }
     return nodes_;
 }
@@ -626,9 +638,24 @@ SearchResult Search::find_best_move(const Position& root,
     }
     const int multi_pv = std::max(1, std::min(options.multi_pv, static_cast<int>(legal_moves.size())));
 
+    const int thread_count = std::max(1, std::min({options.threads, 128, static_cast<int>(legal_moves.size())}));
+    std::atomic<std::uint64_t> shared_nodes{0};
+    std::vector<Search> workers;
+    if (thread_count > 1) {
+        if (!team_ || team_->size() != static_cast<std::size_t>(thread_count)) {
+            team_ = std::make_unique<ParallelTeam>(thread_count);
+        }
+        workers.resize(static_cast<std::size_t>(thread_count));
+        for (Search& worker : workers) {
+            worker.reset_state(options, stop, start_time_, &shared_nodes, tt_generation);
+        }
+    }
+
     std::vector<Move> mating_line;
     if ((options.infinite || options.max_depth >= 3 || options.time_limit_ms >= 200) &&
-        find_forced_mate(root, kMateSearchMaxPly, mating_line) && !mating_line.empty()) {
+        (thread_count > 1 ? find_forced_mate_parallel(root, kMateSearchMaxPly, mating_line, workers)
+                          : find_forced_mate(root, kMateSearchMaxPly, mating_line)) &&
+        !mating_line.empty()) {
         result.best_move = mating_line.front();
         result.has_best_move = true;
         result.score_cp = kMateScore - 1;
@@ -649,15 +676,7 @@ SearchResult Search::find_best_move(const Position& root,
         return result;
     }
 
-    const int thread_count = std::max(1, std::min(options.threads, static_cast<int>(legal_moves.size())));
-    std::atomic<std::uint64_t> shared_nodes{nodes_};
-    std::vector<Search> workers;
-    if (thread_count > 1) {
-        workers.resize(static_cast<std::size_t>(thread_count));
-        for (Search& worker : workers) {
-            worker.reset_state(options, stop, start_time_, &shared_nodes, tt_generation);
-        }
-    }
+    shared_nodes.store(nodes_, std::memory_order_relaxed);
 
     const auto reported_nodes = [&]() {
         if (thread_count > 1) {
@@ -778,39 +797,16 @@ SearchResult Search::find_best_move(const Position& root,
             }
             last_hashfull = hashfull_permille();
         } else {
-            std::atomic_size_t next_index{0};
-            std::vector<std::thread> threads;
-            threads.reserve(workers.size() > 0 ? workers.size() - 1 : 0);
-
-            auto worker_body = [&](std::size_t worker_index) {
+            team_->run(root_moves.size(), [&](std::size_t move_index, std::size_t worker_index) {
                 Search& worker = workers[worker_index];
-                while (true) {
-                    const std::size_t move_index =
-                        next_index.fetch_add(1, std::memory_order_relaxed);
-                    if (move_index >= root_moves.size()) {
-                        break;
-                    }
-                    root_moves[move_index].score =
-                        worker.search_root_move(root, root_moves[move_index].move, depth);
-                    root_moves[move_index].worker_index = worker_index;
-                    if (worker.aborted_) {
-                        break;
-                    }
-                }
-            };
-
-            for (std::size_t worker_index = 1; worker_index < workers.size(); ++worker_index) {
-                threads.emplace_back(worker_body, worker_index);
-            }
-            worker_body(0);
-            for (std::thread& thread : threads) {
-                thread.join();
-            }
+                if (worker.aborted_) return;
+                root_moves[move_index].score =
+                    worker.search_root_move(root, root_moves[move_index].move, depth);
+                root_moves[move_index].worker_index = worker_index;
+            });
+            for (Search& worker : workers) worker.flush_nodes();
 
             last_hashfull = hashfull_permille();
-            if (next_index.load(std::memory_order_relaxed) < root_moves.size()) {
-                aborted_ = true;
-            }
             for (const Search& worker : workers) {
                 if (worker.aborted_) {
                     aborted_ = true;
@@ -944,8 +940,7 @@ int Search::negamax(const Position& position, int depth, int ply, int alpha, int
         }
     }
 
-    const int static_eval = evaluate(position);
-    if (can_try_null_move(position, depth, beta, static_eval)) {
+    if (can_try_null_move(position, depth, beta)) {
         Position null_position = position.make_null_move();
         const int reduction = kNullMoveBaseReduction + depth / 4;
         const int score =
@@ -1053,7 +1048,7 @@ int Search::quiescence(const Position& position, int ply, int alpha, int beta) {
     for (const OrderedMove& ordered_move : ordered_moves) {
         const Move& move = ordered_move.move;
         const int captured = position.piece_at(move.to);
-        if (!in_check && captured != 0 && position.static_exchange_eval(move) < -120) {
+        if (!in_check && captured != 0 && ordered_move.see < -120) {
             continue;
         }
         Position child = position;
@@ -1138,14 +1133,18 @@ int Search::elapsed_ms() const {
 }
 
 bool Search::should_stop() {
-    if (stop_ != nullptr && stop_->load()) {
+    if (stop_ != nullptr && stop_->load(std::memory_order_relaxed)) {
+        return true;
+    }
+    if (mate_cutoff_ != nullptr && mate_index_ > mate_cutoff_->load(std::memory_order_relaxed)) {
         return true;
     }
     if (options_.node_limit > 0 && current_nodes() >= options_.node_limit) {
         return true;
     }
-    if (!options_.infinite && options_.time_limit_ms > 0 && elapsed_ms() >= options_.time_limit_ms) {
-        return true;
+    if (!options_.infinite && options_.time_limit_ms > 0 && nodes_ >= next_time_check_) {
+        if (elapsed_ms() >= options_.time_limit_ms) return true;
+        next_time_check_ = nodes_ + 128;
     }
     return false;
 }
@@ -1153,7 +1152,8 @@ bool Search::should_stop() {
 int Search::move_order_score(const Position& position,
                              const Move& move,
                              int ply,
-                             const Move& tt_move) const {
+                             const Move& tt_move,
+                             int* see_score) const {
     int score = 0;
     if (same_move(move, tt_move)) {
         score += 4000000;
@@ -1162,6 +1162,7 @@ int Search::move_order_score(const Position& position,
     const int captured = position.piece_at(move.to);
     if (captured != 0) {
         const int see = position.static_exchange_eval(move);
+        if (see_score != nullptr) *see_score = see;
         score += 120000 + piece_value(piece_type(captured)) * 12 + see * 24;
         if (see < 0) {
             score += see * 48;
@@ -1197,7 +1198,9 @@ std::vector<Search::OrderedMove> Search::score_moves(const Position& position,
     ordered_moves.reserve(moves.size());
 
     for (const Move& move : moves) {
-        ordered_moves.push_back(OrderedMove{move, move_order_score(position, move, ply, tt_move)});
+        OrderedMove ordered{move, 0, 0};
+        ordered.score = move_order_score(position, move, ply, tt_move, &ordered.see);
+        ordered_moves.push_back(ordered);
     }
 
     std::sort(ordered_moves.begin(),
@@ -1214,8 +1217,7 @@ bool Search::is_quiet(const Position& position, const Move& move) const {
 
 bool Search::can_try_null_move(const Position& position,
                                int depth,
-                               int beta,
-                               int static_eval) const {
+                               int beta) const {
     if (depth < 3) {
         return false;
     }
@@ -1228,7 +1230,7 @@ bool Search::can_try_null_move(const Position& position,
     if (!has_non_pawn_material(position, position.side_to_move())) {
         return false;
     }
-    return static_eval >= beta - 96 - depth * 16;
+    return evaluate(position) >= beta - 96 - depth * 16;
 }
 
 bool Search::has_non_pawn_material(const Position& position, Color color) const {
@@ -1255,10 +1257,51 @@ bool Search::has_non_pawn_material(const Position& position, Color color) const 
 bool Search::find_forced_mate(const Position& position, int max_ply, std::vector<Move>& pv) {
     pv.clear();
     const int normalized_ply = std::max(1, max_ply | 1);
-    return mate_search_attack(position, normalized_ply, &pv);
+    Position work = position;
+    return mate_search_attack(work, normalized_ply, &pv);
 }
 
-bool Search::mate_search_attack(const Position& position,
+bool Search::find_forced_mate_parallel(const Position& position, int max_ply,
+                                       std::vector<Move>& pv, std::vector<Search>& workers) {
+    pv.clear();
+    if (should_stop()) return false;
+    const auto moves = score_moves(position, position.generate_checking_moves(), 0, Move{});
+    if (moves.size() < 2) return find_forced_mate(position, max_ply, pv);
+    count_node();
+    std::vector<std::vector<Move>> lines(moves.size());
+    std::atomic_size_t cutoff{moves.size()};
+    team_->run(moves.size(), [&](std::size_t index, std::size_t worker_index) {
+        if (index > cutoff.load(std::memory_order_relaxed)) return;
+        Search& worker = workers[worker_index];
+        worker.mate_cutoff_ = &cutoff;
+        worker.mate_index_ = index;
+        worker.aborted_ = false;
+        Position child = position;
+        MoveUndo undo;
+        child.make_move(moves[index].move, undo);
+        if (worker.mate_search_defense(child, std::max(1, max_ply | 1) - 1, &lines[index]) &&
+            !worker.aborted_) {
+            lines[index].insert(lines[index].begin(), moves[index].move);
+            std::size_t previous = cutoff.load(std::memory_order_relaxed);
+            while (index < previous && !cutoff.compare_exchange_weak(
+                       previous, index, std::memory_order_relaxed)) {}
+        } else {
+            lines[index].clear();
+        }
+    });
+    for (Search& worker : workers) {
+        worker.flush_nodes();
+        worker.mate_cutoff_ = nullptr;
+        worker.aborted_ = false;
+        nodes_ += worker.nodes_;
+    }
+    const std::size_t selected = cutoff.load(std::memory_order_relaxed);
+    if (selected == moves.size() || should_stop()) return false;
+    pv = std::move(lines[selected]);
+    return true;
+}
+
+bool Search::mate_search_attack(Position& position,
                                 int remaining_ply,
                                 std::vector<Move>* pv) {
     if (should_stop()) {
@@ -1280,11 +1323,13 @@ bool Search::mate_search_attack(const Position& position,
     const auto ordered_moves = score_moves(position, checking_moves, 0, no_tt_move);
     for (const OrderedMove& ordered_move : ordered_moves) {
         const Move& move = ordered_move.move;
-        Position child = position;
-        child.do_move(move);
+        MoveUndo undo;
+        position.make_move(move, undo);
         std::vector<Move> defense_line;
         std::vector<Move>* next_pv = pv != nullptr ? &defense_line : nullptr;
-        if (mate_search_defense(child, remaining_ply - 1, next_pv)) {
+        const bool mate = mate_search_defense(position, remaining_ply - 1, next_pv);
+        position.unmake_move(move, undo);
+        if (mate) {
             if (pv != nullptr) {
                 pv->clear();
                 pv->push_back(move);
@@ -1300,7 +1345,7 @@ bool Search::mate_search_attack(const Position& position,
     return false;
 }
 
-bool Search::mate_search_defense(const Position& position,
+bool Search::mate_search_defense(Position& position,
                                  int remaining_ply,
                                  std::vector<Move>* pv) {
     if (should_stop()) {
@@ -1327,11 +1372,13 @@ bool Search::mate_search_defense(const Position& position,
 
     for (const OrderedMove& ordered_move : ordered_moves) {
         const Move& move = ordered_move.move;
-        Position child = position;
-        child.do_move(move);
+        MoveUndo undo;
+        position.make_move(move, undo);
         std::vector<Move> attack_line;
         std::vector<Move>* next_pv = pv != nullptr ? &attack_line : nullptr;
-        if (!mate_search_attack(child, remaining_ply - 1, next_pv)) {
+        const bool mate = mate_search_attack(position, remaining_ply - 1, next_pv);
+        position.unmake_move(move, undo);
+        if (!mate) {
             return false;
         }
         if (pv != nullptr) {

@@ -6,10 +6,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "position.h"
+#include "parallel.h"
 
 namespace shogi {
 
@@ -69,6 +71,7 @@ private:
     struct OrderedMove {
         Move move;
         int score = 0;
+        int see = 0;
     };
 
     std::atomic_bool* stop_ = nullptr;
@@ -78,6 +81,11 @@ private:
     std::uint64_t nodes_ = 0;
     std::uint8_t tt_generation_ = 0;
     bool aborted_ = false;
+    std::uint64_t pending_nodes_ = 0;
+    std::uint64_t next_time_check_ = 0;
+    std::unique_ptr<ParallelTeam> team_;
+    const std::atomic_size_t* mate_cutoff_ = nullptr;
+    std::size_t mate_index_ = 0;
     std::array<std::array<Move, 2>, kMaxDepth> killer_moves_{};
     std::array<std::array<std::array<int, kSquareCount>, kHistoryFromBuckets>, 2> history_{};
 
@@ -89,17 +97,20 @@ private:
     int move_order_score(const Position& position,
                          const Move& move,
                          int ply,
-                         const Move& tt_move) const;
+                         const Move& tt_move,
+                         int* see_score = nullptr) const;
     std::vector<OrderedMove> score_moves(const Position& position,
                                          const std::vector<Move>& moves,
                                          int ply,
                                          const Move& tt_move) const;
     bool is_quiet(const Position& position, const Move& move) const;
-    bool can_try_null_move(const Position& position, int depth, int beta, int static_eval) const;
+    bool can_try_null_move(const Position& position, int depth, int beta) const;
     bool has_non_pawn_material(const Position& position, Color color) const;
     bool find_forced_mate(const Position& position, int max_ply, std::vector<Move>& pv);
-    bool mate_search_attack(const Position& position, int remaining_ply, std::vector<Move>* pv);
-    bool mate_search_defense(const Position& position, int remaining_ply, std::vector<Move>* pv);
+    bool find_forced_mate_parallel(const Position& position, int max_ply,
+                                  std::vector<Move>& pv, std::vector<Search>& workers);
+    bool mate_search_attack(Position& position, int remaining_ply, std::vector<Move>* pv);
+    bool mate_search_defense(Position& position, int remaining_ply, std::vector<Move>* pv);
     void record_killer(int ply, const Move& move);
     void record_history(Color color, const Move& move, int depth);
     int history_score(Color color, const Move& move) const;
@@ -109,6 +120,7 @@ private:
                      std::atomic<std::uint64_t>* shared_nodes,
                      std::uint8_t tt_generation);
     void count_node();
+    void flush_nodes();
     std::uint64_t current_nodes() const;
     int search_root_move(const Position& root, const Move& root_move, int depth);
     int hashfull_permille() const;

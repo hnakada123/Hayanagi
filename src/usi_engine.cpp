@@ -226,14 +226,15 @@ bool load_position_from_command(const std::string& line, Position& next) {
     return load_position_from_tokens(tokens, 1, next);
 }
 
-PerftStats perft_stats(const Position& position, int depth) {
+PerftStats perft_stats(Position& position, int depth, std::vector<std::vector<Move>>& buffers) {
     PerftStats stats;
     if (depth <= 0) {
         stats.nodes = 1;
         return stats;
     }
 
-    const auto moves = position.generate_legal_moves();
+    auto& moves = buffers[static_cast<std::size_t>(depth)];
+    position.generate_legal_moves(moves);
     if (depth == 1) {
         for (const Move& move : moves) {
             ++stats.nodes;
@@ -244,30 +245,33 @@ PerftStats perft_stats(const Position& position, int depth) {
                 ++stats.promotions;
             }
 
-            Position child = position;
-            child.do_move(move);
-            const bool gives_check = child.is_in_check(child.side_to_move());
+            MoveUndo undo;
+            position.make_move(move, undo);
+            const bool gives_check = position.is_in_check(position.side_to_move());
             if (gives_check) {
                 ++stats.checks;
-                if (child.generate_legal_moves().empty()) {
+                if (!position.has_legal_move()) {
                     ++stats.mates;
                 }
             }
+            position.unmake_move(move, undo);
         }
         return stats;
     }
 
     for (const Move& move : moves) {
-        Position child = position;
-        child.do_move(move);
-        stats += perft_stats(child, depth - 1);
+        MoveUndo undo;
+        position.make_move(move, undo);
+        stats += perft_stats(position, depth - 1, buffers);
+        position.unmake_move(move, undo);
     }
     return stats;
 }
 
 PerftStats perft_stats_for_root_move(const Position& position, const Move& move, int depth) {
     Position child = position;
-    child.do_move(move);
+    MoveUndo undo;
+    child.make_move(move, undo);
     if (depth == 1) {
         PerftStats stats;
         stats.nodes = 1;
@@ -280,13 +284,14 @@ PerftStats perft_stats_for_root_move(const Position& position, const Move& move,
         const bool gives_check = child.is_in_check(child.side_to_move());
         if (gives_check) {
             ++stats.checks;
-            if (child.generate_legal_moves().empty()) {
+            if (!child.has_legal_move()) {
                 ++stats.mates;
             }
         }
         return stats;
     }
-    return perft_stats(child, depth - 1);
+    std::vector<std::vector<Move>> buffers(static_cast<std::size_t>(depth));
+    return perft_stats(child, depth - 1, buffers);
 }
 
 std::uint64_t compute_nps(std::uint64_t nodes, std::uint64_t elapsed_ms) {
@@ -651,9 +656,10 @@ void UsiEngine::start_tsume(const std::string& line) {
     }
     stop_requested_.store(false);
     searching_.store(true);
-    search_thread_ = std::thread([this, snapshot, attacker, depth, millis]() {
+    const int threads = std::clamp(threads_.load(), 1, kMaxThreads);
+    search_thread_ = std::thread([this, snapshot, attacker, depth, millis, threads]() {
         TsumeSearch solver;
-        const auto result = solver.solve(snapshot, attacker, depth, millis, stop_requested_);
+        const auto result = solver.solve(snapshot, attacker, depth, millis, stop_requested_, threads);
         std::lock_guard<std::mutex> lock(search_state_mutex_);
         if (!suppress_bestmove_) {
             std::cout << "tsume " << tsume_status_text(result.status) << " move "
@@ -828,7 +834,8 @@ void UsiEngine::run_tsume_bench(const std::vector<std::string>& tokens) {
         std::atomic_bool stop{false};
         TsumeSearch solver;
         const auto start = std::chrono::steady_clock::now();
-        const TsumeResult result = solver.solve(position, attacker, entry.depth, millis, stop);
+        const TsumeResult result = solver.solve(position, attacker, entry.depth, millis, stop,
+                                               std::clamp(threads_.load(), 1, kMaxThreads));
         const auto end = std::chrono::steady_clock::now();
         const auto elapsed_ms = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
@@ -871,18 +878,35 @@ void UsiEngine::run_perft(const std::string& line) {
     const auto start = std::chrono::steady_clock::now();
     PerftStats total;
 
-    if (divide && depth > 0) {
+    const int requested_threads = std::clamp(threads_.load(), 1, kMaxThreads);
+    if (depth > 0 && (divide || (requested_threads > 1 && depth >= 3))) {
         const auto moves = snapshot.generate_legal_moves();
-        for (const Move& move : moves) {
-            const PerftStats child_stats = perft_stats_for_root_move(snapshot, move, depth);
+        std::vector<PerftStats> results(moves.size());
+        const int count = depth >= 3 ? std::min(requested_threads, static_cast<int>(moves.size())) : 1;
+        if (count > 1) {
+            if (!perft_team_ || perft_team_->size() != static_cast<std::size_t>(count)) {
+                perft_team_ = std::make_unique<ParallelTeam>(count);
+            }
+            perft_team_->run(moves.size(), [&](std::size_t index, std::size_t) {
+                results[index] = perft_stats_for_root_move(snapshot, moves[index], depth);
+            });
+        } else {
+            for (std::size_t i = 0; i < moves.size(); ++i) {
+                results[i] = perft_stats_for_root_move(snapshot, moves[i], depth);
+            }
+        }
+        for (std::size_t i = 0; i < moves.size(); ++i) {
+            const PerftStats& child_stats = results[i];
             total += child_stats;
-            std::cout << snapshot.move_to_usi(move) << ": " << child_stats.nodes
+            if (!divide) continue;
+            std::cout << snapshot.move_to_usi(moves[i]) << ": " << child_stats.nodes
                       << " captures " << child_stats.captures << " promotions "
                       << child_stats.promotions << " checks " << child_stats.checks
                       << " mates " << child_stats.mates << std::endl;
         }
     } else {
-        total = perft_stats(snapshot, depth);
+        std::vector<std::vector<Move>> buffers(static_cast<std::size_t>(depth) + 1);
+        total = perft_stats(snapshot, depth, buffers);
     }
 
     const auto end = std::chrono::steady_clock::now();

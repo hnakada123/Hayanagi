@@ -14,6 +14,8 @@ using namespace shogi;
 
 namespace {
 
+int test_threads = 1;
+
 struct Problem {
     const char* sfen;
     const char* solution;  // 5 手詰の手順
@@ -57,7 +59,7 @@ Position load(const std::string& sfen, const std::string& moves = "") {
 TsumeResult solve(const Position& position, Color attacker, int depth, int millis = 5000) {
     std::atomic_bool stop{false};
     TsumeSearch solver;
-    return solver.solve(position, attacker, depth, millis, stop);
+    return solver.solve(position, attacker, depth, millis, stop, test_threads);
 }
 
 std::string usi(const Position& position, const TsumeResult& result) {
@@ -94,7 +96,7 @@ void test_pv_reconstruction_with_shared_solver() {
         std::atomic_bool stop{false};
         TsumeSearch solver;
         Position position = load(problem.sfen);
-        TsumeResult result = solver.solve(position, Color::Black, 31, 5000, stop);
+        TsumeResult result = solver.solve(position, Color::Black, 31, 5000, stop, test_threads);
         CHECK_MSG(result.status == TsumeStatus::Mate && result.plies == 5, problem.sfen);
         std::string pv;
         for (int remaining = 5; remaining > 0; --remaining) {
@@ -106,7 +108,7 @@ void test_pv_reconstruction_with_shared_solver() {
             pv += position.move_to_usi(result.move) + " ";
             position.do_move(result.move);
             if (remaining > 1) {
-                result = solver.solve(position, Color::Black, remaining - 1, 5000, stop);
+                result = solver.solve(position, Color::Black, remaining - 1, 5000, stop, test_threads);
             }
         }
         CHECK_MSG(position.side_to_move() == Color::White && position.is_in_check(Color::White) &&
@@ -187,11 +189,11 @@ void test_stop_and_timeout() {
     const Position position = load(kProblems[0].sfen, "3c4c");
     std::atomic_bool stop{true};
     TsumeSearch solver;
-    TsumeResult result = solver.solve(position, Color::Black, 30, 5000, stop);
+    TsumeResult result = solver.solve(position, Color::Black, 30, 5000, stop, test_threads);
     CHECK(result.status == TsumeStatus::Cancelled);
 
     stop.store(false);
-    result = solver.solve(position, Color::Black, 30, 1, stop);
+    result = solver.solve(position, Color::Black, 30, 1, stop, test_threads);
     CHECK(result.status == TsumeStatus::Timeout);
 
     // 別スレッドからの stop に速やかに応答する
@@ -200,7 +202,7 @@ void test_stop_and_timeout() {
         stop.store(true);
     });
     const auto start = std::chrono::steady_clock::now();
-    result = solver.solve(position, Color::Black, 30, 60000, stop);
+    result = solver.solve(position, Color::Black, 30, 60000, stop, test_threads);
     const auto elapsed = std::chrono::steady_clock::now() - start;
     stopper.join();
     CHECK(result.status == TsumeStatus::Cancelled);
@@ -208,7 +210,7 @@ void test_stop_and_timeout() {
 
     // 中断後も同じインスタンスで正しく解ける
     stop.store(false);
-    result = solver.solve(load(kProblems[0].sfen), Color::Black, 5, 5000, stop);
+    result = solver.solve(load(kProblems[0].sfen), Color::Black, 5, 5000, stop, test_threads);
     CHECK(result.status == TsumeStatus::Mate && result.plies == 5);
 }
 
@@ -217,8 +219,8 @@ void test_solver_reuse_is_consistent() {
     TsumeSearch solver;
     // 同じ局面を続けて解いても結果が変わらない
     const Position position = load(kProblems[2].sfen);
-    const TsumeResult first = solver.solve(position, Color::Black, 5, 5000, stop);
-    const TsumeResult second = solver.solve(position, Color::Black, 5, 5000, stop);
+    const TsumeResult first = solver.solve(position, Color::Black, 5, 5000, stop, test_threads);
+    const TsumeResult second = solver.solve(position, Color::Black, 5, 5000, stop, test_threads);
     CHECK(first.status == second.status && first.plies == second.plies);
     CHECK(usi(position, first) == usi(position, second));
 
@@ -257,13 +259,16 @@ void test_depth_zero_and_clamping() {
 }  // namespace
 
 int run_tsume_tests() {
-    test_five_problems();
-    test_pv_reconstruction_with_shared_solver();
-    test_limit_is_not_nomate();
-    test_alternative_and_escape();
-    test_pawn_drop_mate_and_white_attacker();
-    test_stop_and_timeout();
-    test_solver_reuse_is_consistent();
-    test_depth_zero_and_clamping();
+    for (int threads : {1, 4}) {
+        test_threads = threads;
+        test_five_problems();
+        test_pv_reconstruction_with_shared_solver();
+        test_limit_is_not_nomate();
+        test_alternative_and_escape();
+        test_pawn_drop_mate_and_white_attacker();
+        test_stop_and_timeout();
+        test_solver_reuse_is_consistent();
+        test_depth_zero_and_clamping();
+    }
     return test_support::failure_count();
 }

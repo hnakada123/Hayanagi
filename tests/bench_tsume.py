@@ -25,7 +25,7 @@ CASES = [
 
 
 class Engine:
-    def __init__(self, executable):
+    def __init__(self, executable, threads=1):
         self.process = subprocess.Popen(
             [str(executable)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, text=True, encoding='utf-8', bufsize=1)
@@ -33,6 +33,7 @@ class Engine:
         self.until('usiok')
         self.send('setoption name USI_OwnBook value false')
         self.send('setoption name TsumeMode value true')
+        self.send(f'setoption name Threads value {threads}')
         self.send('isready')
         self.until('readyok')
 
@@ -90,10 +91,12 @@ def main():
     parser.add_argument('engine', type=Path)
     parser.add_argument('--baseline', type=Path)
     parser.add_argument('--repeat', type=int, default=3, help='各局面の計測回数（最良値を採用）')
+    parser.add_argument('--threads', type=int, default=1)
+    parser.add_argument('--baseline-threads', type=int, default=1)
     args = parser.parse_args()
 
-    engine = Engine(args.engine.resolve())
-    baseline = Engine(args.baseline.resolve()) if args.baseline else None
+    engine = Engine(args.engine.resolve(), args.threads)
+    baseline = Engine(args.baseline.resolve(), args.baseline_threads) if args.baseline else None
 
     if baseline:
         print('| 局面 | 深さ | 結果 | 旧 nodes | 旧 時間(ms) | 新 nodes | 新 時間(ms) | 倍率 |')

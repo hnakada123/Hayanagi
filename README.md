@@ -4,8 +4,8 @@ Hayanagi は、C++17 で実装した USI プロトコル対応の最小構成将
 通常対局用の探索に加えて、詰将棋用の詰み探索（`TsumeSearch`）を備え、
 将棋 GUI [ShogiBoardQ](https://github.com/hnakada123/ShogiBoardQ) に静的ライブラリとして組み込まれています。
 
-- 現在のバージョン: **1.0.1**（[変更履歴](#バージョンと変更履歴)）
-- USI の `id name` は `Hayanagi 1.0.1`。`./build/hayanagi --version` でも表示できます
+- 現在のバージョン: **1.1.0**（[変更履歴](#バージョンと変更履歴)）
+- USI の `id name` は `Hayanagi 1.1.0`。`./build/hayanagi --version` でも表示できます
 - CMake の生成実行ファイル名は `hayanagi`、組み込み用の静的ライブラリは `hayanagi_tsume`
 - 合法手生成、終局判定、通常探索、詰み探索、`bench` / `perft` をひととおり実装
 
@@ -50,7 +50,7 @@ cmake --build build
 ## 実行例
 
 ```bash
-./build/hayanagi --version   # Hayanagi 1.0.1
+./build/hayanagi --version   # Hayanagi 1.1.0
 ./build/hayanagi             # USI エンジンとして起動
 ```
 
@@ -65,10 +65,10 @@ go nodes 5000
 quit
 ```
 
-`usi` に対しては次のように応答します（`Hayanagi 1.0.1` の出力）。
+`usi` に対しては次のように応答します（`Hayanagi 1.1.0` の出力）。
 
 ```text
-id name Hayanagi 1.0.1
+id name Hayanagi 1.1.0
 id author OpenAI
 option name USI_Ponder type check default false
 option name MultiPV type spin default 1 min 1 max 32
@@ -171,6 +171,11 @@ usiok
 
 `MultiPV` を有効にすると、`info ... multipv N pv ...` を順位ごとに出力します。`GenerateAllLegalMoves` は互換性維持のため残していますが、現在は探索強度を落とさないよう no-op です。
 
+`Threads` は通常探索、通常探索前の詰み確認、`go tsume` / `bench tsume`、`perft` に適用されます。
+既定値は 1、範囲は 1〜128 です。例えば `setoption name Threads value 4` で計算を最大 4 スレッドに分担します
+（USI コマンドを受け付けるスレッドは別）。小さい探索では管理コストを避けるため逐次処理し、
+`perft` は深さ 3 以上で並列化します。`divide` の出力順と各統計はスレッド数によらず同じです。
+
 通常探索の `info` には `depth` / `score cp` / `nodes` / `time` / `nps` / `pv` を出力します。
 
 `USI_Ponder` を有効にすると、通常探索の `bestmove` は `bestmove <move> ponder <move>` を返します。`go ponder` で始めた探索は `ponderhit` または `stop` を受けるまで `bestmove` を返しません。
@@ -196,6 +201,9 @@ usiok
 
 - 反復深化付きの `negamax + alpha-beta` 探索を行います。
 - `Threads > 1` のときは root move 単位で並列探索します。
+- 通常探索前の王手限定探索も候補手で分担し、同じワーカー群を反復深化と次の通常探索で再利用します。
+- ノード数はワーカーごとに数えて 128 ノード単位で集計します。`go nodes` 指定時は毎ノード反映して停止判定の精度を保ちます。
+- 停止要求は毎回確認し、時刻取得は原則 128 ノード間隔です。駒交換評価（SEE）の再計算と、枝刈りに不要な局面評価を省きます。
 - `Hash` オプションでサイズ変更できる lockless 共有置換表、PVS、quiescence search、SEE ベースの着手順序、killer/history heuristic、LMR、null-move pruning を使って探索効率を上げています。
 - 短手数の詰みは専用の王手限定探索で先に検出します。
 - 評価関数は駒得に加え、駒の前進度、利きの広さ、敵陣進出、手駒価値、玉の安全度を見ます。
@@ -233,6 +241,8 @@ usiok
 - 置換表（局面キーは盤面・持駒・手番を含む）には詰みと不詰の証明を深さをまたいで保持します。深さ打ち切りは「その深さまで詰みなし」としてだけ再利用し、不詰の証明とは区別します。
 - 置換表は 4 エントリのバケットを持つ固定サイズの表で、64 KB から始めて必要に応じて 2 倍に拡張し、最大 32 MB に収まります。
 - 同じ `TsumeSearch` を続けて使うと、攻方が同じ間は前回の証明を再利用します（PV の再構成や別詰の数え上げが速くなります）。
+- `threads > 1` を渡すと、十分な探索量がある局面の候補手を並列に調べます。玉方の応手が少ないときは、次の攻方の王手で分担します。各ワーカーは独立した局面・置換表を持ち、反復深化の間は再利用します（置換表の最大 32 MB はワーカーごと）。
+- 結果は候補手の生成順で集約し、最短の詰み手数・玉方の最長抵抗を保ちます。結論が出た後の不要な候補は打ち切ります。
 - `TsumeSearch` と `Position` はグローバルな可変状態を持たないので、スレッドごとに別インスタンスを持てば並行して使えます。
 - 計測結果は [BENCHMARK.md](BENCHMARK.md) を参照してください。
 
@@ -290,7 +300,7 @@ message(STATUS "Hayanagi ${HAYANAGI_VERSION}")           # 組み込み側から
   - `Position::set_sfen(sfen, tsume)`: `tsume=true` で攻方の玉がない局面も受け付け、不正な SFEN では `false` を返します。
   - `Position::generate_legal_moves()`: 打ち歩詰めを除いた全合法手。`generate_checking_moves()`: 合法な王手だけ（打ち駒を含み、成・不成は別の手）。どちらも生成順は安定しており、組み込み側が依存できます。
   - `Position::apply_usi_move` / `do_move` / `make_move` / `unmake_move` / `has_legal_move` / `to_sfen` / `move_to_usi`。
-  - `TsumeSearch::solve(position, attacker, max_plies, time_limit_ms, stop)`: `TsumeResult{status, move, plies, nodes}` を返します。`max_plies` は 63 で丸められ、`stop` は他スレッドから立てると速やかに `Cancelled` で戻ります。
+  - `TsumeSearch::solve(position, attacker, max_plies, time_limit_ms, stop, threads = 1)`: `TsumeResult{status, move, plies, nodes}` を返します。従来の 5 引数呼び出しも利用できます。`max_plies` は 63、`threads` は 1〜128 に丸められ、`stop` は他スレッドから立てると速やかに `Cancelled` で戻ります。CMake ターゲットは `Threads::Threads` を依存先に公開しています。
 - 探索結果の意味を変える改良をしたときは、組み込み側で結果をキャッシュしているキー（ShogiBoardQ では Hayanagi の版を含む）を更新する必要があります。
 
 ## テストとベンチマーク
@@ -301,6 +311,11 @@ message(STATUS "Hayanagi ${HAYANAGI_VERSION}")           # 組み込み側から
 python3 tests/test_engine.py build/hayanagi
 # 変更前の実行ファイルがあれば、通常将棋 4 局面の perft 結果も比較する
 python3 tests/test_engine.py build/hayanagi --baseline /path/to/previous/hayanagi
+python3 tests/test_engine.py build/hayanagi --threads 4 --baseline /path/to/previous/hayanagi
+# 同じスレッド設定で通常探索と perft の実時間を比較（各 5 回の中央値）
+python3 tests/bench_threads.py build/hayanagi --baseline /path/to/previous/hayanagi
+# 詰み探索を 4 スレッドで計測
+python3 tests/bench_tsume.py build/hayanagi --threads 4 --baseline /path/to/previous/hayanagi
 ```
 
 平手初期局面の perft、通常探索の合法着手、5 手詰 5 問、別解、不詰、手数超過、
@@ -336,24 +351,35 @@ python3 tests/bench_tsume.py build/hayanagi [--baseline /path/to/previous/hayana
 | `src/position.h/.cpp` | 局面、SFEN、合法手・王手生成、終局判定 |
 | `src/tsume.h/.cpp` | 詰み探索 `TsumeSearch` |
 | `src/search.h/.cpp` | 通常対局用の探索と評価 |
+| `src/parallel.h` | 再利用可能な並列ワーカー群 |
 | `src/book.h/.cpp` | 定跡の読み込み |
 | `src/usi_engine.h/.cpp`, `src/main.cpp` | USI プロトコル処理、`bench` / `perft` |
 | `src/version.h` | バージョン定義（`HAYANAGI_VERSION`） |
 | `tests/test_engine.py` | USI 回帰テスト |
 | `tests/test_*.cpp`, `tests/test_support.h` | C++ 単体テスト |
 | `tests/bench_tsume.py` | 詰み探索ベンチマーク |
+| `tests/bench_threads.py` | 通常探索・perft のスレッド数別ベンチマーク |
 | `BENCHMARK.md` | ベンチマークの計測結果 |
 
 ## バージョンと変更履歴
 
 バージョンは `src/version.h` の `HAYANAGI_VERSION` が唯一の定義元で、CMake の `project(... VERSION)`、
 USI の `id name`、`--version` はすべてここから読みます。リリース時はこの値と本節を更新し、
-同じ番号のタグ（`v1.0.1` など）を付けます。ShogiBoardQ はタグで指定した版をサブモジュールとして参照します。
+同じ番号のタグ（`v1.1.0` など）を付けます。ShogiBoardQ はタグで指定した版をサブモジュールとして参照します。
 
 | バージョン | タグ | 日付 | 概要 |
 |---|---|---|---|
+| 1.1.0 | [v1.1.0](https://github.com/hnakada123/Hayanagi/releases/tag/v1.1.0) | 2026-09-28 | 詰み確認・詰将棋・perft の並列化、ワーカー再利用、逐次処理の高速化 |
 | 1.0.1 | [v1.0.1](https://github.com/hnakada123/Hayanagi/releases/tag/v1.0.1) | 2026-09-25 | Clang での `-Wsign-conversion` 警告を解消（ShogiBoardQ が参照中） |
 | 1.0.0 | [v1.0.0](https://github.com/hnakada123/Hayanagi/releases/tag/v1.0.0) | 2026-09-25 | 詰み探索と局面処理の高速化、ベンチマーク、単体テスト、バージョン情報 |
+
+### 1.1.0（2026-09-28）
+
+- `Threads` を通常探索前の詰み確認、`go tsume` / `bench tsume`、`perft` に適用しました。小さい探索は逐次処理し、詰み手数・玉方の最長抵抗・perft の統計と出力順を維持します。
+- 通常探索のワーカーを再利用し、共有ノード数の更新をまとめました。局面コピー、メモリー確保、不要な局面評価、SEE の重複計算、履歴走査の参照数更新も削減しました。
+- `TsumeSearch::solve` に省略可能な `threads` 引数を追加しました。既存の 5 引数呼び出しも利用でき、既定値は 1 です。
+- 変更前との実測比較では、1 スレッドの通常探索が 1.12 倍、perft が 2.03 倍、4 スレッドの perft が 7.54 倍、重い詰み探索が約 3 倍になりました（[計測条件と結果](BENCHMARK.md#2026-09-28-並列化と逐次処理の改善)）。
+- 並列処理の回帰テストとスレッド数別ベンチマークを追加し、競合・メモリー・未定義動作・リーク検査を実施しました。
 
 ### 1.0.1（2026-09-25）
 

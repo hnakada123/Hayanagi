@@ -1,12 +1,14 @@
 #pragma once
 
 #include "position.h"
+#include "parallel.h"
 
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace shogi {
@@ -30,7 +32,7 @@ public:
     // position から attacker が王手を続けて max_plies 手以内に詰むかを調べる。
     // 深さ 1,3,5,…（玉方手番なら 0,2,4,…）と延ばし、最初に確定した結果を返す。
     TsumeResult solve(const Position& position, Color attacker, int max_plies,
-                      int time_limit_ms, const std::atomic_bool& stop);
+                      int time_limit_ms, const std::atomic_bool& stop, int threads = 1);
 
 private:
     // 置換表エントリ（16 バイト）。詰み・不詰の証明は深さによらず再利用し、
@@ -53,6 +55,9 @@ private:
     static constexpr std::size_t kMaxTableSize = std::size_t{1} << 21;
 
     TsumeResult visit(int remaining, int ply);
+    TsumeResult visit_parallel(int remaining, int ply, const std::vector<Move>& moves);
+    void prepare(Color attacker, const std::atomic_bool& stop,
+                 std::chrono::steady_clock::time_point deadline);
     bool probe(std::uint64_t key, int remaining, TsumeResult& result) const;
     void store(std::uint64_t key, int remaining, const TsumeResult& result);
     const Entry* find_entry(std::uint64_t key) const;
@@ -73,6 +78,11 @@ private:
     std::vector<Entry> table_;
     std::uint16_t generation_ = 1;
     std::size_t live_entries_ = 0;
+    int threads_ = 1;
+    std::unique_ptr<ParallelTeam> team_;
+    std::vector<TsumeSearch> workers_;
+    const std::atomic_size_t* root_cutoff_ = nullptr;
+    std::size_t root_index_ = 0;
 };
 
 }  // namespace shogi

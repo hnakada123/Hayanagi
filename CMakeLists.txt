@@ -22,6 +22,7 @@ find_package(Threads REQUIRED)
 
 add_library(hayanagi_tsume STATIC src/position.cpp src/tsume.cpp)
 target_include_directories(hayanagi_tsume SYSTEM PUBLIC src)
+target_link_libraries(hayanagi_tsume PUBLIC Threads::Threads)
 set_target_properties(hayanagi_tsume PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
 
 add_executable(hayanagi
@@ -51,6 +52,7 @@ if(HAYANAGI_BUILD_TESTS)
         tests/test_main.cpp
         tests/test_position.cpp
         tests/test_tsume.cpp
+        tests/test_parallel.cpp
     )
     target_link_libraries(hayanagi_tests PRIVATE hayanagi_tsume)
     set_target_properties(hayanagi_tests PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)

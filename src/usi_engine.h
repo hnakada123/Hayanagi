@@ -25,6 +25,7 @@ private:
     bool position_valid_ = true;
     void start_tsume(const std::string& line);
     Search search_;
+    std::unique_ptr<ParallelTeam> perft_team_;
     Book book_;
     mutable std::mutex mutex_;
     mutable std::mutex search_state_mutex_;
