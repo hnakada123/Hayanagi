@@ -360,6 +360,17 @@ void UsiEngine::loop() {
 }
 
 void UsiEngine::handle_line(const std::string& line) {
+    const auto command_tokens = split_tokens(line);
+    if (command_tokens.empty()) return;
+    if (command_tokens[0] == "debug") {
+        if (command_tokens.size() == 2 &&
+            (command_tokens[1] == "on" || command_tokens[1] == "off")) {
+            debug_.store(command_tokens[1] == "on");
+            if (debug_.load()) ProtocolOutput{} << "info string debug on" << std::endl;
+        }
+        return;
+    }
+    if (debug_.load()) ProtocolOutput{} << "info string debug received " << line << std::endl;
     if (line == "usi") {
         ProtocolOutput{} << "id name " << kEngineName << " " << kEngineVersion << std::endl;
         ProtocolOutput{} << "id author OpenAI" << std::endl;
@@ -367,6 +378,8 @@ void UsiEngine::handle_line(const std::string& line) {
                   << (kDefaultUsiPonder ? "true" : "false") << std::endl;
         ProtocolOutput{} << "option name MultiPV type spin default " << kDefaultMultiPv << " min 1 max "
                   << kMaxMultiPv << std::endl;
+        ProtocolOutput{} << "option name USI_ShowCurrLine type check default false" << std::endl;
+        ProtocolOutput{} << "option name USI_ShowRefutations type check default false" << std::endl;
         ProtocolOutput{} << "option name Threads type spin default " << kDefaultThreads << " min 1 max "
                   << kMaxThreads << std::endl;
         ProtocolOutput{} << "option name Hash type spin default " << Search::hash_size_mb() << " min "
@@ -516,7 +529,11 @@ void UsiEngine::set_option(const std::string& line) {
         tsume_mode_ = parse_bool_option(value_token);
     } else if (tokens[2] == "USI_Ponder") {
         usi_ponder_.store(parse_bool_option(value_token, kDefaultUsiPonder));
-    } else if (tokens[2] == "MultiPV") {
+    } else if (tokens[2] == "USI_ShowCurrLine") {
+        show_currline_.store(parse_bool_option(value_token));
+    } else if (tokens[2] == "USI_ShowRefutations") {
+        show_refutations_.store(parse_bool_option(value_token));
+    } else if (tokens[2] == "MultiPV" || tokens[2] == "USI_MultiPV") {
         multi_pv_.store(std::clamp(parse_int(value_token, kDefaultMultiPv), 1, kMaxMultiPv));
     } else if (tokens[2] == "Threads") {
         threads_.store(std::clamp(parse_int(value_token, kDefaultThreads), 1, kMaxThreads));
@@ -604,6 +621,11 @@ void UsiEngine::start_search(const std::string& line) {
         snapshot = position_;
     }
     const SearchOptions options = parse_go_options(line);
+    if (debug_.load()) {
+        ProtocolOutput{} << "info string debug search time_limit_ms " << options.time_limit_ms
+            << " movestogo " << options.moves_to_go << " threads " << options.threads
+            << " restricted " << options.restrict_searchmoves << std::endl;
+    }
     const bool valid = position_valid_ && snapshot.find_king(Color::Black) >= 0 &&
                        snapshot.find_king(Color::White) >= 0;
 
@@ -611,16 +633,24 @@ void UsiEngine::start_search(const std::string& line) {
         const std::string sfen = snapshot.to_sfen();
         const auto* entries = book_.lookup(sfen);
         if (entries && !entries->empty()) {
-            const BookEntry& entry = (*entries)[0];
-            ProtocolOutput{} << "info string book hit " << entry.best_move << " score " << entry.score
-                      << " depth " << entry.depth << " count " << entry.count << std::endl;
-            ProtocolOutput out;
-            out << "bestmove " << entry.best_move;
-            if (usi_ponder_.load() && entry.ponder_move != "none") {
-                out << " ponder " << entry.ponder_move;
+            const auto selected = std::find_if(entries->begin(), entries->end(), [&](const BookEntry& entry) {
+                if (options.restrict_searchmoves && std::find(options.searchmoves.begin(),
+                        options.searchmoves.end(), entry.best_move) == options.searchmoves.end()) return false;
+                Position check = snapshot;
+                return check.apply_usi_move(entry.best_move);
+            });
+            if (selected != entries->end()) {
+                const BookEntry& entry = *selected;
+                ProtocolOutput{} << "info string book hit " << entry.best_move << " score " << entry.score
+                          << " depth " << entry.depth << " count " << entry.count << std::endl;
+                ProtocolOutput out;
+                out << "bestmove " << entry.best_move;
+                if (usi_ponder_.load() && entry.ponder_move != "none") {
+                    out << " ponder " << entry.ponder_move;
+                }
+                out << std::endl;
+                return;
             }
-            out << std::endl;
-            return;
         }
     }
 
@@ -1046,6 +1076,8 @@ bool UsiEngine::set_position(const std::string& line) {
 
 SearchOptions UsiEngine::parse_go_options(const std::string& line) const {
     SearchOptions options;
+    options.show_currline = show_currline_.load();
+    options.show_refutations = show_refutations_.load();
     options.multi_pv = std::clamp(multi_pv_.load(), 1, kMaxMultiPv);
     options.threads = std::clamp(threads_.load(), 1, kMaxThreads);
     const auto tokens = split_tokens(line);
@@ -1060,7 +1092,16 @@ SearchOptions UsiEngine::parse_go_options(const std::string& line) const {
 
     for (std::size_t i = 1; i < tokens.size(); ++i) {
         const std::string& token = tokens[i];
-        if (token == "depth" && i + 1 < tokens.size()) {
+        if (token == "searchmoves") {
+            options.restrict_searchmoves = true;
+            const std::vector<std::string> keywords = {"searchmoves", "depth", "movetime", "ponder",
+                "nodes", "btime", "wtime", "binc", "winc", "byoyomi", "infinite", "movestogo", "mate"};
+            while (i + 1 < tokens.size() && std::find(keywords.begin(), keywords.end(), tokens[i + 1]) == keywords.end()) {
+                options.searchmoves.push_back(tokens[++i]);
+            }
+        } else if (token == "movestogo" && i + 1 < tokens.size()) {
+            options.moves_to_go = std::max(0, parse_int(tokens[++i]));
+        } else if (token == "depth" && i + 1 < tokens.size()) {
             options.max_depth = std::clamp(parse_int(tokens[++i], options.max_depth), 1, kMaxDepth);
         } else if (token == "movetime" && i + 1 < tokens.size()) {
             movetime = std::max(1, parse_int(tokens[++i]));
@@ -1101,7 +1142,8 @@ SearchOptions UsiEngine::parse_go_options(const std::string& line) const {
         const std::int64_t remaining = std::max(0, black_to_move ? black_time : white_time);
         const std::int64_t increment = std::max(0, black_to_move ? black_inc : white_inc);
         const std::int64_t safe_byoyomi = std::max(0, byoyomi);
-        const auto slice = remaining > 0 ? std::max<std::int64_t>(remaining / 30, 50) : 0;
+        const auto slice = remaining > 0 ? std::max<std::int64_t>(
+            remaining / (options.moves_to_go > 0 ? options.moves_to_go : 30), 50) : 0;
         const auto soft_target = std::max<std::int64_t>(
             0, slice * slow_mover_ / 100 + increment + safe_byoyomi - network_delay_ms_);
         const auto hard_cap = std::max<std::int64_t>(
@@ -1128,13 +1170,25 @@ void UsiEngine::print_info(const SearchInfo& info) const {
         } else {
             out << " score cp " << info.score_cp;
         }
+        if (info.score_bound == ScoreBound::Lower) out << " lowerbound";
+        if (info.score_bound == ScoreBound::Upper) out << " upperbound";
     }
     out << " nodes " << info.nodes << " time " << info.elapsed_ms
         << " nps " << compute_nps(info.nodes, info.elapsed_ms)
         << " hashfull " << info.hashfull_permille;
+    if (info.cpuload_permille >= 0) out << " cpuload " << info.cpuload_permille;
     if (!info.current_move.empty()) out << " currmove " << info.current_move;
+    if (info.current_move_number > 0) out << " currmovenumber " << info.current_move_number;
     if (!info.pv.empty()) out << " pv " << info.pv;
     out << std::endl;
+    for (std::size_t i = 0; i < info.current_lines.size(); ++i) {
+        out << "info currline " << (i + 1);
+        if (!info.current_lines[i].empty()) out << " " << info.current_lines[i];
+        out << '\n';
+    }
+    for (const auto& line : info.refutations) {
+        if (!line.empty()) out << "info refutation " << line << '\n';
+    }
 }
 
 }  // namespace shogi

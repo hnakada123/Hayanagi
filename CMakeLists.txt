@@ -53,6 +53,8 @@ if(HAYANAGI_BUILD_TESTS)
         tests/test_position.cpp
         tests/test_tsume.cpp
         tests/test_parallel.cpp
+        tests/test_search.cpp
+        src/search.cpp
     )
     target_link_libraries(hayanagi_tests PRIVATE hayanagi_tsume)
     set_target_properties(hayanagi_tests PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)

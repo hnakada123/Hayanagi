@@ -1,4 +1,5 @@
 #include "search.h"
+#include "cpu_time.h"
 
 #include <algorithm>
 #include <array>
@@ -580,6 +581,11 @@ void Search::reset_state(const SearchOptions& options,
     seldepth_ = 0;
     iteration_depth_ = 0;
     current_move_.clear();
+    current_move_number_ = 0;
+    worker_index_ = 0;
+    current_ply_ = 0;
+    next_line_ms_ = 0;
+    current_path_.fill(Move{});
     progress_.reset();
     mate_cutoff_ = nullptr;
     tt_generation_ = tt_generation;
@@ -617,7 +623,58 @@ std::uint64_t Search::current_nodes() const {
     return nodes_;
 }
 
-int Search::search_root_move(const Position& root, const Move& root_move, int depth) {
+void Search::begin_root_move(const Position& root, const Move& move, std::size_t index) {
+    current_move_ = root.move_to_usi(move);
+    current_move_number_ = static_cast<int>(index) + 1;
+    current_path_[0] = move;
+    current_ply_ = 1;
+    publish_line();
+}
+
+void Search::publish_line(bool idle) {
+    if (idle) {
+        current_ply_ = 0;
+        current_move_.clear();
+        current_move_number_ = 0;
+    }
+    if (!options_.show_currline || !progress_) return;
+    std::string line;
+    if (!idle) {
+        std::vector<Move> moves;
+        for (int ply = 0; ply < current_ply_ && ply < kMaxDepth; ++ply) {
+            // null move より先は実局面の合法手順ではないので通知しない。
+            if (!current_path_[ply].is_valid()) break;
+            moves.push_back(current_path_[ply]);
+        }
+        line = format_pv(progress_->root, moves);
+    }
+    std::lock_guard<std::mutex> lock(progress_->mutex);
+    progress_->lines[worker_index_] = std::move(line);
+}
+
+void Search::record_refutation(const Position& root, const Move& move, int depth, std::size_t index) {
+    if (!options_.show_refutations || aborted_) return;
+    const std::string line = build_pv(root, move, depth);
+    std::lock_guard<std::mutex> lock(progress_->mutex);
+    progress_->refutations[index] = line;
+}
+
+void Search::emit_info(SearchInfo info, bool details) {
+    const double cpu_now = process_cpu_seconds();
+    if (cpu_now >= 0 && progress_->cpu_start >= 0) {
+        const double capacity = static_cast<double>(info.elapsed_ms) * progress_->threads;
+        info.cpuload_permille = capacity <= 0 ? 0 : static_cast<int>(std::clamp(
+            (cpu_now - progress_->cpu_start) * 1000000.0 / capacity, 0.0, 1000.0));
+    }
+    std::lock_guard<std::mutex> lock(progress_->mutex);
+    if (details) {
+        if (options_.show_currline) info.current_lines = progress_->lines;
+        if (options_.show_refutations) info.refutations = progress_->refutations;
+    }
+    progress_->callback(info);
+}
+
+int Search::search_root_move(const Position& root, const Move& root_move, int depth, int alpha, int beta) {
     if (should_stop()) {
         aborted_ = true;
         return 0;
@@ -625,7 +682,7 @@ int Search::search_root_move(const Position& root, const Move& root_move, int de
 
     Position child = root;
     child.do_move(root_move);
-    return -negamax(child, depth - 1, 1, -kInfinity, kInfinity);
+    return -negamax(child, depth - 1, 1, -beta, -alpha);
 }
 
 SearchResult Search::find_best_move(const Position& root,
@@ -636,6 +693,8 @@ SearchResult Search::find_best_move(const Position& root,
     reset_state(options, stop, std::chrono::steady_clock::now(), nullptr, tt_generation);
     progress_ = std::make_shared<Progress>();
     progress_->callback = on_info;
+    progress_->root = root;
+    progress_->cpu_start = process_cpu_seconds();
 
     SearchResult result;
     result.terminal = root.terminal_status();
@@ -646,21 +705,31 @@ SearchResult Search::find_best_move(const Position& root,
         return result;
     }
 
-    auto legal_moves = root.generate_search_legal_moves();
+    auto legal_moves = options.restrict_searchmoves ? root.generate_legal_moves()
+                                                  : root.generate_search_legal_moves();
+    if (options.restrict_searchmoves) {
+        legal_moves.erase(std::remove_if(legal_moves.begin(), legal_moves.end(), [&](const Move& move) {
+            return std::find(options.searchmoves.begin(), options.searchmoves.end(), root.move_to_usi(move)) ==
+                   options.searchmoves.end();
+        }), legal_moves.end());
+    }
     if (legal_moves.empty()) {
         result.elapsed_ms = elapsed_ms();
-        if (root.is_in_check(root.side_to_move())) {
+        if (root.is_in_check(root.side_to_move()) && !root.has_legal_move()) {
             result.score_cp = -kMateScore;
             SearchInfo info;
             info.score_cp = result.score_cp;
             info.elapsed_ms = result.elapsed_ms;
-            on_info(info);
+            emit_info(info);
         }
         return result;
     }
     const int multi_pv = std::max(1, std::min(options.multi_pv, static_cast<int>(legal_moves.size())));
 
     const int thread_count = std::max(1, std::min({options.threads, 128, static_cast<int>(legal_moves.size())}));
+    progress_->threads = thread_count;
+    progress_->lines.resize(static_cast<std::size_t>(thread_count));
+    progress_->refutations.resize(legal_moves.size());
     std::atomic<std::uint64_t> shared_nodes{0};
     std::vector<Search> workers;
     if (thread_count > 1) {
@@ -668,16 +737,19 @@ SearchResult Search::find_best_move(const Position& root,
             team_ = std::make_unique<ParallelTeam>(thread_count);
         }
         workers.resize(static_cast<std::size_t>(thread_count));
-        for (Search& worker : workers) {
+        for (std::size_t i = 0; i < workers.size(); ++i) {
+            Search& worker = workers[i];
             worker.reset_state(options, stop, start_time_, &shared_nodes, tt_generation);
             worker.progress_ = progress_;
+            worker.worker_index_ = i;
         }
     }
 
     std::vector<Move> mating_line;
     iteration_depth_ = kMateSearchMaxPly;
     for (Search& worker : workers) worker.iteration_depth_ = kMateSearchMaxPly;
-    if ((options.infinite || options.max_depth >= 3 || options.time_limit_ms >= 200) &&
+    if (!options.restrict_searchmoves &&
+        (options.infinite || options.max_depth >= 3 || options.time_limit_ms >= 200) &&
         (thread_count > 1 ? find_forced_mate_parallel(root, kMateSearchMaxPly, mating_line, workers)
                           : find_forced_mate(root, kMateSearchMaxPly, mating_line)) &&
         !mating_line.empty()) {
@@ -699,7 +771,8 @@ SearchResult Search::find_best_move(const Position& root,
         info.show_multipv = multi_pv > 1;
         info.pv = format_pv(root, mating_line);
         result.pv = info.pv;
-        on_info(info);
+        if (options.show_refutations) info.refutations.push_back(info.pv);
+        emit_info(info);
         return result;
     }
 
@@ -765,98 +838,143 @@ SearchResult Search::find_best_move(const Position& root,
         std::size_t best_index = 0;
         bool found_move = false;
         int best_score = -kInfinity;
-        int alpha = -kInfinity;
-        const int beta = kInfinity;
+        int window_alpha = -kInfinity;
+        int window_beta = kInfinity;
+        if (multi_pv == 1 && result.completed_depth > 0 &&
+            depth >= options.aspiration_min_depth && options.aspiration_window_cp > 0 &&
+            std::abs(result.score_cp) < kDecisiveThreshold) {
+            const int width = std::min(options.aspiration_window_cp, kInfinity);
+            window_alpha = std::max(-kInfinity, result.score_cp - width);
+            window_beta = std::min(kInfinity, result.score_cp + width);
+        }
+        if (options.show_refutations) {
+            std::lock_guard<std::mutex> lock(progress_->mutex);
+            for (std::size_t i = 0; i < root_moves.size(); ++i) {
+                progress_->refutations[i] = root.move_to_usi(root_moves[i].move);
+            }
+        }
+        for (;;) {
+            found_move = false;
+            best_score = -kInfinity;
+            int alpha = window_alpha;
+            const int beta = window_beta;
+            if (thread_count == 1) {
+                if (multi_pv == 1) {
+                    for (std::size_t move_index = 0; move_index < root_moves.size(); ++move_index) {
+                        if (should_stop()) {
+                            aborted_ = true;
+                            break;
+                        }
 
-        if (thread_count == 1) {
-            if (multi_pv == 1) {
-                for (std::size_t move_index = 0; move_index < root_moves.size(); ++move_index) {
-                    if (should_stop()) {
-                        aborted_ = true;
-                        break;
-                    }
+                        Position child = root;
+                        begin_root_move(root, root_moves[move_index].move, move_index);
+                        child.do_move(root_moves[move_index].move);
 
-                    Position child = root;
-                    current_move_ = root.move_to_usi(root_moves[move_index].move);
-                    child.do_move(root_moves[move_index].move);
-
-                    int score = 0;
-                    if (move_index == 0) {
-                        score = -negamax(child, depth - 1, 1, -beta, -alpha);
-                    } else {
-                        score = -negamax(child, depth - 1, 1, -alpha - 1, -alpha);
-                        if (!aborted_ && score > alpha && score < beta) {
+                        int score = 0;
+                        if (move_index == 0) {
                             score = -negamax(child, depth - 1, 1, -beta, -alpha);
+                        } else {
+                            score = -negamax(child, depth - 1, 1, -alpha - 1, -alpha);
+                            if (!aborted_ && score > alpha && score < beta) {
+                                score = -negamax(child, depth - 1, 1, -beta, -alpha);
+                            }
+                        }
+
+                        if (aborted_) {
+                            break;
+                        }
+                        record_refutation(root, root_moves[move_index].move, depth, move_index);
+                        publish_line(true);
+                        if (!found_move || score > best_score) {
+                            found_move = true;
+                            best_score = score;
+                            best_move = root_moves[move_index].move;
+                            best_index = move_index;
+                        }
+                        alpha = std::max(alpha, best_score);
+                        if (alpha >= beta) break;
+                    }
+                } else {
+                    for (std::size_t move_index = 0; move_index < root_moves.size(); ++move_index) {
+                        RootMove& root_move = root_moves[move_index];
+                        if (should_stop()) {
+                            aborted_ = true;
+                            break;
+                        }
+
+                        Position child = root;
+                        begin_root_move(root, root_move.move, move_index);
+                        child.do_move(root_move.move);
+                        root_move.score = -negamax(child, depth - 1, 1, -kInfinity, kInfinity);
+                        if (aborted_) {
+                            break;
+                        }
+
+                        root_move.pv = build_pv(root, root_move.move, depth);
+                        record_refutation(root, root_move.move, depth, move_index);
+                        publish_line(true);
+                        if (!found_move || root_move.score > best_score) {
+                            found_move = true;
+                            best_score = root_move.score;
+                            best_move = root_move.move;
+                            best_index = move_index;
                         }
                     }
-
-                    if (aborted_) {
-                        break;
-                    }
-                    if (!found_move || score > best_score) {
-                        found_move = true;
-                        best_score = score;
-                        best_move = root_moves[move_index].move;
-                        best_index = move_index;
-                    }
-                    alpha = std::max(alpha, best_score);
                 }
+                last_hashfull = hashfull_permille();
             } else {
-                for (std::size_t move_index = 0; move_index < root_moves.size(); ++move_index) {
-                    RootMove& root_move = root_moves[move_index];
-                    if (should_stop()) {
+                team_->run(root_moves.size(), [&](std::size_t move_index, std::size_t worker_index) {
+                    Search& worker = workers[worker_index];
+                    if (worker.aborted_) return;
+                    worker.begin_root_move(root, root_moves[move_index].move, move_index);
+                    root_moves[move_index].score =
+                        worker.search_root_move(root, root_moves[move_index].move, depth, alpha, beta);
+                    worker.record_refutation(root, root_moves[move_index].move, depth, move_index);
+                    worker.publish_line(true);
+                    root_moves[move_index].worker_index = worker_index;
+                });
+                for (Search& worker : workers) worker.flush_nodes();
+                for (const Search& worker : workers) seldepth_ = std::max(seldepth_, worker.seldepth_);
+
+                last_hashfull = hashfull_permille();
+                for (const Search& worker : workers) {
+                    if (worker.aborted_) {
                         aborted_ = true;
                         break;
                     }
-
-                    Position child = root;
-                    current_move_ = root.move_to_usi(root_move.move);
-                    child.do_move(root_move.move);
-                    root_move.score = -negamax(child, depth - 1, 1, -kInfinity, kInfinity);
-                    if (aborted_) {
-                        break;
-                    }
-
-                    root_move.pv = build_pv(root, root_move.move, depth);
-                    if (!found_move || root_move.score > best_score) {
-                        found_move = true;
-                        best_score = root_move.score;
-                        best_move = root_move.move;
-                        best_index = move_index;
+                }
+                if (!aborted_) {
+                    for (std::size_t move_index = 0; move_index < root_moves.size(); ++move_index) {
+                        const RootMove& root_move = root_moves[move_index];
+                        if (!found_move || root_move.score > best_score) {
+                            found_move = true;
+                            best_score = root_move.score;
+                            best_move = root_move.move;
+                            best_index = move_index;
+                        }
                     }
                 }
             }
-            last_hashfull = hashfull_permille();
-        } else {
-            team_->run(root_moves.size(), [&](std::size_t move_index, std::size_t worker_index) {
-                Search& worker = workers[worker_index];
-                if (worker.aborted_) return;
-                worker.current_move_ = root.move_to_usi(root_moves[move_index].move);
-                root_moves[move_index].score =
-                    worker.search_root_move(root, root_moves[move_index].move, depth);
-                root_moves[move_index].worker_index = worker_index;
-            });
-            for (Search& worker : workers) worker.flush_nodes();
-            for (const Search& worker : workers) seldepth_ = std::max(seldepth_, worker.seldepth_);
 
-            last_hashfull = hashfull_permille();
-            for (const Search& worker : workers) {
-                if (worker.aborted_) {
-                    aborted_ = true;
-                    break;
-                }
+            if (aborted_ || !found_move) break;
+            if (best_score <= window_alpha || best_score >= window_beta) {
+                // 狭い窓を外れた値は、局面全体の上限・下限として通知する。
+                // 完了深さと bestmove は全窓での再探索が完了するまで更新しない。
+                SearchInfo info;
+                info.depth = depth;
+                info.seldepth = seldepth_;
+                info.score_cp = best_score;
+                info.score_bound = best_score <= window_alpha ? ScoreBound::Upper : ScoreBound::Lower;
+                info.elapsed_ms = elapsed_ms();
+                info.nodes = reported_nodes();
+                info.hashfull_permille = last_hashfull;
+                info.pv = build_pv(root, best_move, depth);
+                emit_info(info);
+                window_alpha = -kInfinity;
+                window_beta = kInfinity;
+                continue;
             }
-            if (!aborted_) {
-                for (std::size_t move_index = 0; move_index < root_moves.size(); ++move_index) {
-                    const RootMove& root_move = root_moves[move_index];
-                    if (!found_move || root_move.score > best_score) {
-                        found_move = true;
-                        best_score = root_move.score;
-                        best_move = root_move.move;
-                        best_index = move_index;
-                    }
-                }
-            }
+            break;
         }
 
         if (aborted_ || !found_move) {
@@ -864,7 +982,10 @@ SearchResult Search::find_best_move(const Position& root,
         }
 
         previous_best = best_move;
-        store_tt(root.position_key(), depth, 0, best_score, -kInfinity, kInfinity, best_move);
+        // 初手を制限した値は、全合法手を探索した局面の確定値として保存しない。
+        if (!options.restrict_searchmoves) {
+            store_tt(root.position_key(), depth, 0, best_score, -kInfinity, kInfinity, best_move);
+        }
         std::string pv;
         if (thread_count == 1) {
             pv = build_pv(root, best_move, depth);
@@ -889,7 +1010,7 @@ SearchResult Search::find_best_move(const Position& root,
             info.nodes = result.nodes;
             info.elapsed_ms = result.elapsed_ms;
             info.pv = pv;
-            on_info(info);
+            emit_info(info);
         } else {
             std::sort(root_moves.begin(), root_moves.end(), [](const RootMove& lhs, const RootMove& rhs) {
                 if (lhs.score != rhs.score) {
@@ -916,14 +1037,11 @@ SearchResult Search::find_best_move(const Position& root,
                 info.multipv = pv_index + 1;
                 info.show_multipv = true;
                 info.pv = root_moves[pv_index].pv;
-                on_info(info);
+                emit_info(info);
             }
             result.pv = root_moves.front().pv;
         }
 
-        if (options.infinite) {
-            continue;
-        }
     }
 
     if (!result.has_best_move) {
@@ -933,10 +1051,25 @@ SearchResult Search::find_best_move(const Position& root,
         result.nodes = reported_nodes();
     }
     result.hashfull_permille = last_hashfull;
+    if (options.show_refutations) {
+        SearchInfo info;
+        info.has_score = false;
+        info.depth = result.completed_depth;
+        info.seldepth = seldepth_;
+        info.elapsed_ms = elapsed_ms();
+        info.nodes = reported_nodes();
+        info.hashfull_permille = last_hashfull;
+        {
+            std::lock_guard<std::mutex> lock(progress_->mutex);
+            info.refutations = progress_->refutations;
+        }
+        emit_info(info);
+    }
     return result;
 }
 
 int Search::negamax(const Position& position, int depth, int ply, int alpha, int beta) {
+    current_ply_ = ply;
     seldepth_ = std::max(seldepth_, ply);
     if (should_stop()) {
         aborted_ = true;
@@ -980,6 +1113,7 @@ int Search::negamax(const Position& position, int depth, int ply, int alpha, int
     }
 
     if (can_try_null_move(position, depth, beta)) {
+        current_path_[ply] = Move{};
         Position null_position = position.make_null_move();
         const int reduction = kNullMoveBaseReduction + depth / 4;
         const int score =
@@ -1007,6 +1141,7 @@ int Search::negamax(const Position& position, int depth, int ply, int alpha, int
 
     for (std::size_t move_index = 0; move_index < ordered_moves.size(); ++move_index) {
         const Move& move = ordered_moves[move_index].move;
+        current_path_[ply] = move;
         Position child = position;
         child.do_move(move);
 
@@ -1054,6 +1189,7 @@ int Search::negamax(const Position& position, int depth, int ply, int alpha, int
 }
 
 int Search::quiescence(const Position& position, int ply, int alpha, int beta) {
+    current_ply_ = ply;
     seldepth_ = std::max(seldepth_, ply);
     if (should_stop()) {
         aborted_ = true;
@@ -1093,6 +1229,7 @@ int Search::quiescence(const Position& position, int ply, int alpha, int beta) {
             continue;
         }
         Position child = position;
+        current_path_[ply] = move;
         child.do_move(move);
         const int score = -quiescence(child, ply + 1, -beta, -alpha);
         if (aborted_) {
@@ -1190,6 +1327,10 @@ bool Search::should_stop() {
             return true;
         }
         next_time_check_ = nodes_ + 128;
+        if (options_.show_currline && millis >= next_line_ms_) {
+            next_line_ms_ = millis + 100;
+            publish_line();
+        }
         int next_ms = progress_ ? progress_->next_ms.load(std::memory_order_relaxed) : 0;
         // 担当ワーカーが先に終了しても通知が続くよう、全ワーカーで送信時刻を共有する。
         if (progress_ && millis >= next_ms && progress_->next_ms.compare_exchange_strong(
@@ -1202,8 +1343,8 @@ bool Search::should_stop() {
             info.elapsed_ms = millis;
             info.hashfull_permille = hashfull_permille();
             info.current_move = current_move_;
-            std::lock_guard<std::mutex> lock(progress_->mutex);
-            progress_->callback(info);
+            info.current_move_number = current_move_number_;
+            emit_info(info, true);
         }
     }
     return false;
@@ -1333,7 +1474,7 @@ bool Search::find_forced_mate_parallel(const Position& position, int max_ply,
     team_->run(moves.size(), [&](std::size_t index, std::size_t worker_index) {
         if (index > cutoff.load(std::memory_order_relaxed)) return;
         Search& worker = workers[worker_index];
-        worker.current_move_ = position.move_to_usi(moves[index].move);
+        worker.begin_root_move(position, moves[index].move, index);
         worker.mate_cutoff_ = &cutoff;
         worker.mate_index_ = index;
         worker.aborted_ = false;
@@ -1349,6 +1490,7 @@ bool Search::find_forced_mate_parallel(const Position& position, int max_ply,
         } else {
             lines[index].clear();
         }
+        worker.publish_line(true);
     });
     for (Search& worker : workers) {
         worker.flush_nodes();
@@ -1366,6 +1508,7 @@ bool Search::mate_search_attack(Position& position,
                                 int remaining_ply,
                                 std::vector<Move>* pv) {
     seldepth_ = std::max(seldepth_, kMateSearchMaxPly - remaining_ply);
+    current_ply_ = kMateSearchMaxPly - remaining_ply;
     if (should_stop()) {
         aborted_ = true;
         return false;
@@ -1383,9 +1526,10 @@ bool Search::mate_search_attack(Position& position,
 
     const Move no_tt_move;
     const auto ordered_moves = score_moves(position, checking_moves, 0, no_tt_move);
-    for (const OrderedMove& ordered_move : ordered_moves) {
-        const Move& move = ordered_move.move;
-        if (remaining_ply == kMateSearchMaxPly) current_move_ = position.move_to_usi(move);
+    for (std::size_t index = 0; index < ordered_moves.size(); ++index) {
+        const Move& move = ordered_moves[index].move;
+        current_path_[kMateSearchMaxPly - remaining_ply] = move;
+        if (remaining_ply == kMateSearchMaxPly) begin_root_move(position, move, index);
         MoveUndo undo;
         position.make_move(move, undo);
         std::vector<Move> defense_line;
@@ -1412,6 +1556,7 @@ bool Search::mate_search_defense(Position& position,
                                  int remaining_ply,
                                  std::vector<Move>* pv) {
     seldepth_ = std::max(seldepth_, kMateSearchMaxPly - remaining_ply);
+    current_ply_ = kMateSearchMaxPly - remaining_ply;
     if (should_stop()) {
         aborted_ = true;
         return false;
@@ -1436,6 +1581,7 @@ bool Search::mate_search_defense(Position& position,
 
     for (const OrderedMove& ordered_move : ordered_moves) {
         const Move& move = ordered_move.move;
+        current_path_[kMateSearchMaxPly - remaining_ply] = move;
         MoveUndo undo;
         position.make_move(move, undo);
         std::vector<Move> attack_line;

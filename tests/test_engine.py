@@ -175,7 +175,7 @@ class EngineTests(unittest.TestCase):
             for engine in (old, self.engine):
                 engine.send('setoption name Threads value 1\nsetoption name Hash value 16\n'
                             'setoption name USI_OwnBook value false\n' + position + '\ngo depth 4')
-                output.append([re.sub(r' time \d+ nps \d+| seldepth \d+| hashfull \d+', '', line)
+                output.append([re.sub(r' time \d+ nps \d+| seldepth \d+| hashfull \d+| cpuload \d+', '', line)
                                for line in engine.until('bestmove ')])
             self.assertEqual(output[0], output[1], position)
 
@@ -470,6 +470,137 @@ class EngineTests(unittest.TestCase):
             self.assertEqual(self.engine.until('readyok')[-1], 'readyok')
         self.engine.send('stop')
         self.engine.until('bestmove ', timeout=3)
+
+    def test_searchmoves_restriction_and_multipv(self):
+        allowed = {'7g7f', '2g2f'}
+        for threads in (1, 4):
+            self.engine.send(f'setoption name Threads value {threads}\n'
+                             'setoption name MultiPV value 32\nposition startpos\n'
+                             'go searchmoves 7g7f 2g2f 7g7f invalid 9a9b depth 3')
+            lines = self.engine.until('bestmove ')
+            self.assertIn(lines[-1].split()[1], allowed)
+            pvs = [line for line in lines if ' pv ' in line]
+            self.assertEqual(len(pvs), 6, lines)
+            self.assertEqual({line.split(' pv ')[1].split()[0] for line in pvs}, allowed)
+            self.assertTrue(all(re.search(r' multipv [12] ', line) for line in pvs), lines)
+            for empty in ('', 'invalid 9a9b'):
+                self.engine.send('go depth 1 searchmoves ' + empty)
+                self.assertEqual(self.engine.until('bestmove ')[-1], 'bestmove resign')
+            self.engine.send('go depth 1')
+            self.assertNotEqual(self.engine.until('bestmove ')[-1], 'bestmove resign')
+        # 探索用の枝刈りで省略される不成も、明示的に指定した場合は探索する。
+        self.engine.send('setoption name GenerateAllLegalMoves value false\n'
+                         'position sfen 4k4/9/4P4/9/9/9/9/9/4K4 b - 1\n'
+                         'go depth 1 searchmoves 5c5b')
+        self.assertEqual(self.engine.until('bestmove ')[-1], 'bestmove 5c5b')
+
+    def test_searchmoves_mate_precheck_and_early_stop(self):
+        position = 'position sfen 9/9/6R1+R/5k3/9/7+S1/9/9/4K4 b 2b4g3s4n4l18p 1'
+        for threads in (1, 4):
+            self.engine.send(f'setoption name Threads value {threads}\n' + position +
+                             '\ngo depth 5 nodes 100 searchmoves 1c1b')
+            self.assertEqual(self.engine.until('bestmove ')[-1], 'bestmove 1c1b')
+            self.engine.send('position startpos\ngo infinite searchmoves 2g2f\nstop')
+            self.assertEqual(self.engine.until('bestmove ')[-1], 'bestmove 2g2f')
+
+    def test_searchmoves_book_filter(self):
+        with tempfile.TemporaryDirectory(prefix='hayanagi restricted book ') as directory:
+            Path(directory, 'standard_book.db').write_text(
+                '#YANEURAOU-DB2016 1.00\n'
+                'sfen lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1\n'
+                '7g7f 3c3d 10 1 1\n', encoding='utf-8')
+            self.engine.send(f'setoption name BookDir value {directory}\n'
+                             'setoption name USI_OwnBook value true\nisready')
+            self.engine.until('readyok')
+            for move in ('7g7f', '2g2f'):
+                self.engine.send(f'position startpos\ngo depth 1 searchmoves {move}')
+                lines = self.engine.until('bestmove ')
+                self.assertEqual(lines[-1], 'bestmove ' + move)
+                self.assertEqual(any('book hit' in line for line in lines), move == '7g7f')
+
+    def test_debug_and_movestogo_time_allocation(self):
+        self.assertFalse(any('debug ' in line for line in self.engine.ready()))
+        self.engine.send('debug on\nposition startpos')
+        for moves, expected in ((1, 60000), (10, 6000), (30, 2000), (0, 2000), (-2, 2000)):
+            self.engine.send(f'go btime 60000 wtime 60000 movestogo {moves} nodes 1')
+            lines = self.engine.until('bestmove ')
+            self.assertTrue(any(f'debug search time_limit_ms {expected} ' in line for line in lines), lines)
+        self.engine.send('go btime 60000 wtime 60000 movestogo 10 movetime 70 nodes 1')
+        self.assertTrue(any('debug search time_limit_ms 70 ' in line for line in self.engine.until('bestmove ')))
+        self.engine.send('go infinite searchmoves 7g7f 2g2f')
+        self.engine.until('info depth ')
+        self.assertTrue(any('debug received isready' in line for line in self.engine.ready()))
+        self.engine.send('debug off\nisready')
+        self.assertFalse(any('debug ' in line for line in self.engine.until('readyok')))
+        self.engine.send('stop')
+        self.engine.until('bestmove ', timeout=3)
+
+    def test_refutations_option_and_legal_replies(self):
+        self.assertIn('option name USI_ShowRefutations type check default false', self.usi_lines)
+        for threads in (1, 4):
+            self.engine.send(f'setoption name Threads value {threads}\nsetoption name Hash value 1\n'
+                             'setoption name USI_ShowRefutations value true\nposition startpos\n'
+                             'go depth 3 searchmoves 7g7f 2g2f')
+            lines = self.engine.until('bestmove ')
+            replies = [line.split()[2:] for line in lines if line.startswith('info refutation ')]
+            self.assertEqual(len(replies), 2, lines)
+            self.assertEqual({moves[0] for moves in replies}, {'7g7f', '2g2f'})
+            self.assertTrue(all(len(moves) >= 2 for moves in replies), replies)
+            for moves in replies:
+                self.engine.send('position startpos moves ' + ' '.join(moves))
+                self.assertEqual(self.engine.ready(), ['readyok'])
+            self.engine.send('setoption name USI_ShowRefutations value false\nposition startpos\ngo depth 2')
+            self.assertFalse(any('refutation ' in line for line in self.engine.until('bestmove ')))
+
+    def test_score_bounds_precede_exact_research(self):
+        self.engine.send('setoption name Threads value 1\nsetoption name Hash value 16\n'
+                         'position sfen 4k4/9/9/9/4R4/9/9/9/4K4 w G2P 1\ngo depth 5')
+        lines = self.engine.until('bestmove ')
+        bounds = [(i, line) for i, line in enumerate(lines) if 'bound ' in line]
+        self.assertTrue(bounds, lines)
+        for index, line in bounds:
+            depth = re.search(r'depth (\d+)', line)[1]
+            value = int(re.search(r'score cp (-?\d+)', line)[1])
+            exact = next((candidate for candidate in lines[index + 1:]
+                          if candidate.startswith('info depth ' + depth + ' ') and
+                          ' score cp ' in candidate and 'bound ' not in candidate), None)
+            self.assertIsNotNone(exact, lines)
+            final = int(re.search(r'score cp (-?\d+)', exact)[1])
+            if 'upperbound' in line:
+                self.assertGreaterEqual(value, final)
+            else:
+                self.assertLessEqual(value, final)
+
+    def test_currline_all_workers_and_cpu_load(self):
+        self.assertIn('option name USI_ShowCurrLine type check default false', self.usi_lines)
+        allowed = {'7g7f', '2g2f', '5g5f', '3g3f'}
+        for threads in (1, 4):
+            self.engine.send(f'setoption name Threads value {threads}\nsetoption name Hash value 1\n'
+                             'setoption name USI_ShowCurrLine value true\nposition startpos\n'
+                             'go infinite searchmoves 7g7f 2g2f 5g5f 3g3f')
+            lines = self.engine.until('info currline 1', timeout=5)
+            if threads > 1:
+                lines += self.engine.until(f'info currline {threads}', timeout=3)
+            self.engine.send('stop')
+            lines += self.engine.until('bestmove ', timeout=3)
+            current = [line.split()[2:] for line in lines if line.startswith('info currline ')]
+            self.assertEqual([int(fields[0]) for fields in current], list(range(1, threads + 1)), lines)
+            metrics = [line for line in lines if ' currmovenumber ' in line]
+            self.assertTrue(metrics, lines)
+            for line in metrics:
+                self.assertIn(int(re.search(r'currmovenumber (\d+)', line)[1]), range(1, 5))
+                self.assertIn(int(re.search(r'cpuload (\d+)', line)[1]), range(1, 1001))
+                self.assertIn(re.search(r'currmove (\S+)', line)[1], allowed)
+            # 初手の直後や null move の探索中は、合法な接頭辞が1手だけの場合もある。
+            self.assertTrue(any(len(fields) > 1 for fields in current), current)
+            for fields in current:
+                if len(fields) == 1:  # 担当する候補手が終了したワーカー
+                    continue
+                self.assertIn(fields[1], allowed)
+                self.engine.send('position startpos moves ' + ' '.join(fields[1:]))
+                self.assertEqual(self.engine.ready(), ['readyok'])
+        self.engine.send('setoption name USI_ShowCurrLine value false\nposition startpos\ngo depth 3')
+        self.assertFalse(any('currline ' in line for line in self.engine.until('bestmove ')))
 
 
 if __name__ == '__main__':

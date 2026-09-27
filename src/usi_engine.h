@@ -36,6 +36,9 @@ private:
     std::atomic_bool stop_requested_{false};
     std::atomic_bool searching_{false};
     std::atomic_bool usi_ponder_{false};
+    std::atomic_bool debug_{false};
+    std::atomic_bool show_currline_{false};
+    std::atomic_bool show_refutations_{false};
     std::atomic_int multi_pv_{1};
     std::atomic_int threads_{1};
     PositionRules position_rules_{};

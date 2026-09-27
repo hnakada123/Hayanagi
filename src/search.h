@@ -25,19 +25,33 @@ struct SearchOptions {
     std::uint64_t node_limit = 0;
     int multi_pv = 1;
     int threads = 1;
+    int moves_to_go = 0;
+    bool restrict_searchmoves = false;
+    std::vector<std::string> searchmoves;
+    bool show_currline = false;
+    bool show_refutations = false;
+    int aspiration_min_depth = 5;
+    int aspiration_window_cp = 50;
 };
+
+enum class ScoreBound { Exact, Lower, Upper };
 
 struct SearchInfo {
     int depth = 0;
     int seldepth = 0;
     int score_cp = 0;
     bool has_score = true;
+    ScoreBound score_bound = ScoreBound::Exact;
     std::uint64_t nodes = 0;
     int elapsed_ms = 0;
     int multipv = 1;
     bool show_multipv = false;
     int hashfull_permille = 0;
     std::string current_move;
+    int current_move_number = 0;
+    int cpuload_permille = -1;
+    std::vector<std::string> current_lines;
+    std::vector<std::string> refutations;
     std::string pv;
 };
 
@@ -71,6 +85,11 @@ private:
         std::atomic_int next_ms{1000};
         std::mutex mutex;
         std::function<void(const SearchInfo&)> callback;
+        Position root;
+        int threads = 1;
+        double cpu_start = 0;
+        std::vector<std::string> lines;
+        std::vector<std::string> refutations;
     };
 
     struct RootMove {
@@ -99,6 +118,11 @@ private:
     int seldepth_ = 0;
     int iteration_depth_ = 0;
     std::string current_move_;
+    int current_move_number_ = 0;
+    std::size_t worker_index_ = 0;
+    int current_ply_ = 0;
+    int next_line_ms_ = 0;
+    std::array<Move, kMaxDepth + 1> current_path_{};
     std::shared_ptr<Progress> progress_;
     std::unique_ptr<ParallelTeam> team_;
     const std::atomic_size_t* mate_cutoff_ = nullptr;
@@ -139,7 +163,11 @@ private:
     void count_node();
     void flush_nodes();
     std::uint64_t current_nodes() const;
-    int search_root_move(const Position& root, const Move& root_move, int depth);
+    int search_root_move(const Position& root, const Move& root_move, int depth, int alpha, int beta);
+    void begin_root_move(const Position& root, const Move& move, std::size_t index);
+    void publish_line(bool idle = false);
+    void record_refutation(const Position& root, const Move& move, int depth, std::size_t index);
+    void emit_info(SearchInfo info, bool details = false);
     int hashfull_permille() const;
     std::string format_pv(const Position& root, const std::vector<Move>& moves) const;
     std::string build_pv(const Position& root, const Move& root_move, int max_length) const;

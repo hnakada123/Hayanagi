@@ -4,8 +4,8 @@ Hayanagi は、C++17 で実装した USI プロトコル対応の最小構成将
 通常対局用の探索に加えて、詰将棋用の詰み探索（`TsumeSearch`）を備え、
 将棋 GUI [ShogiBoardQ](https://github.com/hnakada123/ShogiBoardQ) に静的ライブラリとして組み込まれています。
 
-- 現在のバージョン: **1.2.0**（[変更履歴](#バージョンと変更履歴)）
-- USI の `id name` は `Hayanagi 1.2.0`。`./build/hayanagi --version` でも表示できます
+- 現在のバージョン: **1.3.0**（[変更履歴](#バージョンと変更履歴)）
+- USI の `id name` は `Hayanagi 1.3.0`。`./build/hayanagi --version` でも表示できます
 - CMake の生成実行ファイル名は `hayanagi`、組み込み用の静的ライブラリは `hayanagi_tsume`
 - 合法手生成、終局判定、通常探索、詰み探索、`bench` / `perft` をひととおり実装
 
@@ -50,7 +50,7 @@ cmake --build build
 ## 実行例
 
 ```bash
-./build/hayanagi --version   # Hayanagi 1.2.0
+./build/hayanagi --version   # Hayanagi 1.3.0
 ./build/hayanagi             # USI エンジンとして起動
 ```
 
@@ -65,13 +65,15 @@ go nodes 5000
 quit
 ```
 
-`usi` に対しては次のように応答します（`Hayanagi 1.2.0` の出力）。
+`usi` に対しては次のように応答します（`Hayanagi 1.3.0` の出力）。
 
 ```text
-id name Hayanagi 1.2.0
+id name Hayanagi 1.3.0
 id author OpenAI
 option name USI_Ponder type check default false
 option name MultiPV type spin default 1 min 1 max 32
+option name USI_ShowCurrLine type check default false
+option name USI_ShowRefutations type check default false
 option name Threads type spin default 1 min 1 max 128
 option name Hash type spin default 16 min 1 max 65536
 option name USI_Hash type spin default 16 min 1 max 65536
@@ -120,6 +122,8 @@ usiok
 - `go depth N`
 - `go movetime N`
 - `go nodes N`
+- `go ... searchmoves <move1> <move2> ...`（探索する初手を指定）
+- `go ... movestogo N`（次の時間更新までの自分の残り着手数）
 - `go ponder ...`
 - `go infinite`（`stop` まで `bestmove` を返さない）
 - `go mate <ミリ秒|infinite>`（標準の詰将棋解答。`checkmate` で全手順を返す）
@@ -130,6 +134,9 @@ usiok
 - `setoption name BookFile value <file>`（`no_book` / `standard_book.db` / `yaneura_book1.db`〜`yaneura_book4.db` / `user_book1.db`〜`user_book3.db`）
 - `setoption name USI_Ponder value <bool>`
 - `setoption name MultiPV value N`
+- `setoption name USI_MultiPV value N`（`MultiPV` の別名）
+- `setoption name USI_ShowCurrLine value <bool>`
+- `setoption name USI_ShowRefutations value <bool>`
 - `setoption name Threads value N`
 - `setoption name Hash value N`（MB 単位）
 - `setoption name USI_Hash value N`（標準名。`Hash` と同じ置換表を設定）
@@ -144,6 +151,7 @@ usiok
 - `setoption name TsumeMode value <bool>`（片玉の局面を受け付ける）
 - `stop`
 - `ponderhit`
+- `debug on|off`（診断情報の切り替え）
 - `gameover win|lose|draw`（進行中の探索と先読みを終了）
 - `quit`
 - `bench depth N`
@@ -159,6 +167,8 @@ usiok
 - `BookDir`
 - `BookFile`
 - `MultiPV`
+- `USI_ShowCurrLine`
+- `USI_ShowRefutations`
 - `Threads`
 - `Hash`
 - `USI_Hash`（`Hash` の別名）
@@ -177,25 +187,52 @@ usiok
 
 `MultiPV` を有効にすると、`info ... multipv N pv ...` を順位ごとに出力します。`GenerateAllLegalMoves` は互換性維持のため残していますが、現在は探索強度を落とさないよう no-op です。
 
+`searchmoves` は初手だけを制限します。例えば `go depth 6 searchmoves 7g7f 2g2f` は、
+その2手のいずれかを初手とする手順を探索します。定跡も指定された合法手から選び、
+詰み確認や中断時の代替手が制限を迂回することはありません。重複・不正・非合法な指し手は除き、
+候補が空なら `bestmove resign` を返します。制限は次の `go` に引き継ぎません。
+`MultiPV` の出力数は制限後の合法な候補数が上限です。
+
+`movestogo N` を指定すると、持ち時間を N で割った値を時間配分の基準にします。
+未指定または N が0以下なら従来の30手分配を使います。加算・秒読み・通信遅延・
+持ち時間による上限も適用し、`movetime` 指定がある場合はそちらを優先します。
+
 `Threads` は通常探索、通常探索前の詰み確認、`go mate` / `go tsume` / `bench tsume`、`perft` に適用されます。
 既定値は 1、範囲は 1〜128 です。例えば `setoption name Threads value 4` で計算を最大 4 スレッドに分担します
 （USI コマンドを受け付けるスレッドは別）。小さい探索では管理コストを避けるため逐次処理し、
 `perft` は深さ 3 以上で並列化します。`divide` の出力順と各統計はスレッド数によらず同じです。
 
-通常探索の `info` には `depth` / `seldepth` / `score cp` / `nodes` / `time` / `nps` / `hashfull` / `pv` を出力します。
+通常探索の `info` には `depth` / `seldepth` / `score cp` / `nodes` / `time` / `nps` / `hashfull` / `cpuload` / `pv` を出力します。
 詰みを見つけた場合は `score mate N`、詰まされる場合は `score mate -N` で手数を通知します。
 入玉宣言や連続王手の千日手による勝敗は詰みとは区別します。
-探索中は約1秒間隔でノード数・ハッシュ使用率・現在の候補手 `currmove` も通知します。
-評価値は完了した反復の値を通知し、未確定の境界値（`lowerbound` / `upperbound`）は出力しません。
+探索中は約1秒間隔でノード数・ハッシュ使用率・現在の候補手 `currmove` と、探索順で1から数えた `currmovenumber` も通知します。
+`cpuload` は探索開始以降のプロセス CPU 時間を、経過時間と実際の探索ワーカー数で割った使用率です。
+全ワーカーを使い切った状態を1000とし、0〜1000で通知します。CPU 時間を取得できない環境では省略します。
+
+通常探索の SinglePV では深さ5以降、直前の評価値の周囲を先に調べる aspiration window を使います。
+評価値が探索窓を外れた場合は、確認できた下限に `lowerbound`、上限に `upperbound` を付けて通知します。
+その後は探索窓を広げて再探索し、値が確定するまで完了深さと最善手を更新しません。
+再探索中の `stop` では、最後に完了した反復の最善手を返します。
+
+`USI_ShowCurrLine` を true にすると、各ワーカーの探索中の合法手順を `info currline <番号> <手順>` で通知します。
+ワーカー番号は1から始まり、全ワーカー分をまとめて約1秒間隔で出力します。手順は約100ミリ秒間隔で採取し、
+待機中のワーカーは手順を空にします。探索内部の null move より先は通知しません。
+`USI_ShowRefutations` を true にすると、各候補手について探索から得られた応手・手順を `info refutation <初手> <応手…>` で通知します。
+応手が得られていない場合は初手だけを返し、探索中の定期通知と探索終了時に出力します。
+両オプションとも既定は false で、次の `go` から反映します。
+
+`debug on` は受信コマンドや探索の時間配分を `info string debug ...` で通知します。
+既定は off です。探索中でも `debug on` / `debug off` を切り替えられます。
 
 `USI_Ponder` を有効にすると、通常探索の `bestmove` は `bestmove <move> ponder <move>` を返します。`go ponder` で始めた探索は `ponderhit` または `stop` を受けるまで `bestmove` を返しません。
 `go infinite` は、詰みや終局を検出した場合も `stop` を待ちます。無制限探索では定跡による即時返答を行いません。
 `gameover` / `position` / `usinewgame` / `quit` は古い探索結果を破棄します。
 コマンドは LF・CRLF に対応し、`BookDir` には空白を含むパスも指定できます。
 
-[将棋所のUSI仕様](https://shogidokoro2.stars.ne.jp/usi.html)に記載された原案の追加機能のうち、
-`debug` / `register` / `registration`、`go searchmoves` / `movestogo`、
-`info currmovenumber` / `cpuload` / `refutation` / `currline` は未対応です。
+[将棋所のUSI仕様](https://shogidokoro2.stars.ne.jp/usi.html)に掲載された原案の未対応コマンド一覧のうち、
+Hayanagi では利用者登録用の `register` / `registration` を除いて実装しています。
+`searchmoves` / `movestogo` や追加の探索情報の意味は [USI原案](https://hgm.nubati.net/usi.html) に従います。
+これらの追加機能は将棋所自身では未対応のため、対応 GUI や検証ツールから利用してください。
 
 ## 実装概要
 
@@ -362,6 +399,8 @@ python3 tests/bench_tsume.py build/hayanagi --threads 4 --baseline /path/to/prev
 後手攻方、打ち歩詰め、入力不正、時間切れ、中止・局面切替、`id name` の形式を検証します。
 標準 `go mate` の全手順、符号付き詰みスコア、`USI_Hash`、`gameover`、
 詰み・定跡がある場合の無制限探索、先読み、CRLF、空白付き定跡パス、探索情報の出力も検証します。
+初手制限と定跡・MultiPV・中断の組み合わせ、残り着手数による時間配分、診断切り替え、
+全ワーカーの合法な探索手順・反駁手順・CPU 使用率、上下限からの再探索と中断も検証します。
 
 C++ の単体テスト `hayanagi_tests` は、Hayanagi 自体をビルドしたときだけ既定で生成されます
 （`add_subdirectory` で組み込んだ場合は `-DHAYANAGI_BUILD_TESTS=ON` で有効化）。
@@ -396,6 +435,7 @@ python3 tests/bench_tsume.py build/hayanagi [--baseline /path/to/previous/hayana
 | `src/parallel.h` | 再利用可能な並列ワーカー群 |
 | `src/book.h/.cpp` | 定跡の読み込み |
 | `src/usi_engine.h/.cpp`, `src/main.cpp` | USI プロトコル処理、`bench` / `perft` |
+| `src/cpu_time.h` | CPU 使用率通知のためのプロセス CPU 時間計測 |
 | `src/version.h` | バージョン定義（`HAYANAGI_VERSION`） |
 | `tests/test_engine.py` | USI 回帰テスト |
 | `tests/test_*.cpp`, `tests/test_support.h` | C++ 単体テスト |
@@ -407,14 +447,23 @@ python3 tests/bench_tsume.py build/hayanagi [--baseline /path/to/previous/hayana
 
 バージョンは `src/version.h` の `HAYANAGI_VERSION` が唯一の定義元で、CMake の `project(... VERSION)`、
 USI の `id name`、`--version` はすべてここから読みます。リリース時はこの値と本節を更新し、
-同じ番号のタグ（`v1.2.0` など）を付けます。ShogiBoardQ はタグで指定した版をサブモジュールとして参照します。
+同じ番号のタグ（`v1.3.0` など）を付けます。ShogiBoardQ はタグで指定した版をサブモジュールとして参照します。
 
 | バージョン | タグ | 日付 | 概要 |
 |---|---|---|---|
+| 1.3.0 | [v1.3.0](https://github.com/hnakada123/Hayanagi/releases/tag/v1.3.0) | 2026-09-28 | 初手制限・残り手数指定・デバッグ、追加探索情報と評価値の上下限通知 |
 | 1.2.0 | [v1.2.0](https://github.com/hnakada123/Hayanagi/releases/tag/v1.2.0) | 2026-09-28 | 標準詰将棋解答・詰みスコア、USI 互換性と探索終了処理の改善 |
 | 1.1.0 | [v1.1.0](https://github.com/hnakada123/Hayanagi/releases/tag/v1.1.0) | 2026-09-28 | 詰み確認・詰将棋・perft の並列化、ワーカー再利用、逐次処理の高速化 |
 | 1.0.1 | [v1.0.1](https://github.com/hnakada123/Hayanagi/releases/tag/v1.0.1) | 2026-09-25 | Clang での `-Wsign-conversion` 警告を解消（ShogiBoardQ が参照中） |
 | 1.0.0 | [v1.0.0](https://github.com/hnakada123/Hayanagi/releases/tag/v1.0.0) | 2026-09-25 | 詰み探索と局面処理の高速化、ベンチマーク、単体テスト、バージョン情報 |
+
+### 1.3.0（2026-09-28）
+
+- `go searchmoves` / `movestogo` と `debug on/off` に対応しました。
+- `info currmovenumber` / `cpuload` / `currline` / `refutation` と、表示切り替えオプションを追加しました。
+- 探索窓を絞った探索で確認した `lowerbound` / `upperbound` を通知し、全窓で再探索して評価値を確定します。
+- `searchmoves` と定跡・並列探索・MultiPV・中断・置換表再利用の整合性を検証するテストを追加しました。
+- USI 回帰テストを32件に拡充し、C++ テスト、競合・メモリー・未定義動作・リーク検査を通過しました。
 
 ### 1.2.0（2026-09-28）
 
