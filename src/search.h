@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -27,11 +29,15 @@ struct SearchOptions {
 
 struct SearchInfo {
     int depth = 0;
+    int seldepth = 0;
     int score_cp = 0;
+    bool has_score = true;
     std::uint64_t nodes = 0;
     int elapsed_ms = 0;
     int multipv = 1;
     bool show_multipv = false;
+    int hashfull_permille = 0;
+    std::string current_move;
     std::string pv;
 };
 
@@ -51,6 +57,7 @@ class Search {
 public:
     static std::size_t hash_size_mb();
     static bool set_hash_size_mb(std::size_t hash_size_mb);
+    static std::optional<int> mate_distance(int score);
 
     SearchResult find_best_move(const Position& root,
                                 const SearchOptions& options,
@@ -59,6 +66,12 @@ public:
 
 private:
     static constexpr int kHistoryFromBuckets = kSquareCount + kHandPieceKinds;
+
+    struct Progress {
+        std::atomic_int next_ms{1000};
+        std::mutex mutex;
+        std::function<void(const SearchInfo&)> callback;
+    };
 
     struct RootMove {
         Move move;
@@ -83,6 +96,10 @@ private:
     bool aborted_ = false;
     std::uint64_t pending_nodes_ = 0;
     std::uint64_t next_time_check_ = 0;
+    int seldepth_ = 0;
+    int iteration_depth_ = 0;
+    std::string current_move_;
+    std::shared_ptr<Progress> progress_;
     std::unique_ptr<ParallelTeam> team_;
     const std::atomic_size_t* mate_cutoff_ = nullptr;
     std::size_t mate_index_ = 0;

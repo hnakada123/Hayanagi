@@ -23,7 +23,9 @@ private:
     Position position_;
     bool tsume_mode_ = false;
     bool position_valid_ = true;
+    bool mate_position_valid_ = true;
     void start_tsume(const std::string& line);
+    void start_mate(const std::string& line);
     Search search_;
     std::unique_ptr<ParallelTeam> perft_team_;
     Book book_;

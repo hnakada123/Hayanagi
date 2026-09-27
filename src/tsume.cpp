@@ -186,8 +186,8 @@ void TsumeSearch::prepare(Color attacker, const std::atomic_bool& stop,
 
 TsumeResult TsumeSearch::solve(const Position& position, Color attacker, int max_plies,
                               int time_limit_ms, const std::atomic_bool& stop, int threads) {
-    prepare(attacker, stop, std::chrono::steady_clock::now() +
-                               std::chrono::milliseconds(std::max(1, time_limit_ms)));
+    prepare(attacker, stop, time_limit_ms == 0 ? std::chrono::steady_clock::time_point::max()
+        : std::chrono::steady_clock::now() + std::chrono::milliseconds(std::max(1, time_limit_ms)));
     max_plies = std::clamp(max_plies, 0, kMaxPlies);
     threads_ = std::clamp(threads, 1, 128);
     position_ = position;

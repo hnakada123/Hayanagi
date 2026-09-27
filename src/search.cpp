@@ -12,6 +12,9 @@ namespace shogi {
 namespace {
 
 constexpr int kMateThreshold = kMateScore - 256;
+// 入玉・連続王手の千日手などは詰みではないため、別の値域で扱う。
+constexpr int kTerminalWinScore = kMateScore - 1000;
+constexpr int kDecisiveThreshold = kTerminalWinScore - 256;
 constexpr int kTempoBonus = 12;
 constexpr int kNullMoveBaseReduction = 2;
 constexpr int kMateSearchMaxPly = 5;
@@ -33,9 +36,9 @@ constexpr int kLanceDirections[][2] = {{-1, 0}};
 int terminal_score(const TerminalStatus& status, int ply) {
     switch (status.outcome) {
         case TerminalOutcome::Win:
-            return kMateScore - ply;
+            return kTerminalWinScore - ply;
         case TerminalOutcome::Loss:
-            return -kMateScore + ply;
+            return -kTerminalWinScore + ply;
         case TerminalOutcome::Draw:
             return 0;
         case TerminalOutcome::None:
@@ -70,20 +73,20 @@ int from_bucket(const Move& move) {
 }
 
 int score_to_tt(int score, int ply) {
-    if (score >= kMateThreshold) {
+    if (score >= kDecisiveThreshold) {
         return score + ply;
     }
-    if (score <= -kMateThreshold) {
+    if (score <= -kDecisiveThreshold) {
         return score - ply;
     }
     return score;
 }
 
 int score_from_tt(int score, int ply) {
-    if (score >= kMateThreshold) {
+    if (score >= kDecisiveThreshold) {
         return score - ply;
     }
-    if (score <= -kMateThreshold) {
+    if (score <= -kDecisiveThreshold) {
         return score + ply;
     }
     return score;
@@ -556,6 +559,12 @@ bool Search::set_hash_size_mb(std::size_t hash_size_mb) {
     return shared_tt().resize_mb(hash_size_mb);
 }
 
+std::optional<int> Search::mate_distance(int score) {
+    if (score >= kMateThreshold && score <= kMateScore) return kMateScore - score;
+    if (score <= -kMateThreshold && score >= -kMateScore) return -kMateScore - score;
+    return std::nullopt;
+}
+
 void Search::reset_state(const SearchOptions& options,
                          std::atomic_bool& stop,
                          std::chrono::steady_clock::time_point start_time,
@@ -568,6 +577,10 @@ void Search::reset_state(const SearchOptions& options,
     nodes_ = 0;
     pending_nodes_ = 0;
     next_time_check_ = 0;
+    seldepth_ = 0;
+    iteration_depth_ = 0;
+    current_move_.clear();
+    progress_.reset();
     mate_cutoff_ = nullptr;
     tt_generation_ = tt_generation;
     aborted_ = false;
@@ -621,6 +634,8 @@ SearchResult Search::find_best_move(const Position& root,
                                     const std::function<void(const SearchInfo&)>& on_info) {
     const std::uint8_t tt_generation = shared_tt().next_generation();
     reset_state(options, stop, std::chrono::steady_clock::now(), nullptr, tt_generation);
+    progress_ = std::make_shared<Progress>();
+    progress_->callback = on_info;
 
     SearchResult result;
     result.terminal = root.terminal_status();
@@ -634,6 +649,13 @@ SearchResult Search::find_best_move(const Position& root,
     auto legal_moves = root.generate_search_legal_moves();
     if (legal_moves.empty()) {
         result.elapsed_ms = elapsed_ms();
+        if (root.is_in_check(root.side_to_move())) {
+            result.score_cp = -kMateScore;
+            SearchInfo info;
+            info.score_cp = result.score_cp;
+            info.elapsed_ms = result.elapsed_ms;
+            on_info(info);
+        }
         return result;
     }
     const int multi_pv = std::max(1, std::min(options.multi_pv, static_cast<int>(legal_moves.size())));
@@ -648,23 +670,28 @@ SearchResult Search::find_best_move(const Position& root,
         workers.resize(static_cast<std::size_t>(thread_count));
         for (Search& worker : workers) {
             worker.reset_state(options, stop, start_time_, &shared_nodes, tt_generation);
+            worker.progress_ = progress_;
         }
     }
 
     std::vector<Move> mating_line;
+    iteration_depth_ = kMateSearchMaxPly;
+    for (Search& worker : workers) worker.iteration_depth_ = kMateSearchMaxPly;
     if ((options.infinite || options.max_depth >= 3 || options.time_limit_ms >= 200) &&
         (thread_count > 1 ? find_forced_mate_parallel(root, kMateSearchMaxPly, mating_line, workers)
                           : find_forced_mate(root, kMateSearchMaxPly, mating_line)) &&
         !mating_line.empty()) {
         result.best_move = mating_line.front();
         result.has_best_move = true;
-        result.score_cp = kMateScore - 1;
+        result.score_cp = kMateScore - static_cast<int>(mating_line.size());
         result.completed_depth = kMateSearchMaxPly;
         result.nodes = current_nodes();
         result.elapsed_ms = elapsed_ms();
         result.hashfull_permille = hashfull_permille();
         SearchInfo info;
         info.depth = kMateSearchMaxPly;
+        info.seldepth = kMateSearchMaxPly;
+        info.hashfull_permille = result.hashfull_permille;
         info.score_cp = result.score_cp;
         info.nodes = result.nodes;
         info.elapsed_ms = result.elapsed_ms;
@@ -709,6 +736,8 @@ SearchResult Search::find_best_move(const Position& root,
         if (coordinator_should_stop()) {
             break;
         }
+        iteration_depth_ = depth;
+        for (Search& worker : workers) worker.iteration_depth_ = depth;
 
         Move tt_move;
         TTEntry tt_entry;
@@ -748,6 +777,7 @@ SearchResult Search::find_best_move(const Position& root,
                     }
 
                     Position child = root;
+                    current_move_ = root.move_to_usi(root_moves[move_index].move);
                     child.do_move(root_moves[move_index].move);
 
                     int score = 0;
@@ -780,6 +810,7 @@ SearchResult Search::find_best_move(const Position& root,
                     }
 
                     Position child = root;
+                    current_move_ = root.move_to_usi(root_move.move);
                     child.do_move(root_move.move);
                     root_move.score = -negamax(child, depth - 1, 1, -kInfinity, kInfinity);
                     if (aborted_) {
@@ -800,11 +831,13 @@ SearchResult Search::find_best_move(const Position& root,
             team_->run(root_moves.size(), [&](std::size_t move_index, std::size_t worker_index) {
                 Search& worker = workers[worker_index];
                 if (worker.aborted_) return;
+                worker.current_move_ = root.move_to_usi(root_moves[move_index].move);
                 root_moves[move_index].score =
                     worker.search_root_move(root, root_moves[move_index].move, depth);
                 root_moves[move_index].worker_index = worker_index;
             });
             for (Search& worker : workers) worker.flush_nodes();
+            for (const Search& worker : workers) seldepth_ = std::max(seldepth_, worker.seldepth_);
 
             last_hashfull = hashfull_permille();
             for (const Search& worker : workers) {
@@ -850,6 +883,8 @@ SearchResult Search::find_best_move(const Position& root,
             result.pv = pv;
             SearchInfo info;
             info.depth = depth;
+            info.seldepth = seldepth_;
+            info.hashfull_permille = last_hashfull;
             info.score_cp = best_score;
             info.nodes = result.nodes;
             info.elapsed_ms = result.elapsed_ms;
@@ -873,6 +908,8 @@ SearchResult Search::find_best_move(const Position& root,
                 }
                 SearchInfo info;
                 info.depth = depth;
+                info.seldepth = seldepth_;
+                info.hashfull_permille = last_hashfull;
                 info.score_cp = root_moves[pv_index].score;
                 info.nodes = result.nodes;
                 info.elapsed_ms = result.elapsed_ms;
@@ -900,6 +937,7 @@ SearchResult Search::find_best_move(const Position& root,
 }
 
 int Search::negamax(const Position& position, int depth, int ply, int alpha, int beta) {
+    seldepth_ = std::max(seldepth_, ply);
     if (should_stop()) {
         aborted_ = true;
         return evaluate(position);
@@ -909,6 +947,7 @@ int Search::negamax(const Position& position, int depth, int ply, int alpha, int
     if (terminal.is_terminal()) {
         return terminal_score(terminal, ply);
     }
+    if (ply >= kMaxDepth) return evaluate(position);
     if (depth <= 0) {
         return quiescence(position, ply, alpha, beta);
     }
@@ -1015,6 +1054,7 @@ int Search::negamax(const Position& position, int depth, int ply, int alpha, int
 }
 
 int Search::quiescence(const Position& position, int ply, int alpha, int beta) {
+    seldepth_ = std::max(seldepth_, ply);
     if (should_stop()) {
         aborted_ = true;
         return evaluate(position);
@@ -1026,6 +1066,7 @@ int Search::quiescence(const Position& position, int ply, int alpha, int beta) {
         return terminal_score(terminal, ply);
     }
 
+    if (ply >= kMaxDepth) return evaluate(position);
     const bool in_check = position.is_in_check(position.side_to_move());
     if (!in_check) {
         const int stand_pat = evaluate(position);
@@ -1123,6 +1164,7 @@ int Search::evaluate(const Position& position) const {
 
     int score = black_score - white_score;
     score += position.side_to_move() == Color::Black ? kTempoBonus : -kTempoBonus;
+    score = std::clamp(score, -kDecisiveThreshold + 1, kDecisiveThreshold - 1);
     return position.side_to_move() == Color::Black ? score : -score;
 }
 
@@ -1142,9 +1184,27 @@ bool Search::should_stop() {
     if (options_.node_limit > 0 && current_nodes() >= options_.node_limit) {
         return true;
     }
-    if (!options_.infinite && options_.time_limit_ms > 0 && nodes_ >= next_time_check_) {
-        if (elapsed_ms() >= options_.time_limit_ms) return true;
+    if (nodes_ >= next_time_check_) {
+        const int millis = elapsed_ms();
+        if (!options_.infinite && options_.time_limit_ms > 0 && millis >= options_.time_limit_ms) {
+            return true;
+        }
         next_time_check_ = nodes_ + 128;
+        int next_ms = progress_ ? progress_->next_ms.load(std::memory_order_relaxed) : 0;
+        // 担当ワーカーが先に終了しても通知が続くよう、全ワーカーで送信時刻を共有する。
+        if (progress_ && millis >= next_ms && progress_->next_ms.compare_exchange_strong(
+                next_ms, millis + 1000, std::memory_order_relaxed)) {
+            SearchInfo info;
+            info.depth = iteration_depth_;
+            info.seldepth = seldepth_;
+            info.has_score = false;
+            info.nodes = current_nodes();
+            info.elapsed_ms = millis;
+            info.hashfull_permille = hashfull_permille();
+            info.current_move = current_move_;
+            std::lock_guard<std::mutex> lock(progress_->mutex);
+            progress_->callback(info);
+        }
     }
     return false;
 }
@@ -1221,7 +1281,7 @@ bool Search::can_try_null_move(const Position& position,
     if (depth < 3) {
         return false;
     }
-    if (beta >= kMateThreshold || beta <= -kMateThreshold) {
+    if (beta >= kDecisiveThreshold || beta <= -kDecisiveThreshold) {
         return false;
     }
     if (position.is_in_check(position.side_to_move())) {
@@ -1273,6 +1333,7 @@ bool Search::find_forced_mate_parallel(const Position& position, int max_ply,
     team_->run(moves.size(), [&](std::size_t index, std::size_t worker_index) {
         if (index > cutoff.load(std::memory_order_relaxed)) return;
         Search& worker = workers[worker_index];
+        worker.current_move_ = position.move_to_usi(moves[index].move);
         worker.mate_cutoff_ = &cutoff;
         worker.mate_index_ = index;
         worker.aborted_ = false;
@@ -1304,6 +1365,7 @@ bool Search::find_forced_mate_parallel(const Position& position, int max_ply,
 bool Search::mate_search_attack(Position& position,
                                 int remaining_ply,
                                 std::vector<Move>* pv) {
+    seldepth_ = std::max(seldepth_, kMateSearchMaxPly - remaining_ply);
     if (should_stop()) {
         aborted_ = true;
         return false;
@@ -1323,6 +1385,7 @@ bool Search::mate_search_attack(Position& position,
     const auto ordered_moves = score_moves(position, checking_moves, 0, no_tt_move);
     for (const OrderedMove& ordered_move : ordered_moves) {
         const Move& move = ordered_move.move;
+        if (remaining_ply == kMateSearchMaxPly) current_move_ = position.move_to_usi(move);
         MoveUndo undo;
         position.make_move(move, undo);
         std::vector<Move> defense_line;
@@ -1348,6 +1411,7 @@ bool Search::mate_search_attack(Position& position,
 bool Search::mate_search_defense(Position& position,
                                  int remaining_ply,
                                  std::vector<Move>* pv) {
+    seldepth_ = std::max(seldepth_, kMateSearchMaxPly - remaining_ply);
     if (should_stop()) {
         aborted_ = true;
         return false;

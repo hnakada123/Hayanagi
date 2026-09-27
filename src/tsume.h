@@ -31,6 +31,7 @@ public:
 
     // position から attacker が王手を続けて max_plies 手以内に詰むかを調べる。
     // 深さ 1,3,5,…（玉方手番なら 0,2,4,…）と延ばし、最初に確定した結果を返す。
+    // time_limit_ms == 0 は時間無制限（stop による中断は可能）。
     TsumeResult solve(const Position& position, Color attacker, int max_plies,
                       int time_limit_ms, const std::atomic_bool& stop, int threads = 1);
 

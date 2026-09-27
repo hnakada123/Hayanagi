@@ -4,8 +4,8 @@ Hayanagi は、C++17 で実装した USI プロトコル対応の最小構成将
 通常対局用の探索に加えて、詰将棋用の詰み探索（`TsumeSearch`）を備え、
 将棋 GUI [ShogiBoardQ](https://github.com/hnakada123/ShogiBoardQ) に静的ライブラリとして組み込まれています。
 
-- 現在のバージョン: **1.1.0**（[変更履歴](#バージョンと変更履歴)）
-- USI の `id name` は `Hayanagi 1.1.0`。`./build/hayanagi --version` でも表示できます
+- 現在のバージョン: **1.2.0**（[変更履歴](#バージョンと変更履歴)）
+- USI の `id name` は `Hayanagi 1.2.0`。`./build/hayanagi --version` でも表示できます
 - CMake の生成実行ファイル名は `hayanagi`、組み込み用の静的ライブラリは `hayanagi_tsume`
 - 合法手生成、終局判定、通常探索、詰み探索、`bench` / `perft` をひととおり実装
 
@@ -50,7 +50,7 @@ cmake --build build
 ## 実行例
 
 ```bash
-./build/hayanagi --version   # Hayanagi 1.1.0
+./build/hayanagi --version   # Hayanagi 1.2.0
 ./build/hayanagi             # USI エンジンとして起動
 ```
 
@@ -65,15 +65,16 @@ go nodes 5000
 quit
 ```
 
-`usi` に対しては次のように応答します（`Hayanagi 1.1.0` の出力）。
+`usi` に対しては次のように応答します（`Hayanagi 1.2.0` の出力）。
 
 ```text
-id name Hayanagi 1.1.0
+id name Hayanagi 1.2.0
 id author OpenAI
 option name USI_Ponder type check default false
 option name MultiPV type spin default 1 min 1 max 32
 option name Threads type spin default 1 min 1 max 128
 option name Hash type spin default 16 min 1 max 65536
+option name USI_Hash type spin default 16 min 1 max 65536
 option name MinimumThinkingTime type spin default 0 min 0 max 600000
 option name NetworkDelay type spin default 0 min 0 max 600000
 option name NetworkDelay2 type spin default 0 min 0 max 600000
@@ -120,6 +121,8 @@ usiok
 - `go movetime N`
 - `go nodes N`
 - `go ponder ...`
+- `go infinite`（`stop` まで `bestmove` を返さない）
+- `go mate <ミリ秒|infinite>`（標準の詰将棋解答。`checkmate` で全手順を返す）
 - `go wtime ... btime ... byoyomi ...`
 - `go tsume <attack|defense> depth N movetime M`（詰み探索。[詳細](#詰み探索詰将棋の攻方玉方)）
 - `setoption name USI_OwnBook value <bool>`
@@ -129,6 +132,7 @@ usiok
 - `setoption name MultiPV value N`
 - `setoption name Threads value N`
 - `setoption name Hash value N`（MB 単位）
+- `setoption name USI_Hash value N`（標準名。`Hash` と同じ置換表を設定）
 - `setoption name MinimumThinkingTime value N`
 - `setoption name NetworkDelay value N`
 - `setoption name NetworkDelay2 value N`
@@ -140,6 +144,7 @@ usiok
 - `setoption name TsumeMode value <bool>`（片玉の局面を受け付ける）
 - `stop`
 - `ponderhit`
+- `gameover win|lose|draw`（進行中の探索と先読みを終了）
 - `quit`
 - `bench depth N`
 - `bench nodes N`
@@ -156,6 +161,7 @@ usiok
 - `MultiPV`
 - `Threads`
 - `Hash`
+- `USI_Hash`（`Hash` の別名）
 - `USI_Ponder`
 - `MinimumThinkingTime`
 - `NetworkDelay`
@@ -171,14 +177,25 @@ usiok
 
 `MultiPV` を有効にすると、`info ... multipv N pv ...` を順位ごとに出力します。`GenerateAllLegalMoves` は互換性維持のため残していますが、現在は探索強度を落とさないよう no-op です。
 
-`Threads` は通常探索、通常探索前の詰み確認、`go tsume` / `bench tsume`、`perft` に適用されます。
+`Threads` は通常探索、通常探索前の詰み確認、`go mate` / `go tsume` / `bench tsume`、`perft` に適用されます。
 既定値は 1、範囲は 1〜128 です。例えば `setoption name Threads value 4` で計算を最大 4 スレッドに分担します
 （USI コマンドを受け付けるスレッドは別）。小さい探索では管理コストを避けるため逐次処理し、
 `perft` は深さ 3 以上で並列化します。`divide` の出力順と各統計はスレッド数によらず同じです。
 
-通常探索の `info` には `depth` / `score cp` / `nodes` / `time` / `nps` / `pv` を出力します。
+通常探索の `info` には `depth` / `seldepth` / `score cp` / `nodes` / `time` / `nps` / `hashfull` / `pv` を出力します。
+詰みを見つけた場合は `score mate N`、詰まされる場合は `score mate -N` で手数を通知します。
+入玉宣言や連続王手の千日手による勝敗は詰みとは区別します。
+探索中は約1秒間隔でノード数・ハッシュ使用率・現在の候補手 `currmove` も通知します。
+評価値は完了した反復の値を通知し、未確定の境界値（`lowerbound` / `upperbound`）は出力しません。
 
 `USI_Ponder` を有効にすると、通常探索の `bestmove` は `bestmove <move> ponder <move>` を返します。`go ponder` で始めた探索は `ponderhit` または `stop` を受けるまで `bestmove` を返しません。
+`go infinite` は、詰みや終局を検出した場合も `stop` を待ちます。無制限探索では定跡による即時返答を行いません。
+`gameover` / `position` / `usinewgame` / `quit` は古い探索結果を破棄します。
+コマンドは LF・CRLF に対応し、`BookDir` には空白を含むパスも指定できます。
+
+[将棋所のUSI仕様](https://shogidokoro2.stars.ne.jp/usi.html)に記載された原案の追加機能のうち、
+`debug` / `register` / `registration`、`go searchmoves` / `movestogo`、
+`info currmovenumber` / `cpuload` / `refutation` / `currline` は未対応です。
 
 ## 実装概要
 
@@ -246,6 +263,29 @@ usiok
 - `TsumeSearch` と `Position` はグローバルな可変状態を持たないので、スレッドごとに別インスタンスを持てば並行して使えます。
 - 計測結果は [BENCHMARK.md](BENCHMARK.md) を参照してください。
 
+### 標準 USI `go mate`
+
+現在手番を攻方として解答します。制限時間は手数ではなくミリ秒です。
+攻方の玉を省略した局面でも、`TsumeMode` を設定せずに利用できます。
+
+```text
+position sfen 9/9/6R1+R/5k3/9/7+S1/9/9/9 b 2b4g3s4n4l18p 1
+go mate 5000
+```
+
+応答例:
+
+```text
+checkmate 3c5c+ 4d4e 1c4c P*4d 4c4d
+```
+
+- 詰みの場合は最長抵抗を含む合法な全手順、不詰を証明できた場合だけ `checkmate nomate` を返します。
+- 時間切れや未解決のままの `stop` には `checkmate timeout` を返します。通常探索の `bestmove` は返しません。
+- `go mate infinite` は時間制限なしで探索し、詰み・不詰が確定した時点で返答します。
+- 内部の探索上限は **63手** です。上限に達しても不詰と判定せず、その旨を `info string` で通知し、期限または `stop` まで待って `checkmate timeout` を返します。
+- `position` / `gameover` / `quit` による中断では結果を破棄します。
+- C++ API の `TsumeSearch::solve` では `time_limit_ms == 0` が時間無制限です。USI の `go mate 0` は制限時間0ミリ秒として扱います。
+
 ### USI 拡張 `go tsume`
 
 単独実行時は次の独自 USI 拡張を利用できます（通常 USI の `go mate` とは別のコマンドです）。
@@ -271,7 +311,7 @@ tsume mate move 4d4e plies 4 nodes ...
 - `nomate` は不詰の証明です。`depthlimit` は指定手数以内に詰みがないという意味で、それより長い詰みの否定ではありません。`timeout` / `cancelled` は未判定です。
 - `move` は攻方の詰め手、または玉方の抵抗・逃れの手です。着手がない場合は `none` です。`plies` は証明された詰みまでの手数で、`mate` の場合に有効です。
 - `stop` で中断結果を返し、`position` / `quit` は進行中の探索を破棄します。
-- `TsumeMode` は既定 false です。通常の `position` では両玉が必要で、片玉局面での通常の `go` は拒否します。
+- `TsumeMode` は既定 false です。片玉局面で独自拡張の `go tsume` を使う場合は true にします。標準 `go mate` は設定不要ですが、片玉局面での通常の `go` は拒否します。
 
 ### `bench tsume`
 
@@ -320,6 +360,8 @@ python3 tests/bench_tsume.py build/hayanagi --threads 4 --baseline /path/to/prev
 
 平手初期局面の perft、通常探索の合法着手、5 手詰 5 問、別解、不詰、手数超過、
 後手攻方、打ち歩詰め、入力不正、時間切れ、中止・局面切替、`id name` の形式を検証します。
+標準 `go mate` の全手順、符号付き詰みスコア、`USI_Hash`、`gameover`、
+詰み・定跡がある場合の無制限探索、先読み、CRLF、空白付き定跡パス、探索情報の出力も検証します。
 
 C++ の単体テスト `hayanagi_tests` は、Hayanagi 自体をビルドしたときだけ既定で生成されます
 （`add_subdirectory` で組み込んだ場合は `-DHAYANAGI_BUILD_TESTS=ON` で有効化）。
@@ -365,13 +407,23 @@ python3 tests/bench_tsume.py build/hayanagi [--baseline /path/to/previous/hayana
 
 バージョンは `src/version.h` の `HAYANAGI_VERSION` が唯一の定義元で、CMake の `project(... VERSION)`、
 USI の `id name`、`--version` はすべてここから読みます。リリース時はこの値と本節を更新し、
-同じ番号のタグ（`v1.1.0` など）を付けます。ShogiBoardQ はタグで指定した版をサブモジュールとして参照します。
+同じ番号のタグ（`v1.2.0` など）を付けます。ShogiBoardQ はタグで指定した版をサブモジュールとして参照します。
 
 | バージョン | タグ | 日付 | 概要 |
 |---|---|---|---|
+| 1.2.0 | [v1.2.0](https://github.com/hnakada123/Hayanagi/releases/tag/v1.2.0) | 2026-09-28 | 標準詰将棋解答・詰みスコア、USI 互換性と探索終了処理の改善 |
 | 1.1.0 | [v1.1.0](https://github.com/hnakada123/Hayanagi/releases/tag/v1.1.0) | 2026-09-28 | 詰み確認・詰将棋・perft の並列化、ワーカー再利用、逐次処理の高速化 |
 | 1.0.1 | [v1.0.1](https://github.com/hnakada123/Hayanagi/releases/tag/v1.0.1) | 2026-09-25 | Clang での `-Wsign-conversion` 警告を解消（ShogiBoardQ が参照中） |
 | 1.0.0 | [v1.0.0](https://github.com/hnakada123/Hayanagi/releases/tag/v1.0.0) | 2026-09-25 | 詰み探索と局面処理の高速化、ベンチマーク、単体テスト、バージョン情報 |
+
+### 1.2.0（2026-09-28）
+
+- 標準 `go mate` / `checkmate` と `score mate` に対応し、入玉などの勝敗との区別を追加しました。
+- `USI_Hash` と `gameover` に対応し、`go infinite` の返答待機、先読み終了時の結果出力を修正しました。
+- `seldepth` / `hashfull` / `currmove` の通知、並列出力の排他処理、CRLF・空白付きパス対応を追加しました。
+- 不正な `position` の後に以前の局面で通常探索してしまう問題を修正しました。
+- 持ち時間・秒読みともに0の場合の即時停止と、大きな持ち時間の計算時の桁あふれを修正しました。
+- USI 回帰テストを25件に拡充し、既存の C++ テスト、競合・メモリー・未定義動作・リーク検査を通過しました。
 
 ### 1.1.0（2026-09-28）
 

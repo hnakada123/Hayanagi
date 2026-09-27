@@ -10,6 +10,7 @@ import re
 import subprocess
 import threading
 import time
+import tempfile
 import unittest
 
 PROBLEMS = [
@@ -85,6 +86,13 @@ class Engine:
             self.reader.join(timeout=5)
             self.process.stdin.close()
             self.process.stdout.close()
+        if self.process.returncode != 0:
+            diagnostics = []
+            while not self.output.empty():
+                line = self.output.get_nowait()
+                if line is not None:
+                    diagnostics.append(line)
+            raise AssertionError(f'Engine exited with {self.process.returncode}: {diagnostics[-30:]}')
 
 
 class EngineTests(unittest.TestCase):
@@ -167,7 +175,7 @@ class EngineTests(unittest.TestCase):
             for engine in (old, self.engine):
                 engine.send('setoption name Threads value 1\nsetoption name Hash value 16\n'
                             'setoption name USI_OwnBook value false\n' + position + '\ngo depth 4')
-                output.append([re.sub(r' time \d+ nps \d+', '', line)
+                output.append([re.sub(r' time \d+ nps \d+| seldepth \d+| hashfull \d+', '', line)
                                for line in engine.until('bestmove ')])
             self.assertEqual(output[0], output[1], position)
 
@@ -293,7 +301,7 @@ class EngineTests(unittest.TestCase):
             for threads in (1, 4, 2):
                 self.engine.send(f'setoption name Threads value {threads}\ngo depth 5')
                 lines = self.engine.until('bestmove ')
-                self.assertTrue(any('score cp 29999 ' in line for line in lines), lines)
+                self.assertTrue(any('score mate 5 ' in line for line in lines), lines)
                 if reference is None:
                     reference = lines[-1]
                 self.assertEqual(lines[-1], reference)
@@ -306,6 +314,162 @@ class EngineTests(unittest.TestCase):
             counts = [int(re.search(r' nodes (\d+)', line).group(1))
                       for line in lines if line.startswith('info depth ')]
             self.assertEqual(counts, [30] * 30)
+
+    def assert_no_result(self, timeout=0.1):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                line = self.engine.output.get(timeout=max(0.001, deadline - time.monotonic()))
+            except queue.Empty:
+                return
+            self.assertIsNotNone(line)
+            self.assertFalse(line.startswith(('bestmove ', 'checkmate ', 'tsume ')), line)
+
+    def test_standard_hash_and_crlf(self):
+        self.engine.send('  setoption name USI_Hash value 32\r\nusi\r')
+        lines = self.engine.until('usiok')
+        for name in ('Hash', 'USI_Hash'):
+            self.assertIn(f'option name {name} type spin default 32 min 1 max 65536', lines)
+        self.engine.send('setoption name Hash value 16\nusi')
+        self.assertIn('option name USI_Hash type spin default 16 min 1 max 65536',
+                      self.engine.until('usiok'))
+
+    def test_standard_mate_returns_complete_legal_line(self):
+        # 標準 go mate は TsumeMode を設定せず、攻方玉なしでも使える。
+        for threads in (1, 4):
+            self.engine.send(f'setoption name Threads value {threads}')
+            for sfen, _ in PROBLEMS:
+                with self.subTest(threads=threads, sfen=sfen):
+                    self.engine.send('position sfen ' + sfen + '\ngo mate 5000')
+                    lines = self.engine.until('checkmate ')
+                    self.assertFalse(any(line.startswith('bestmove ') for line in lines), lines)
+                    moves = lines[-1].split()[1:]
+                    self.assertEqual(len(moves), 5, lines)
+                    # 各着手が合法であることを position の適用と終端の詰みで検証する。
+                    self.engine.send('setoption name TsumeMode value true')
+                    status, result = self.solve(sfen, 'defense', 1, ' '.join(moves))
+                    self.assertEqual((status, result.get('plies')), ('mate', '0'))
+                    self.engine.send('setoption name TsumeMode value false')
+        self.engine.send('position sfen 9/9/9/9/9/9/1g7/2g6/K8 w r 1\ngo mate infinite')
+        self.assertRegex(self.engine.until('checkmate ')[-1], r'^checkmate \S+$')
+
+    def test_standard_mate_nomate_timeout_and_stop(self):
+        self.engine.send('position startpos\ngo mate infinite')
+        self.assertEqual(self.engine.until('checkmate ')[-1], 'checkmate nomate')
+        # 0 は探索手数ではなく、即時に期限を迎えるミリ秒指定。
+        self.engine.send('position sfen ' + PROBLEMS[0][0] + '\ngo mate 0')
+        self.assertEqual(self.engine.until('checkmate ')[-1], 'checkmate timeout')
+        # 深さ 5 では未解決の局面。stop には bestmove ではなく checkmate を返す。
+        difficult = 'position sfen 9/9/9/9/9/2k6/4r4/9/9 b RBSLb4g3s4n3l18p 1'
+        self.engine.send(difficult + '\ngo mate 1')
+        self.assertEqual(self.engine.until('checkmate ')[-1], 'checkmate timeout')
+        self.engine.send(difficult + '\ngo mate infinite\nstop')
+        lines = self.engine.until('checkmate ', timeout=3)
+        self.assertEqual(lines[-1], 'checkmate timeout')
+        self.assertFalse(any(line.startswith('bestmove ') for line in lines))
+        self.engine.send(difficult + '\ngo mate 600000\nposition startpos\ngo mate 1000')
+        self.assertEqual(self.engine.until('checkmate '), ['checkmate nomate'])
+
+    def test_signed_mate_scores_and_search_information(self):
+        position = 'position sfen 9/9/6R1+R/5k3/9/7+S1/9/9/4K4 b 2b4g3s4n4l18p 1'
+        for threads in (1, 4):
+            self.engine.send(f'setoption name Threads value {threads}\n' + position + '\ngo depth 5')
+            lines = self.engine.until('bestmove ')
+            self.assertTrue(any('score mate 5 ' in line for line in lines), lines)
+            self.engine.send(position + ' moves 3c5c+ 4d4e 1c4c\ngo depth 2')
+            lines = self.engine.until('bestmove ')
+            self.assertTrue(any('score mate -2 ' in line for line in lines), lines)
+            for line in lines[:-1]:
+                depth = re.search(r'depth (\d+) seldepth (\d+)', line)
+                self.assertIsNotNone(depth, line)
+                self.assertGreaterEqual(int(depth[2]), int(depth[1]))
+                fullness = re.search(r' hashfull (\d+)', line)
+                self.assertIsNotNone(fullness, line)
+                self.assertIn(int(fullness[1]), range(1001))
+
+    def test_infinite_and_ponder_wait_even_after_mate(self):
+        positions = [
+            'position sfen 9/9/6R1+R/5k3/9/7+S1/9/9/4K4 b 2b4g3s4n4l18p 1',
+            'position sfen 8k/6G2/7G1/9/9/9/9/9/4K4 b R 1 moves R*1b',
+        ]
+        for position in positions:
+            for command, finish in (('go infinite', 'stop'), ('go ponder depth 5', 'ponderhit')):
+                with self.subTest(position=position, command=command):
+                    self.engine.send(position + '\n' + command)
+                    lines = self.engine.until('info depth ')
+                    self.assertFalse(any(line.startswith('bestmove ') for line in lines), lines)
+                    self.assert_no_result()
+                    self.engine.send(finish)
+                    self.engine.until('bestmove ', timeout=3)
+                    self.assert_no_result(0.02)
+
+    def test_gameover_cancels_search_and_pending_ponder(self):
+        for outcome in ('win', 'lose', 'draw'):
+            self.engine.send('position startpos\ngo ponder depth 1')
+            self.engine.until('info depth 1 ')
+            self.engine.send(f'gameover {outcome}\nponderhit\nisready')
+            self.assertEqual(self.engine.until('readyok'), ['readyok'])
+            self.assert_no_result(0.02)
+        self.engine.send('position sfen 9/9/9/9/9/2k6/4r4/9/9 b RBSLb4g3s4n3l18p 1\ngo mate infinite')
+        self.engine.send('gameover lose\nisready')
+        self.assertEqual(self.engine.until('readyok'), ['readyok'])
+        self.engine.send('usinewgame\nposition startpos\ngo depth 1')
+        self.assertNotEqual(self.engine.until('bestmove ')[-1], 'bestmove resign')
+
+    def test_book_and_infinite_with_directory_spaces(self):
+        with tempfile.TemporaryDirectory(prefix='hayanagi book ') as directory:
+            Path(directory, 'standard_book.db').write_text(
+                '#YANEURAOU-DB2016 1.00\n'
+                'sfen lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1\n'
+                '7g7f 3c3d 10 1 1\n', encoding='utf-8')
+            self.engine.send(f'setoption name BookDir value {directory}\n'
+                             'setoption name USI_OwnBook value true\nisready')
+            self.assertTrue(any('book loaded ' in line for line in self.engine.until('readyok')))
+            self.engine.send('position startpos\ngo depth 1')
+            self.assertEqual(self.engine.until('bestmove ')[-1], 'bestmove 7g7f')
+            self.engine.send('go infinite nodes 1000')
+            self.engine.until('info depth ')
+            self.assert_no_result()
+            self.engine.send('stop')
+            self.engine.until('bestmove ', timeout=3)
+
+    def test_invalid_position_does_not_reuse_previous_position(self):
+        self.engine.send('position startpos\nposition sfen invalid\ngo depth 1')
+        self.assertEqual(self.engine.until('bestmove ')[-1], 'bestmove resign')
+        self.engine.send('go mate 1000')
+        self.assertEqual(self.engine.until('checkmate ')[-1], 'checkmate timeout')
+
+    def test_try_rule_win_is_not_reported_as_checkmate(self):
+        self.engine.send('setoption name EnteringKingRule value TryRule\n'
+                         'position sfen 9/4K4/9/9/9/9/9/9/k8 b - 1\ngo depth 2')
+        lines = self.engine.until('bestmove ')
+        self.assertEqual(lines[-1], 'bestmove 5b5a')
+        self.assertTrue(any('score cp 28999 ' in line for line in lines), lines)
+        self.assertFalse(any('score mate ' in line for line in lines), lines)
+
+    def test_zero_remaining_time_and_large_clock_values(self):
+        self.engine.send('position startpos\ngo btime 0 wtime 0 byoyomi 0')
+        self.engine.until('bestmove ', timeout=3)
+        self.engine.send('setoption name SlowMover value 1000\n'
+                         'go btime 2147483647 wtime 2147483647 byoyomi 2147483647 nodes 1000')
+        self.engine.until('bestmove ', timeout=3)
+
+    def test_periodic_information_and_ready_during_search(self):
+        self.engine.send('position startpos\ngo infinite')
+        deadline = time.monotonic() + 5
+        while True:
+            lines = self.engine.until('info depth ', timeout=max(0.01, deadline - time.monotonic()))
+            if ' currmove ' in lines[-1]:
+                self.assertIn(' hashfull ', lines[-1])
+                self.assertNotIn(' score ', lines[-1])
+                break
+            self.assertLess(time.monotonic(), deadline)
+        # isready と探索情報の出力が混ざって壊れないことも確認する。
+        self.engine.send('\n'.join(['isready'] * 30))
+        for _ in range(30):
+            self.assertEqual(self.engine.until('readyok')[-1], 'readyok')
+        self.engine.send('stop')
+        self.engine.until('bestmove ', timeout=3)
 
 
 if __name__ == '__main__':

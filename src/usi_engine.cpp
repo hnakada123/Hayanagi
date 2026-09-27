@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <vector>
@@ -15,6 +16,16 @@
 namespace shogi {
 
 namespace {
+
+// 一行分を組み立ててから排他出力する。isready と探索通知の混在を防ぐ。
+class ProtocolOutput : public std::ostringstream {
+public:
+    ~ProtocolOutput() {
+        static std::mutex output_mutex;
+        std::lock_guard<std::mutex> lock(output_mutex);
+        std::cout << str() << std::flush;
+    }
+};
 
 constexpr int kDefaultMultiPv = 1;
 constexpr int kMaxMultiPv = 32;
@@ -337,6 +348,10 @@ UsiEngine::~UsiEngine() {
 void UsiEngine::loop() {
     std::string line;
     while (std::getline(std::cin, line)) {
+        // CRLF とコマンド前後の空白を許容する。
+        const auto first = line.find_first_not_of(" \t\r");
+        if (first == std::string::npos) continue;
+        line = line.substr(first, line.find_last_not_of(" \t\r") - first + 1);
         handle_line(line);
         if (line == "quit") {
             break;
@@ -346,37 +361,39 @@ void UsiEngine::loop() {
 
 void UsiEngine::handle_line(const std::string& line) {
     if (line == "usi") {
-        std::cout << "id name " << kEngineName << " " << kEngineVersion << std::endl;
-        std::cout << "id author OpenAI" << std::endl;
-        std::cout << "option name USI_Ponder type check default "
+        ProtocolOutput{} << "id name " << kEngineName << " " << kEngineVersion << std::endl;
+        ProtocolOutput{} << "id author OpenAI" << std::endl;
+        ProtocolOutput{} << "option name USI_Ponder type check default "
                   << (kDefaultUsiPonder ? "true" : "false") << std::endl;
-        std::cout << "option name MultiPV type spin default " << kDefaultMultiPv << " min 1 max "
+        ProtocolOutput{} << "option name MultiPV type spin default " << kDefaultMultiPv << " min 1 max "
                   << kMaxMultiPv << std::endl;
-        std::cout << "option name Threads type spin default " << kDefaultThreads << " min 1 max "
+        ProtocolOutput{} << "option name Threads type spin default " << kDefaultThreads << " min 1 max "
                   << kMaxThreads << std::endl;
-        std::cout << "option name Hash type spin default " << Search::hash_size_mb() << " min "
+        ProtocolOutput{} << "option name Hash type spin default " << Search::hash_size_mb() << " min "
                   << kMinHashSizeMb << " max " << kMaxHashSizeMb << std::endl;
-        std::cout << "option name MinimumThinkingTime type spin default "
+        ProtocolOutput{} << "option name USI_Hash type spin default " << Search::hash_size_mb() << " min "
+                  << kMinHashSizeMb << " max " << kMaxHashSizeMb << std::endl;
+        ProtocolOutput{} << "option name MinimumThinkingTime type spin default "
                   << kDefaultMinimumThinkingTimeMs << " min 0 max " << kMaxOptionMillis
                   << std::endl;
-        std::cout << "option name NetworkDelay type spin default " << kDefaultNetworkDelayMs
+        ProtocolOutput{} << "option name NetworkDelay type spin default " << kDefaultNetworkDelayMs
                   << " min 0 max " << kMaxOptionMillis << std::endl;
-        std::cout << "option name NetworkDelay2 type spin default " << kDefaultNetworkDelay2Ms
+        ProtocolOutput{} << "option name NetworkDelay2 type spin default " << kDefaultNetworkDelay2Ms
                   << " min 0 max " << kMaxOptionMillis << std::endl;
-        std::cout << "option name SlowMover type spin default " << kDefaultSlowMover << " min 1 max "
+        ProtocolOutput{} << "option name SlowMover type spin default " << kDefaultSlowMover << " min 1 max "
                   << kMaxSlowMover << std::endl;
-        std::cout << "option name ResignValue type spin default " << kDefaultResignValue
+        ProtocolOutput{} << "option name ResignValue type spin default " << kDefaultResignValue
                   << " min 0 max " << kMaxResignValue << std::endl;
-        std::cout << "option name MaxMovesToDraw type spin default " << position_rules_.max_moves_to_draw
+        ProtocolOutput{} << "option name MaxMovesToDraw type spin default " << position_rules_.max_moves_to_draw
                   << " min 0 max " << kMaxOptionMillis << std::endl;
-        std::cout << "option name EnteringKingRule type combo default CSARule24"
+        ProtocolOutput{} << "option name EnteringKingRule type combo default CSARule24"
                   << " var NoEnteringKing var CSARule24 var CSARule24H var CSARule27"
                   << " var CSARule27H var TryRule" << std::endl;
-        std::cout << "option name GenerateAllLegalMoves type check default "
+        ProtocolOutput{} << "option name GenerateAllLegalMoves type check default "
                   << (position_rules_.generate_all_legal_moves ? "true" : "false") << std::endl;
-        std::cout << "option name USI_OwnBook type check default true" << std::endl;
-        std::cout << "option name BookDir type string default book" << std::endl;
-        std::cout << "option name BookFile type combo default standard_book.db"
+        ProtocolOutput{} << "option name USI_OwnBook type check default true" << std::endl;
+        ProtocolOutput{} << "option name BookDir type string default book" << std::endl;
+        ProtocolOutput{} << "option name BookFile type combo default standard_book.db"
                   << " var no_book"
                   << " var standard_book.db"
                   << " var yaneura_book1.db"
@@ -386,8 +403,8 @@ void UsiEngine::handle_line(const std::string& line) {
                   << " var user_book1.db"
                   << " var user_book2.db"
                   << " var user_book3.db" << std::endl;
-        std::cout << "option name TsumeMode type check default false" << std::endl;
-        std::cout << "usiok" << std::endl;
+        ProtocolOutput{} << "option name TsumeMode type check default false" << std::endl;
+        ProtocolOutput{} << "usiok" << std::endl;
         return;
     }
     if (line == "isready") {
@@ -408,13 +425,13 @@ void UsiEngine::handle_line(const std::string& line) {
                 }
             }
             if (book_.load(book_path.string())) {
-                std::cout << "info string book loaded " << book_path.string() << std::endl;
+                ProtocolOutput{} << "info string book loaded " << book_path.string() << std::endl;
             } else {
-                std::cout << "info string book not found " << book_path.string() << std::endl;
+                ProtocolOutput{} << "info string book not found " << book_path.string() << std::endl;
             }
             book_loaded_ = true;
         }
-        std::cout << "readyok" << std::endl;
+        ProtocolOutput{} << "readyok" << std::endl;
         return;
     }
     if (line == "usinewgame") {
@@ -422,12 +439,15 @@ void UsiEngine::handle_line(const std::string& line) {
         std::lock_guard<std::mutex> lock(mutex_);
         position_.set_startpos();
         position_valid_ = true;
+        mate_position_valid_ = true;
         return;
     }
     if (line.rfind("position ", 0) == 0) {
         stop_search();
         position_valid_ = set_position(line);
-        if (!position_valid_) std::cout << "info string invalid position" << std::endl;
+        if (!position_valid_ && !mate_position_valid_) {
+            ProtocolOutput{} << "info string invalid position" << std::endl;
+        }
         return;
     }
     if (line.rfind("bench", 0) == 0) {
@@ -442,12 +462,11 @@ void UsiEngine::handle_line(const std::string& line) {
         start_tsume(line);
         return;
     }
-    if (line.rfind("go", 0) == 0) {
-        if (position_.find_king(Color::Black) < 0 || position_.find_king(Color::White) < 0) {
-            std::cout << "info string use go tsume for kingless positions" << std::endl;
-            std::cout << "bestmove resign" << std::endl;
-            return;
-        }
+    if (line == "go mate" || line.rfind("go mate ", 0) == 0) {
+        start_mate(line);
+        return;
+    }
+    if (line == "go" || line.rfind("go ", 0) == 0) {
         start_search(line);
         return;
     }
@@ -467,6 +486,10 @@ void UsiEngine::handle_line(const std::string& line) {
         set_option(line);
         return;
     }
+    if (line == "gameover" || line.rfind("gameover ", 0) == 0) {
+        stop_search();
+        return;
+    }
     if (line == "quit") {
         stop_search();
     }
@@ -482,6 +505,7 @@ void UsiEngine::set_option(const std::string& line) {
     for (std::size_t i = 3; i + 1 < tokens.size(); ++i) {
         if (tokens[i] == "value") {
             value_token = tokens[i + 1];
+            for (std::size_t j = i + 2; j < tokens.size(); ++j) value_token += " " + tokens[j];
             break;
         }
     }
@@ -496,12 +520,12 @@ void UsiEngine::set_option(const std::string& line) {
         multi_pv_.store(std::clamp(parse_int(value_token, kDefaultMultiPv), 1, kMaxMultiPv));
     } else if (tokens[2] == "Threads") {
         threads_.store(std::clamp(parse_int(value_token, kDefaultThreads), 1, kMaxThreads));
-    } else if (tokens[2] == "Hash") {
+    } else if (tokens[2] == "Hash" || tokens[2] == "USI_Hash") {
         const std::size_t hash_size_mb = std::clamp<std::size_t>(
             parse_uint64(value_token, Search::hash_size_mb()), kMinHashSizeMb, kMaxHashSizeMb);
         stop_search();
         if (!Search::set_hash_size_mb(hash_size_mb)) {
-            std::cout << "info string hash resize_failed " << hash_size_mb << std::endl;
+            ProtocolOutput{} << "info string hash resize_failed " << hash_size_mb << std::endl;
         }
     } else if (tokens[2] == "MinimumThinkingTime") {
         minimum_thinking_time_ms_ =
@@ -580,19 +604,22 @@ void UsiEngine::start_search(const std::string& line) {
         snapshot = position_;
     }
     const SearchOptions options = parse_go_options(line);
+    const bool valid = position_valid_ && snapshot.find_king(Color::Black) >= 0 &&
+                       snapshot.find_king(Color::White) >= 0;
 
-    if (usi_own_book_ && book_.is_loaded() && !options.ponder) {
+    if (valid && usi_own_book_ && book_.is_loaded() && !options.ponder && !options.infinite) {
         const std::string sfen = snapshot.to_sfen();
         const auto* entries = book_.lookup(sfen);
         if (entries && !entries->empty()) {
             const BookEntry& entry = (*entries)[0];
-            std::cout << "info string book hit " << entry.best_move << " score " << entry.score
+            ProtocolOutput{} << "info string book hit " << entry.best_move << " score " << entry.score
                       << " depth " << entry.depth << " count " << entry.count << std::endl;
-            std::cout << "bestmove " << entry.best_move;
+            ProtocolOutput out;
+            out << "bestmove " << entry.best_move;
             if (usi_ponder_.load() && entry.ponder_move != "none") {
-                std::cout << " ponder " << entry.ponder_move;
+                out << " ponder " << entry.ponder_move;
             }
-            std::cout << std::endl;
+            out << std::endl;
             return;
         }
     }
@@ -606,29 +633,97 @@ void UsiEngine::start_search(const std::string& line) {
     const int resign_value = resign_value_;
     searching_.store(true);
 
-    search_thread_ = std::thread([this, snapshot, options, resign_value]() mutable {
-        const SearchResult result =
-            search_.find_best_move(snapshot, options, stop_requested_, [&](const SearchInfo& info) {
+    search_thread_ = std::thread([this, snapshot, options, resign_value, valid]() mutable {
+        SearchResult result;
+        if (valid) {
+            result = search_.find_best_move(snapshot, options, stop_requested_, [&](const SearchInfo& info) {
                 print_info(info);
             });
+        } else {
+            ProtocolOutput{} << "info string invalid position for normal search" << std::endl;
+        }
 
-        bool emit_bestmove = true;
         {
             std::unique_lock<std::mutex> lock(search_state_mutex_);
-            if (options.ponder && !stop_requested_.load() && !ponderhit_ && !suppress_bestmove_) {
-                search_state_cv_.wait(lock, [this]() {
-                    return stop_requested_.load() || ponderhit_ || suppress_bestmove_;
-                });
-            }
-            emit_bestmove = !suppress_bestmove_;
+            search_state_cv_.wait(lock, [this, &options]() {
+                return stop_requested_.load() || suppress_bestmove_ ||
+                       (!options.infinite && (!options.ponder || ponderhit_));
+            });
+            if (!suppress_bestmove_) report_bestmove(result, snapshot, resign_value);
             pondering_ = false;
             ponderhit_ = false;
         }
 
-        if (emit_bestmove) {
-            report_bestmove(result, snapshot, resign_value);
+        searching_.store(false);
+        search_state_cv_.notify_all();
+    });
+}
+
+void UsiEngine::start_mate(const std::string& line) {
+    stop_search();
+    const auto tokens = split_tokens(line);
+    const bool infinite = tokens.size() == 3 && tokens[2] == "infinite";
+    const int millis = tokens.size() == 3 ? parse_int(tokens[2], -1) : -1;
+    if (!mate_position_valid_ || position_.find_king(opposite(position_.side_to_move())) < 0 ||
+        (!infinite && millis < 0)) {
+        ProtocolOutput{} << "info string invalid go mate or position" << std::endl;
+        ProtocolOutput{} << "checkmate timeout" << std::endl;
+        return;
+    }
+
+    using Clock = std::chrono::steady_clock;
+    const auto deadline = infinite ? Clock::time_point::max()
+                                  : Clock::now() + std::chrono::milliseconds(millis);
+    const Position snapshot = position_;
+    const int threads = std::clamp(threads_.load(), 1, kMaxThreads);
+    stop_requested_.store(false);
+    searching_.store(true);
+    search_thread_ = std::thread([this, snapshot, threads, deadline, infinite]() {
+        TsumeSearch solver;
+        Position work = snapshot;
+        const Color attacker = snapshot.side_to_move();
+        const auto solve = [&](int depth) {
+            if (!infinite && Clock::now() >= deadline) {
+                TsumeResult expired;
+                expired.status = TsumeStatus::Timeout;
+                return expired;
+            }
+            const int remaining = infinite ? 0 : std::max(1, static_cast<int>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count()));
+            return solver.solve(work, attacker, depth, remaining, stop_requested_, threads);
+        };
+
+        auto result = solve(63);
+        const bool depth_limit = result.status == TsumeStatus::Limit;
+        std::string response = "timeout";
+        if (result.status == TsumeStatus::NoMate) {
+            response = "nomate";
+        } else if (result.status == TsumeStatus::Mate) {
+            // 子局面の証明を再利用して、最長抵抗を含む合法な全手順を再構成する。
+            // 再構成にも同じ時間制限と stop を適用する。
+            std::string pv;
+            while (result.status == TsumeStatus::Mate && result.plies > 0) {
+                if (!result.move.is_valid()) break;
+                const std::string move = work.move_to_usi(result.move);
+                if (!work.apply_usi_move(move)) break;
+                if (!pv.empty()) pv += ' ';
+                pv += move;
+                result = solve(result.plies - 1);
+            }
+            if (result.status == TsumeStatus::Mate && result.plies == 0 && !pv.empty() &&
+                work.is_in_check(work.side_to_move()) && !work.has_legal_move()) {
+                response = pv;
+            }
         }
 
+        std::unique_lock<std::mutex> lock(search_state_mutex_);
+        if (depth_limit && !suppress_bestmove_) {
+            ProtocolOutput{} << "info string mate search depth limit 63 reached" << std::endl;
+            const auto stopped = [this]() { return stop_requested_.load() || suppress_bestmove_; };
+            if (infinite) search_state_cv_.wait(lock, stopped);
+            else search_state_cv_.wait_until(lock, deadline, stopped);
+        }
+        if (!suppress_bestmove_) ProtocolOutput{} << "checkmate " << response << std::endl;
         searching_.store(false);
         search_state_cv_.notify_all();
     });
@@ -638,14 +733,14 @@ void UsiEngine::start_tsume(const std::string& line) {
     stop_search();
     const auto tokens = split_tokens(line);
     if (!position_valid_ || tokens.size() < 3 || (tokens[2] != "attack" && tokens[2] != "defense")) {
-        std::cout << "tsume invalid" << std::endl;
+        ProtocolOutput{} << "tsume invalid" << std::endl;
         return;
     }
     const Position snapshot = position_;
     const Color attacker = tokens[2] == "attack" ? snapshot.side_to_move()
                                                 : opposite(snapshot.side_to_move());
     if (snapshot.find_king(opposite(attacker)) < 0) {
-        std::cout << "tsume invalid" << std::endl;
+        ProtocolOutput{} << "tsume invalid" << std::endl;
         return;
     }
     int depth = 31;
@@ -662,7 +757,7 @@ void UsiEngine::start_tsume(const std::string& line) {
         const auto result = solver.solve(snapshot, attacker, depth, millis, stop_requested_, threads);
         std::lock_guard<std::mutex> lock(search_state_mutex_);
         if (!suppress_bestmove_) {
-            std::cout << "tsume " << tsume_status_text(result.status) << " move "
+            ProtocolOutput{} << "tsume " << tsume_status_text(result.status) << " move "
                       << (result.move.is_valid() ? snapshot.move_to_usi(result.move) : "none")
                       << " plies " << result.plies << " nodes " << result.nodes << std::endl;
         }
@@ -675,28 +770,29 @@ void UsiEngine::report_bestmove(const SearchResult& result,
                                 int resign_value) const {
     if (result.terminal.outcome == TerminalOutcome::Win &&
         result.terminal.reason == TerminalReason::DeclarationWin) {
-        std::cout << "bestmove win" << std::endl;
+        ProtocolOutput{} << "bestmove win" << std::endl;
         return;
     }
     if (result.terminal.is_terminal()) {
-        std::cout << "info string terminal " << terminal_reason_text(result.terminal) << " "
+        ProtocolOutput{} << "info string terminal " << terminal_reason_text(result.terminal) << " "
                   << terminal_outcome_text(result.terminal) << std::endl;
-        std::cout << "bestmove resign" << std::endl;
+        ProtocolOutput{} << "bestmove resign" << std::endl;
         return;
     }
     if (!result.has_best_move || result.score_cp <= -resign_value) {
-        std::cout << "bestmove resign" << std::endl;
+        ProtocolOutput{} << "bestmove resign" << std::endl;
         return;
     }
 
-    std::cout << "bestmove " << snapshot.move_to_usi(result.best_move);
+    ProtocolOutput out;
+    out << "bestmove " << snapshot.move_to_usi(result.best_move);
     if (usi_ponder_.load()) {
         const std::string ponder = extract_ponder_move(result.pv);
         if (!ponder.empty()) {
-            std::cout << " ponder " << ponder;
+            out << " ponder " << ponder;
         }
     }
-    std::cout << std::endl;
+    out << std::endl;
 }
 
 void UsiEngine::run_bench(const std::string& line) {
@@ -747,7 +843,7 @@ void UsiEngine::run_bench(const std::string& line) {
             Position position;
             apply_position_rules(position);
             if (!load_position_from_command(entry.position_command, position)) {
-                std::cout << "info string bench setup_failed " << entry.name << std::endl;
+                ProtocolOutput{} << "info string bench setup_failed " << entry.name << std::endl;
                 continue;
             }
             items.push_back(BenchWorkItem{entry.name, position});
@@ -755,7 +851,7 @@ void UsiEngine::run_bench(const std::string& line) {
     }
 
     if (items.empty()) {
-        std::cout << "info string bench no_positions" << std::endl;
+        ProtocolOutput{} << "info string bench no_positions" << std::endl;
         return;
     }
 
@@ -785,7 +881,7 @@ void UsiEngine::run_bench(const std::string& line) {
             bestmove = items[i].position.move_to_usi(result.best_move);
         }
 
-        std::cout << "info string bench " << (i + 1) << "/" << items.size() << " "
+        ProtocolOutput{} << "info string bench " << (i + 1) << "/" << items.size() << " "
                   << items[i].name << " depth " << depth << " nodes " << result.nodes
                   << " time " << result.elapsed_ms << " nps "
                   << compute_nps(result.nodes, result.elapsed_ms) << " hashfull "
@@ -796,13 +892,14 @@ void UsiEngine::run_bench(const std::string& line) {
     const auto total_end = std::chrono::steady_clock::now();
     const auto total_ms = static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::milliseconds>(total_end - total_start).count());
-    std::cout << "info string bench total positions " << items.size() << " depth " << depth
+    ProtocolOutput out;
+    out << "info string bench total positions " << items.size() << " depth " << depth
               << " nodes " << total_nodes << " time " << total_ms << " nps "
               << compute_nps(total_nodes, total_ms);
     if (node_limit > 0) {
-        std::cout << " node_limit " << node_limit;
+        out << " node_limit " << node_limit;
     }
-    std::cout << " hashfull_avg " << (total_hashfull / static_cast<int>(items.size()))
+    out << " hashfull_avg " << (total_hashfull / static_cast<int>(items.size()))
               << " hashfull_max " << max_hashfull << std::endl;
 }
 
@@ -826,7 +923,7 @@ void UsiEngine::run_tsume_bench(const std::vector<std::string>& tokens) {
             command += std::string(" moves ") + entry.moves;
         }
         if (!load_position_from_tokens(split_tokens(command), 1, position, true)) {
-            std::cout << "info string bench tsume setup_failed " << entry.name << std::endl;
+            ProtocolOutput{} << "info string bench tsume setup_failed " << entry.name << std::endl;
             continue;
         }
         const Color attacker =
@@ -841,14 +938,14 @@ void UsiEngine::run_tsume_bench(const std::vector<std::string>& tokens) {
             std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
         total_nodes += result.nodes;
         total_ms += elapsed_ms;
-        std::cout << "info string bench tsume " << (i + 1) << "/" << suite.size() << " "
+        ProtocolOutput{} << "info string bench tsume " << (i + 1) << "/" << suite.size() << " "
                   << entry.name << " depth " << entry.depth << " status "
                   << tsume_status_text(result.status) << " move "
                   << (result.move.is_valid() ? position.move_to_usi(result.move) : "none")
                   << " plies " << result.plies << " nodes " << result.nodes << " time "
                   << elapsed_ms << " nps " << compute_nps(result.nodes, elapsed_ms) << std::endl;
     }
-    std::cout << "info string bench tsume total positions " << suite.size() << " nodes "
+    ProtocolOutput{} << "info string bench tsume total positions " << suite.size() << " nodes "
               << total_nodes << " time " << total_ms << " nps "
               << compute_nps(total_nodes, total_ms) << std::endl;
 }
@@ -899,7 +996,7 @@ void UsiEngine::run_perft(const std::string& line) {
             const PerftStats& child_stats = results[i];
             total += child_stats;
             if (!divide) continue;
-            std::cout << snapshot.move_to_usi(moves[i]) << ": " << child_stats.nodes
+            ProtocolOutput{} << snapshot.move_to_usi(moves[i]) << ": " << child_stats.nodes
                       << " captures " << child_stats.captures << " promotions "
                       << child_stats.promotions << " checks " << child_stats.checks
                       << " mates " << child_stats.mates << std::endl;
@@ -913,17 +1010,19 @@ void UsiEngine::run_perft(const std::string& line) {
     const auto elapsed_ms = static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
 
-    std::cout << "info string perft depth " << depth << " nodes " << total.nodes
+    ProtocolOutput out;
+    out << "info string perft depth " << depth << " nodes " << total.nodes
               << " captures " << total.captures << " promotions " << total.promotions
               << " checks " << total.checks << " mates " << total.mates << " time "
               << elapsed_ms << " nps " << compute_nps(total.nodes, elapsed_ms);
     if (divide) {
-        std::cout << " divide";
+        out << " divide";
     }
-    std::cout << std::endl;
+    out << std::endl;
 }
 
 bool UsiEngine::set_position(const std::string& line) {
+    mate_position_valid_ = false;
     const auto tokens = split_tokens(line);
     if (tokens.size() < 2) {
         return false;
@@ -931,13 +1030,18 @@ bool UsiEngine::set_position(const std::string& line) {
 
     Position next;
     apply_position_rules(next);
-    if (!load_position_from_tokens(tokens, 1, next, tsume_mode_)) {
-        return false;
+    const bool valid = load_position_from_tokens(tokens, 1, next, tsume_mode_);
+    if (!valid) {
+        // 標準 go mate は専用オプションなしで攻方玉のない局面を受け取れる。
+        next = Position{};
+        apply_position_rules(next);
+        if (!load_position_from_tokens(tokens, 1, next, true)) return false;
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
     position_ = next;
-    return true;
+    mate_position_valid_ = true;
+    return valid;
 }
 
 SearchOptions UsiEngine::parse_go_options(const std::string& line) const {
@@ -952,11 +1056,12 @@ SearchOptions UsiEngine::parse_go_options(const std::string& line) const {
     int black_inc = 0;
     int white_inc = 0;
     int byoyomi = 0;
+    bool has_clock = false;
 
     for (std::size_t i = 1; i < tokens.size(); ++i) {
         const std::string& token = tokens[i];
         if (token == "depth" && i + 1 < tokens.size()) {
-            options.max_depth = std::max(1, parse_int(tokens[++i], options.max_depth));
+            options.max_depth = std::clamp(parse_int(tokens[++i], options.max_depth), 1, kMaxDepth);
         } else if (token == "movetime" && i + 1 < tokens.size()) {
             movetime = std::max(1, parse_int(tokens[++i]));
         } else if (token == "ponder") {
@@ -964,14 +1069,19 @@ SearchOptions UsiEngine::parse_go_options(const std::string& line) const {
         } else if (token == "nodes" && i + 1 < tokens.size()) {
             options.node_limit = std::max<std::uint64_t>(1, parse_uint64(tokens[++i], 0));
         } else if (token == "btime" && i + 1 < tokens.size()) {
+            has_clock = true;
             black_time = parse_int(tokens[++i]);
         } else if (token == "wtime" && i + 1 < tokens.size()) {
+            has_clock = true;
             white_time = parse_int(tokens[++i]);
         } else if (token == "binc" && i + 1 < tokens.size()) {
+            has_clock = true;
             black_inc = parse_int(tokens[++i]);
         } else if (token == "winc" && i + 1 < tokens.size()) {
+            has_clock = true;
             white_inc = parse_int(tokens[++i]);
         } else if (token == "byoyomi" && i + 1 < tokens.size()) {
+            has_clock = true;
             byoyomi = parse_int(tokens[++i]);
         } else if (token == "infinite") {
             options.infinite = true;
@@ -981,45 +1091,50 @@ SearchOptions UsiEngine::parse_go_options(const std::string& line) const {
 
     if (movetime > 0) {
         options.time_limit_ms = movetime;
-    } else if (!options.infinite) {
+    } else if (!options.infinite && has_clock) {
         bool black_to_move = true;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             black_to_move = position_.side_to_move() == Color::Black;
         }
-        const int remaining = std::max(0, black_to_move ? black_time : white_time);
-        const int increment = std::max(0, black_to_move ? black_inc : white_inc);
-        const int safe_byoyomi = std::max(0, byoyomi);
-        if (remaining > 0 || increment > 0 || byoyomi > 0) {
-            const int slice = remaining > 0 ? std::max(remaining / 30, 50) : 0;
-            const int slowed_slice = slice * slow_mover_ / 100;
-            const int soft_target =
-                std::max(0, slowed_slice + increment + safe_byoyomi - network_delay_ms_);
-            const int hard_cap =
-                std::max(0, remaining + increment + safe_byoyomi - network_delay2_ms_);
-            const int minimum_time = std::max(
-                0, minimum_thinking_time_ms_ - network_delay_ms_ - network_delay2_ms_);
-            int time_limit = std::max(soft_target, minimum_time);
-            if (hard_cap > 0) {
-                time_limit = std::min(time_limit, hard_cap);
-            } else {
-                time_limit = 1;
-            }
-            options.time_limit_ms = std::max(1, time_limit);
-        }
+        // 残り時間 0 は無制限ではない。加算・秒読みを含む計算は 64 ビットで行う。
+        const std::int64_t remaining = std::max(0, black_to_move ? black_time : white_time);
+        const std::int64_t increment = std::max(0, black_to_move ? black_inc : white_inc);
+        const std::int64_t safe_byoyomi = std::max(0, byoyomi);
+        const auto slice = remaining > 0 ? std::max<std::int64_t>(remaining / 30, 50) : 0;
+        const auto soft_target = std::max<std::int64_t>(
+            0, slice * slow_mover_ / 100 + increment + safe_byoyomi - network_delay_ms_);
+        const auto hard_cap = std::max<std::int64_t>(
+            0, remaining + increment + safe_byoyomi - network_delay2_ms_);
+        const auto minimum_time = std::max<std::int64_t>(
+            0, minimum_thinking_time_ms_ - network_delay_ms_ - network_delay2_ms_);
+        options.time_limit_ms = static_cast<int>(std::clamp<std::int64_t>(
+            std::min(std::max(soft_target, minimum_time), hard_cap),
+            1, std::numeric_limits<int>::max()));
     }
 
     return options;
 }
 
 void UsiEngine::print_info(const SearchInfo& info) const {
-    std::cout << "info depth " << info.depth;
+    ProtocolOutput out;
+    out << "info depth " << info.depth << " seldepth " << info.seldepth;
     if (info.show_multipv) {
-        std::cout << " multipv " << info.multipv;
+        out << " multipv " << info.multipv;
     }
-    std::cout << " score cp " << info.score_cp << " nodes " << info.nodes << " time "
-              << info.elapsed_ms << " nps " << compute_nps(info.nodes, info.elapsed_ms) << " pv "
-              << info.pv << std::endl;
+    if (info.has_score) {
+        if (const auto mate = Search::mate_distance(info.score_cp)) {
+            out << " score mate " << *mate;
+        } else {
+            out << " score cp " << info.score_cp;
+        }
+    }
+    out << " nodes " << info.nodes << " time " << info.elapsed_ms
+        << " nps " << compute_nps(info.nodes, info.elapsed_ms)
+        << " hashfull " << info.hashfull_permille;
+    if (!info.current_move.empty()) out << " currmove " << info.current_move;
+    if (!info.pv.empty()) out << " pv " << info.pv;
+    out << std::endl;
 }
 
 }  // namespace shogi
