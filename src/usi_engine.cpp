@@ -380,6 +380,11 @@ void UsiEngine::handle_line(const std::string& line) {
                   << kMaxMultiPv << std::endl;
         ProtocolOutput{} << "option name USI_ShowCurrLine type check default false" << std::endl;
         ProtocolOutput{} << "option name USI_ShowRefutations type check default false" << std::endl;
+        ProtocolOutput{} << "option name USI_LimitStrength type check default false" << std::endl;
+        ProtocolOutput{} << "option name USI_Strength type spin default " << SearchOptions::kDefaultStrength
+                         << " min " << SearchOptions::kMinStrength << " max " << SearchOptions::kMaxStrength
+                         << std::endl;
+        ProtocolOutput{} << "option name USI_AnalyseMode type check default false" << std::endl;
         ProtocolOutput{} << "option name Threads type spin default " << kDefaultThreads << " min 1 max "
                   << kMaxThreads << std::endl;
         ProtocolOutput{} << "option name Hash type spin default " << Search::hash_size_mb() << " min "
@@ -418,6 +423,8 @@ void UsiEngine::handle_line(const std::string& line) {
                   << " var user_book3.db" << std::endl;
         ProtocolOutput{} << "option name TsumeMode type check default false" << std::endl;
         ProtocolOutput{} << "usiok" << std::endl;
+        // 公開版には利用制限がないため、コピー保護の確認は常に利用可を返す。
+        ProtocolOutput{} << "copyprotection checking\ncopyprotection ok\n";
         return;
     }
     if (line == "isready") {
@@ -533,6 +540,13 @@ void UsiEngine::set_option(const std::string& line) {
         show_currline_.store(parse_bool_option(value_token));
     } else if (tokens[2] == "USI_ShowRefutations") {
         show_refutations_.store(parse_bool_option(value_token));
+    } else if (tokens[2] == "USI_LimitStrength") {
+        limit_strength_ = parse_bool_option(value_token);
+    } else if (tokens[2] == "USI_Strength") {
+        strength_ = std::clamp(parse_int(value_token, SearchOptions::kDefaultStrength),
+                               SearchOptions::kMinStrength, SearchOptions::kMaxStrength);
+    } else if (tokens[2] == "USI_AnalyseMode") {
+        analyse_mode_ = parse_bool_option(value_token);
     } else if (tokens[2] == "MultiPV" || tokens[2] == "USI_MultiPV") {
         multi_pv_.store(std::clamp(parse_int(value_token, kDefaultMultiPv), 1, kMaxMultiPv));
     } else if (tokens[2] == "Threads") {
@@ -624,12 +638,16 @@ void UsiEngine::start_search(const std::string& line) {
     if (debug_.load()) {
         ProtocolOutput{} << "info string debug search time_limit_ms " << options.time_limit_ms
             << " movestogo " << options.moves_to_go << " threads " << options.threads
-            << " restricted " << options.restrict_searchmoves << std::endl;
+            << " restricted " << options.restrict_searchmoves
+            << " analyse_mode " << analyse_mode_ << " limit_strength " << options.limit_strength
+            << " strength " << options.strength << " depth_limit " << options.max_depth
+            << " node_limit " << options.node_limit << std::endl;
     }
     const bool valid = position_valid_ && snapshot.find_king(Color::Black) >= 0 &&
                        snapshot.find_king(Color::White) >= 0;
 
-    if (valid && usi_own_book_ && book_.is_loaded() && !options.ponder && !options.infinite) {
+    if (valid && !analyse_mode_ && !options.limit_strength && usi_own_book_ && book_.is_loaded() &&
+        !options.ponder && !options.infinite) {
         const std::string sfen = snapshot.to_sfen();
         const auto* entries = book_.lookup(sfen);
         if (entries && !entries->empty()) {
@@ -660,10 +678,11 @@ void UsiEngine::start_search(const std::string& line) {
         ponderhit_ = false;
         suppress_bestmove_ = false;
     }
-    const int resign_value = resign_value_;
+    const int resign_value = analyse_mode_ ? kMaxResignValue : resign_value_;
+    const bool show_ponder = !analyse_mode_ && usi_ponder_.load();
     searching_.store(true);
 
-    search_thread_ = std::thread([this, snapshot, options, resign_value, valid]() mutable {
+    search_thread_ = std::thread([this, snapshot, options, resign_value, show_ponder, valid]() mutable {
         SearchResult result;
         if (valid) {
             result = search_.find_best_move(snapshot, options, stop_requested_, [&](const SearchInfo& info) {
@@ -679,7 +698,7 @@ void UsiEngine::start_search(const std::string& line) {
                 return stop_requested_.load() || suppress_bestmove_ ||
                        (!options.infinite && (!options.ponder || ponderhit_));
             });
-            if (!suppress_bestmove_) report_bestmove(result, snapshot, resign_value);
+            if (!suppress_bestmove_) report_bestmove(result, snapshot, resign_value, show_ponder);
             pondering_ = false;
             ponderhit_ = false;
         }
@@ -797,7 +816,7 @@ void UsiEngine::start_tsume(const std::string& line) {
 
 void UsiEngine::report_bestmove(const SearchResult& result,
                                 const Position& snapshot,
-                                int resign_value) const {
+                                int resign_value, bool show_ponder) const {
     if (result.terminal.outcome == TerminalOutcome::Win &&
         result.terminal.reason == TerminalReason::DeclarationWin) {
         ProtocolOutput{} << "bestmove win" << std::endl;
@@ -816,7 +835,7 @@ void UsiEngine::report_bestmove(const SearchResult& result,
 
     ProtocolOutput out;
     out << "bestmove " << snapshot.move_to_usi(result.best_move);
-    if (usi_ponder_.load()) {
+    if (show_ponder) {
         const std::string ponder = extract_ponder_move(result.pv);
         if (!ponder.empty()) {
             out << " ponder " << ponder;
@@ -1076,6 +1095,8 @@ bool UsiEngine::set_position(const std::string& line) {
 
 SearchOptions UsiEngine::parse_go_options(const std::string& line) const {
     SearchOptions options;
+    options.limit_strength = limit_strength_ && !analyse_mode_;
+    options.strength = strength_;
     options.show_currline = show_currline_.load();
     options.show_refutations = show_refutations_.load();
     options.multi_pv = std::clamp(multi_pv_.load(), 1, kMaxMultiPv);
@@ -1126,7 +1147,6 @@ SearchOptions UsiEngine::parse_go_options(const std::string& line) const {
             byoyomi = parse_int(tokens[++i]);
         } else if (token == "infinite") {
             options.infinite = true;
-            options.max_depth = kMaxDepth;
         }
     }
 
@@ -1155,6 +1175,7 @@ SearchOptions UsiEngine::parse_go_options(const std::string& line) const {
             1, std::numeric_limits<int>::max()));
     }
 
+    options.apply_strength_limit();
     return options;
 }
 

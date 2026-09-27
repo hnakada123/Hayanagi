@@ -518,6 +518,101 @@ class EngineTests(unittest.TestCase):
                 self.assertEqual(lines[-1], 'bestmove ' + move)
                 self.assertEqual(any('book hit' in line for line in lines), move == '7g7f')
 
+    def test_copyprotection_and_strength_options(self):
+        for option in ('USI_LimitStrength', 'USI_AnalyseMode'):
+            self.assertIn(f'option name {option} type check default false', self.usi_lines)
+        self.assertIn('option name USI_Strength type spin default 1 min -15 max 6', self.usi_lines)
+        self.engine.send('usi\nisready')
+        lines = self.engine.until('readyok')
+        index = lines.index('usiok')
+        self.assertEqual(lines[index + 1:], ['copyprotection checking', 'copyprotection ok', 'readyok'])
+        self.assertFalse(any(line.startswith('registration ') for line in lines))
+
+    def test_strength_limits_and_explicit_limits(self):
+        self.engine.send('debug on\nsetoption name USI_LimitStrength value true')
+        # 範囲外は上下限へ丸め、0は1級相当、不正値は既定値に戻す。
+        cases = [(-999, 1, 256), (-15, 1, 256), (-10, 2, 1536),
+                 (-5, 4, 8192), (-1, 5, 32768), (0, 5, 32768),
+                 (1, 6, 49152), (6, 7, 262144), (999, 7, 262144), ('invalid', 6, 49152)]
+        for threads in (1, 4):
+            self.engine.send(f'setoption name Threads value {threads}')
+            for strength, depth, nodes in cases:
+                with self.subTest(threads=threads, strength=strength):
+                    self.engine.send(f'setoption name USI_Strength value {strength}\n'
+                                     'position startpos\ngo depth 20 nodes 1000 searchmoves 7g7f 2g2f')
+                    lines = self.engine.until('bestmove ')
+                    self.assertTrue(any(f'depth_limit {depth} node_limit {min(nodes, 1000)}' in line
+                                        for line in lines), lines)
+                    infos = [line for line in lines if line.startswith('info depth ')]
+                    self.assertTrue(infos, lines)
+                    self.assertTrue(all(int(line.split()[2]) <= depth for line in infos), infos)
+                    self.assertTrue(all(int(re.search(r' nodes (\d+)', line)[1]) <= min(nodes, 1000) + threads
+                                        for line in infos), infos)
+                    self.assertIn(lines[-1], ('bestmove 7g7f', 'bestmove 2g2f'))
+        self.engine.send('go depth 1 nodes 1 movetime 1 searchmoves 2g2f')
+        lines = self.engine.until('bestmove ')
+        self.assertIn('time_limit_ms 1 ', '\n'.join(lines))
+        self.assertIn('depth_limit 1 node_limit 1', '\n'.join(lines))
+        self.assertEqual(lines[-1], 'bestmove 2g2f')
+
+    def test_strength_disabled_and_waiting_modes(self):
+        self.engine.send('setoption name USI_Strength value -15\nposition startpos\ngo depth 3')
+        lines = self.engine.until('bestmove ')
+        self.assertTrue(any(line.startswith('info depth 3 ') for line in lines), lines)
+        self.engine.send('setoption name USI_LimitStrength value true')
+        for command, finish in (('go infinite', 'stop'), ('go ponder depth 5', 'ponderhit')):
+            self.engine.send('position startpos\n' + command + ' searchmoves 2g2f')
+            self.engine.until('info depth 1 ')
+            self.assertFalse(any(line.startswith('bestmove ') for line in self.engine.ready()))
+            self.engine.send(finish)
+            self.assertEqual(self.engine.until('bestmove ', timeout=3)[-1], 'bestmove 2g2f')
+        # 専用の詰将棋解答には対局用の棋力制限をかけない。
+        self.engine.send('position sfen ' + PROBLEMS[0][0] + '\ngo mate 5000')
+        self.assertEqual(self.engine.until('checkmate ')[-1], 'checkmate ' + PROBLEMS[0][1])
+
+    def test_analyse_and_strength_bypass_book_without_losing_settings(self):
+        with tempfile.TemporaryDirectory(prefix='hayanagi analyse book ') as directory:
+            Path(directory, 'standard_book.db').write_text(
+                '#YANEURAOU-DB2016 1.00\n'
+                'sfen lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1\n'
+                '7g7f 3c3d 10 1 1\n', encoding='utf-8')
+            self.engine.send(f'setoption name BookDir value {directory}\n'
+                             'setoption name USI_OwnBook value true\n'
+                             'setoption name USI_Strength value -15')
+            self.engine.ready()
+            cases = [(False, False, True, None), (True, True, False, 3),
+                     (False, True, False, 1), (False, False, True, None)]
+            for analyse, limited, book_hit, depth in cases:
+                self.engine.send(f'setoption name USI_AnalyseMode value {str(analyse).lower()}\n'
+                                 f'setoption name USI_LimitStrength value {str(limited).lower()}\n'
+                                 'position startpos\ngo depth 3 searchmoves 7g7f')
+                lines = self.engine.until('bestmove ')
+                self.assertEqual(any('book hit' in line for line in lines), book_hit, lines)
+                self.assertEqual(lines[-1], 'bestmove 7g7f')
+                if depth is not None:
+                    depths = [int(line.split()[2]) for line in lines if line.startswith('info depth ')]
+                    self.assertEqual(max(depths), depth, lines)
+
+    def test_analyse_resignation_ponder_and_option_snapshot(self):
+        position = 'position sfen 4k4/9/9/9/4R4/9/9/9/4K4 w - 1'
+        self.engine.send('setoption name ResignValue value 1\n'
+                         'setoption name USI_Ponder value true\n' + position + '\ngo depth 2')
+        self.assertEqual(self.engine.until('bestmove ')[-1], 'bestmove resign')
+        self.engine.send('debug on\nsetoption name USI_AnalyseMode value true\n' + position + '\ngo depth 2 infinite')
+        lines = self.engine.until('info depth 2 ')
+        self.assertIn('depth_limit 2 node_limit 0', '\n'.join(lines))
+        self.engine.send('debug off')
+        self.assertFalse(any(line.startswith('bestmove ') for line in self.engine.ready()))
+        # 探索中の設定変更は次のgoから反映し、開始時の解析設定を維持する。
+        self.engine.send('setoption name USI_AnalyseMode value false\nstop')
+        bestmove = self.engine.until('bestmove ')[-1]
+        self.assertNotEqual(bestmove, 'bestmove resign')
+        self.assertNotIn(' ponder ', bestmove)
+        self.engine.send(position + ' moves ' + bestmove.split()[1])
+        self.assertEqual(self.engine.ready(), ['readyok'])
+        self.engine.send(position + '\ngo depth 2')
+        self.assertEqual(self.engine.until('bestmove ')[-1], 'bestmove resign')
+
     def test_debug_and_movestogo_time_allocation(self):
         self.assertFalse(any('debug ' in line for line in self.engine.ready()))
         self.engine.send('debug on\nposition startpos')

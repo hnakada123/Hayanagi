@@ -552,6 +552,18 @@ int king_safety_score(const Position& position, Color color, int phase) {
 
 }  // namespace
 
+void SearchOptions::apply_strength_limit() {
+    if (!limit_strength) return;
+    strength = std::clamp(strength, kMinStrength, kMaxStrength);
+    // 0 は1級として扱う。段級位は未校正の目安で、探索量だけを段階的に制限する。
+    const int level = strength <= 0 ? std::min(strength, -1) - kMinStrength
+                                   : strength - kMinStrength - 1;
+    std::uint64_t budget = std::uint64_t{256} << (level / 2);
+    if (level % 2 != 0) budget = budget * 3 / 2;
+    max_depth = std::min(max_depth, 1 + level / 3);
+    node_limit = node_limit == 0 ? budget : std::min(node_limit, budget);
+}
+
 std::size_t Search::hash_size_mb() {
     return shared_tt().size_mb();
 }
@@ -589,6 +601,7 @@ void Search::reset_state(const SearchOptions& options,
     progress_.reset();
     mate_cutoff_ = nullptr;
     tt_generation_ = tt_generation;
+    tt_key_salt_ = 0;
     aborted_ = false;
     for (auto& ply_killers : killer_moves_) {
         ply_killers = {Move{}, Move{}};
@@ -686,11 +699,20 @@ int Search::search_root_move(const Position& root, const Move& root_move, int de
 }
 
 SearchResult Search::find_best_move(const Position& root,
-                                    const SearchOptions& options,
+                                    const SearchOptions& requested_options,
                                     std::atomic_bool& stop,
                                     const std::function<void(const SearchInfo&)>& on_info) {
+    SearchOptions options = requested_options;
+    options.apply_strength_limit();
     const std::uint8_t tt_generation = shared_tt().next_generation();
     reset_state(options, stop, std::chrono::steady_clock::now(), nullptr, tt_generation);
+    if (options.limit_strength) {
+        // 過去の深い探索や弱い探索の反復によって棋力制限を迂回しない。
+        // 今回のワーカー間だけで同じキーを使い、通常探索のキャッシュも区別する。
+        static std::atomic<std::uint64_t> salt_counter{0};
+        constexpr std::uint64_t increment = 0x9e3779b97f4a7c15ULL;
+        tt_key_salt_ = salt_counter.fetch_add(increment, std::memory_order_relaxed) + increment;
+    }
     progress_ = std::make_shared<Progress>();
     progress_->callback = on_info;
     progress_->root = root;
@@ -740,6 +762,7 @@ SearchResult Search::find_best_move(const Position& root,
         for (std::size_t i = 0; i < workers.size(); ++i) {
             Search& worker = workers[i];
             worker.reset_state(options, stop, start_time_, &shared_nodes, tt_generation);
+            worker.tt_key_salt_ = tt_key_salt_;
             worker.progress_ = progress_;
             worker.worker_index_ = i;
         }
@@ -748,7 +771,7 @@ SearchResult Search::find_best_move(const Position& root,
     std::vector<Move> mating_line;
     iteration_depth_ = kMateSearchMaxPly;
     for (Search& worker : workers) worker.iteration_depth_ = kMateSearchMaxPly;
-    if (!options.restrict_searchmoves &&
+    if (!options.limit_strength && !options.restrict_searchmoves &&
         (options.infinite || options.max_depth >= 3 || options.time_limit_ms >= 200) &&
         (thread_count > 1 ? find_forced_mate_parallel(root, kMateSearchMaxPly, mating_line, workers)
                           : find_forced_mate(root, kMateSearchMaxPly, mating_line)) &&
@@ -814,7 +837,7 @@ SearchResult Search::find_best_move(const Position& root,
 
         Move tt_move;
         TTEntry tt_entry;
-        if (shared_tt().probe(root.position_key(), tt_entry)) {
+        if (shared_tt().probe(root.position_key() ^ tt_key_salt_, tt_entry)) {
             tt_move = tt_entry.best_move;
         }
 
@@ -1092,7 +1115,7 @@ int Search::negamax(const Position& position, int depth, int ply, int alpha, int
     Move tt_move;
 
     TTEntry tt_entry;
-    if (shared_tt().probe(key, tt_entry)) {
+    if (shared_tt().probe(key ^ tt_key_salt_, tt_entry)) {
         tt_move = tt_entry.best_move;
         if (tt_entry.depth >= depth) {
             const int tt_score = score_from_tt(tt_entry.score, ply);
@@ -1703,7 +1726,7 @@ std::string Search::build_pv(const Position& root, const Move& root_move, int ma
         }
 
         TTEntry tt_entry;
-        if (!shared_tt().probe(position.position_key(), tt_entry) ||
+        if (!shared_tt().probe(position.position_key() ^ tt_key_salt_, tt_entry) ||
             tt_entry.generation != tt_generation_) {
             break;
         }
@@ -1721,7 +1744,7 @@ void Search::store_tt(std::uint64_t key,
                       int beta,
                       const Move& best_move) {
     TTEntry entry;
-    entry.key = key;
+    entry.key = key ^ tt_key_salt_;
     entry.depth = depth;
     entry.score = score_to_tt(score, ply);
     entry.best_move = best_move;

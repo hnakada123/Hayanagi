@@ -18,6 +18,10 @@
 namespace shogi {
 
 struct SearchOptions {
+    static constexpr int kMinStrength = -15;
+    static constexpr int kMaxStrength = 6;
+    static constexpr int kDefaultStrength = 1;
+
     int max_depth = kMaxDepth;
     int time_limit_ms = 0;
     bool infinite = false;
@@ -32,6 +36,10 @@ struct SearchOptions {
     bool show_refutations = false;
     int aspiration_min_depth = 5;
     int aspiration_window_cp = 50;
+    bool limit_strength = false;
+    int strength = kDefaultStrength;
+
+    void apply_strength_limit();
 };
 
 enum class ScoreBound { Exact, Lower, Upper };
@@ -112,6 +120,7 @@ private:
     std::chrono::steady_clock::time_point start_time_{};
     std::uint64_t nodes_ = 0;
     std::uint8_t tt_generation_ = 0;
+    std::uint64_t tt_key_salt_ = 0;
     bool aborted_ = false;
     std::uint64_t pending_nodes_ = 0;
     std::uint64_t next_time_check_ = 0;

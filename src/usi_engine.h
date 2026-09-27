@@ -50,6 +50,9 @@ private:
     int network_delay2_ms_ = 0;
     int slow_mover_ = 100;
     int resign_value_ = 99999;
+    bool limit_strength_ = false;
+    int strength_ = SearchOptions::kDefaultStrength;
+    bool analyse_mode_ = false;
     bool usi_own_book_ = true;
     std::string book_dir_ = "book";
     std::string book_file_ = "standard_book.db";
@@ -65,7 +68,8 @@ private:
     void run_perft(const std::string& line);
     bool set_position(const std::string& line);
     SearchOptions parse_go_options(const std::string& line) const;
-    void report_bestmove(const SearchResult& result, const Position& snapshot, int resign_value) const;
+    void report_bestmove(const SearchResult& result, const Position& snapshot,
+                         int resign_value, bool show_ponder) const;
     void print_info(const SearchInfo& info) const;
 };
 
