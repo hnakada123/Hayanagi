@@ -1,8 +1,41 @@
 #pragma once
 
 #include <cstdint>
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
 
 namespace shogi {
+
+namespace bitboard_detail {
+inline int popcount(std::uint64_t bits) {
+#if defined(_MSC_VER)
+    return static_cast<int>(__popcnt64(bits));
+#else
+    return __builtin_popcountll(bits);
+#endif
+}
+
+inline int trailing_zeros(std::uint64_t bits) {
+#if defined(_MSC_VER)
+    unsigned long index = 0;
+    _BitScanForward64(&index, bits);
+    return static_cast<int>(index);
+#else
+    return __builtin_ctzll(bits);
+#endif
+}
+
+inline int highest_bit(std::uint64_t bits) {
+#if defined(_MSC_VER)
+    unsigned long index = 0;
+    _BitScanReverse64(&index, bits);
+    return static_cast<int>(index);
+#else
+    return 63 - __builtin_clzll(bits);
+#endif
+}
+}  // namespace bitboard_detail
 
 struct Bitboard {
     static constexpr std::uint64_t kHiMask = (1ULL << 17) - 1;
@@ -27,7 +60,7 @@ struct Bitboard {
     }
 
     int count() const {
-        return __builtin_popcountll(lo) + __builtin_popcountll(hi);
+        return bitboard_detail::popcount(lo) + bitboard_detail::popcount(hi);
     }
 
     bool test(int square) const {
@@ -56,12 +89,12 @@ struct Bitboard {
 
     // 最下位ビットの升（空でないこと）
     int lsb() const {
-        return lo != 0 ? __builtin_ctzll(lo) : 64 + __builtin_ctzll(hi);
+        return lo != 0 ? bitboard_detail::trailing_zeros(lo) : 64 + bitboard_detail::trailing_zeros(hi);
     }
 
     // 最上位ビットの升（空でないこと）
     int msb() const {
-        return hi != 0 ? 64 + (63 - __builtin_clzll(hi)) : 63 - __builtin_clzll(lo);
+        return hi != 0 ? 64 + bitboard_detail::highest_bit(hi) : bitboard_detail::highest_bit(lo);
     }
 
     // 2 つ以上のビットが立っているか
@@ -71,11 +104,11 @@ struct Bitboard {
 
     int pop_lsb() {
         if (lo != 0) {
-            const int bit = __builtin_ctzll(lo);
+            const int bit = bitboard_detail::trailing_zeros(lo);
             lo &= lo - 1;
             return bit;
         }
-        const int bit = __builtin_ctzll(hi);
+        const int bit = bitboard_detail::trailing_zeros(hi);
         hi &= hi - 1;
         return 64 + bit;
     }

@@ -66,7 +66,7 @@ endif()
 # 盤面や表を int で添字付けする設計なので、符号変換の警告は GCC と同じく無効にする。
 foreach(target IN LISTS HAYANAGI_TARGETS)
     if(MSVC)
-        target_compile_options(${target} PRIVATE /W4)
+        target_compile_options(${target} PRIVATE /W4 /utf-8)
     else()
         target_compile_options(${target} PRIVATE
             -Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wno-sign-conversion)
