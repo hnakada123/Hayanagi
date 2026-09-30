@@ -4,8 +4,8 @@ Hayanagi は、C++17 で実装した USI プロトコル対応の最小構成将
 通常対局用の探索に加えて、詰将棋用の詰み探索（`TsumeSearch`）を備え、
 将棋 GUI [ShogiBoardQ](https://github.com/hnakada123/ShogiBoardQ) に静的ライブラリとして組み込まれています。
 
-- 現在のバージョン: **1.4.0**（[変更履歴](#バージョンと変更履歴)）
-- USI の `id name` は `Hayanagi 1.4.0`。`./build/hayanagi --version` でも表示できます
+- 現在のバージョン: **1.5.0**（[変更履歴](#バージョンと変更履歴)）
+- USI の `id name` は `Hayanagi 1.5.0`。`./build/hayanagi --version` でも表示できます
 - CMake の生成実行ファイル名は `hayanagi`、組み込み用の静的ライブラリは `hayanagi_tsume`
 - 合法手生成、終局判定、通常探索、詰み探索、`bench` / `perft` をひととおり実装
 
@@ -52,7 +52,7 @@ cmake --build build
 ## 実行例
 
 ```bash
-./build/hayanagi --version   # Hayanagi 1.4.0
+./build/hayanagi --version   # Hayanagi 1.5.0
 ./build/hayanagi             # USI エンジンとして起動
 ```
 
@@ -67,10 +67,10 @@ go nodes 5000
 quit
 ```
 
-`usi` に対しては次のように応答します（`Hayanagi 1.4.0` の出力）。
+`usi` に対しては次のように応答します（`Hayanagi 1.5.0` の出力）。
 
 ```text
-id name Hayanagi 1.4.0
+id name Hayanagi 1.5.0
 id author OpenAI
 option name USI_Ponder type check default false
 option name MultiPV type spin default 1 min 1 max 32
@@ -974,16 +974,27 @@ python3 tests/bench_tsume.py build/hayanagi [--baseline /path/to/previous/hayana
 
 バージョンは `src/version.h` の `HAYANAGI_VERSION` が唯一の定義元で、CMake の `project(... VERSION)`、
 USI の `id name`、`--version` はすべてここから読みます。リリース時はこの値と本節を更新し、
-同じ番号のタグ（`v1.4.0` など）を付けます。ShogiBoardQ はタグで指定した版をサブモジュールとして参照します。
+同じ番号のタグ（`v1.5.0` など）を付けます。ShogiBoardQ はタグで指定した版をサブモジュールとして参照します。
 
 | バージョン | タグ | 日付 | 概要 |
 |---|---|---|---|
+| 1.5.0 | 未作成（未リリース） | 2026-10-01 | 独自定跡の生成・検証、通常探索・評価と定跡読込の改善、配布準備 |
 | 1.4.0 | [v1.4.0](https://github.com/hnakada123/Hayanagi/releases/tag/v1.4.0) | 2026-09-28 | 棋力制限・解析モード、コピー保護状態の通知 |
 | 1.3.0 | [v1.3.0](https://github.com/hnakada123/Hayanagi/releases/tag/v1.3.0) | 2026-09-28 | 初手制限・残り手数指定・デバッグ、追加探索情報と評価値の上下限通知 |
 | 1.2.0 | [v1.2.0](https://github.com/hnakada123/Hayanagi/releases/tag/v1.2.0) | 2026-09-28 | 標準詰将棋解答・詰みスコア、USI 互換性と探索終了処理の改善 |
 | 1.1.0 | [v1.1.0](https://github.com/hnakada123/Hayanagi/releases/tag/v1.1.0) | 2026-09-28 | 詰み確認・詰将棋・perft の並列化、ワーカー再利用、逐次処理の高速化 |
 | 1.0.1 | [v1.0.1](https://github.com/hnakada123/Hayanagi/releases/tag/v1.0.1) | 2026-09-25 | Clang での `-Wsign-conversion` 警告を解消（ShogiBoardQ が参照中） |
 | 1.0.0 | [v1.0.0](https://github.com/hnakada123/Hayanagi/releases/tag/v1.0.0) | 2026-09-25 | 詰み探索と局面処理の高速化、ベンチマーク、単体テスト、バージョン情報 |
+
+### 1.5.0（2026-10-01、未リリース）
+
+- 棋譜取込、候補手の同一深さでの選別、問題局面の再解析による独自定跡の生成と、未使用棋譜の局面を使った対局検証を追加しました。
+- 詰み確認で着手履歴と終局条件を保持し、浅い探索での駒打ちによる１手詰めの見落としや、王手となる駒取りの過剰な枝刈りを修正しました。
+- 事前の詰み確認と静止探索の探索量に上限を設け、通常探索の予算を確保しました。探索が完了しない場合の代替手も評価して選びます。
+- 相手に狙われた守りのない駒と、逃げ場の少ない飛車の危険性を評価に反映しました。
+- 定跡照合を手数の異なる同一局面に対応させ、使用手数の上限、`no_book`、終局条件、予想応手の合法性の扱いを改善しました。ビルド時に配置する定跡も選択できます。
+- MSVC のビット演算と UTF-8 コンパイルに対応し、出典確認付きの配布 ZIP 作成ツールを追加しました。
+- 拡張・修正版の定跡候補は 11,409 局面・19,735 候補手です。棋力向上を確認できていないため既定の定跡は現行版を維持し、新候補はローカル検証用としています。再配布条件の確認状況は [book/redistribution.json](book/redistribution.json) に記録しています。
 
 ### 1.4.0（2026-09-28）
 
