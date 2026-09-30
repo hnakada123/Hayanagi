@@ -527,7 +527,7 @@ def main():
     ingest.add_argument('--source-sha256', required=True)
     export = commands.add_parser('export', help='select, optionally analyze, and export DB2016')
     export.add_argument('--work-db', type=Path, required=True)
-    export.add_argument('--output', type=Path, default=Path('book/standard_book.db'))
+    export.add_argument('--output', type=Path, default=Path('book/hayanagi_book.db'))
     export.add_argument('--min-count', type=positive, default=3)
     export.add_argument('--min-pairs', type=positive, default=2)
     export.add_argument('--pair-cap', type=positive, default=16)

@@ -188,10 +188,13 @@ class RuntimeTests(unittest.TestCase):
         self.engine = Engine(ENGINE)
         self.addCleanup(self.engine.close)
         self.engine.send('usi')
-        self.engine.until('usiok')
+        lines = self.engine.until('usiok')
+        self.assertEqual([s for s in lines if s.startswith('option name BookFile ')],
+                         ['option name BookFile type combo default hayanagi_book.db'
+                          ' var no_book var hayanagi_book.db'])
 
     def load(self, extra='', ponder='3c3d'):
-        Path(self.directory.name, 'standard_book.db').write_text(
+        Path(self.directory.name, 'hayanagi_book.db').write_text(
             '#YANEURAOU-DB2016 1.00\n' + extra + 'sfen ' + START + '\n' +
             f'7g7f {ponder} 10 5 10\n', encoding='ascii')
         self.engine.send(f'setoption name BookDir value {self.directory.name}')
@@ -216,6 +219,9 @@ class RuntimeTests(unittest.TestCase):
         self.engine.send('setoption name BookFile value no_book')
         self.engine.ready()
         self.assertFalse(any('book hit' in s for s in self.search()))
+        self.engine.send('setoption name BookFile value hayanagi_book.db')
+        self.engine.ready()
+        self.assertTrue(any('book hit' in s for s in self.search()))
 
     def test_invalid_ponder_is_omitted(self):
         self.load(ponder='7g7f')

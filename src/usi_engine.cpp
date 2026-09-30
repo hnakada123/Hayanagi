@@ -411,16 +411,8 @@ void UsiEngine::handle_line(const std::string& line) {
                   << (position_rules_.generate_all_legal_moves ? "true" : "false") << std::endl;
         ProtocolOutput{} << "option name USI_OwnBook type check default true" << std::endl;
         ProtocolOutput{} << "option name BookDir type string default book" << std::endl;
-        ProtocolOutput{} << "option name BookFile type combo default standard_book.db"
-                  << " var no_book"
-                  << " var standard_book.db"
-                  << " var yaneura_book1.db"
-                  << " var yaneura_book2.db"
-                  << " var yaneura_book3.db"
-                  << " var yaneura_book4.db"
-                  << " var user_book1.db"
-                  << " var user_book2.db"
-                  << " var user_book3.db" << std::endl;
+        ProtocolOutput{} << "option name BookFile type combo default hayanagi_book.db"
+                  << " var no_book var hayanagi_book.db" << std::endl;
         ProtocolOutput{} << "option name TsumeMode type check default false" << std::endl;
         ProtocolOutput{} << "usiok" << std::endl;
         // 公開版には利用制限がないため、コピー保護の確認は常に利用可を返す。

@@ -420,7 +420,7 @@ class EngineTests(unittest.TestCase):
 
     def test_book_and_infinite_with_directory_spaces(self):
         with tempfile.TemporaryDirectory(prefix='hayanagi book ') as directory:
-            Path(directory, 'standard_book.db').write_text(
+            Path(directory, 'hayanagi_book.db').write_text(
                 '#YANEURAOU-DB2016 1.00\n'
                 'sfen lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1\n'
                 '7g7f 3c3d 10 1 1\n', encoding='utf-8')
@@ -507,7 +507,7 @@ class EngineTests(unittest.TestCase):
 
     def test_searchmoves_book_filter(self):
         with tempfile.TemporaryDirectory(prefix='hayanagi restricted book ') as directory:
-            Path(directory, 'standard_book.db').write_text(
+            Path(directory, 'hayanagi_book.db').write_text(
                 '#YANEURAOU-DB2016 1.00\n'
                 'sfen lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1\n'
                 '7g7f 3c3d 10 1 1\n', encoding='utf-8')
@@ -574,7 +574,7 @@ class EngineTests(unittest.TestCase):
 
     def test_analyse_and_strength_bypass_book_without_losing_settings(self):
         with tempfile.TemporaryDirectory(prefix='hayanagi analyse book ') as directory:
-            Path(directory, 'standard_book.db').write_text(
+            Path(directory, 'hayanagi_book.db').write_text(
                 '#YANEURAOU-DB2016 1.00\n'
                 'sfen lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1\n'
                 '7g7f 3c3d 10 1 1\n', encoding='utf-8')

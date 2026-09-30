@@ -55,7 +55,7 @@ private:
     bool analyse_mode_ = false;
     bool usi_own_book_ = true;
     std::string book_dir_ = "book";
-    std::string book_file_ = "standard_book.db";
+    std::string book_file_ = "hayanagi_book.db";
     bool book_loaded_ = false;
 
     void handle_line(const std::string& line);

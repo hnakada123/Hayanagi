@@ -37,8 +37,8 @@ def build_package(args):
                      and permission.get('permission_evidence_url') and permission.get('permission_text'))
         if args.purpose == 'release' and not confirmed:
             raise ValueError('Generated-book redistribution is unconfirmed; use --purpose preview for local layout verification')
-        contents.update({'book/standard_book.db': args.book,
-                         'book/standard_book.json': args.book.with_suffix('.json'),
+        contents.update({'book/hayanagi_book.db': args.book,
+                         'book/hayanagi_book.json': args.book.with_suffix('.json'),
                          'book/NOTICE.txt': ROOT / 'book/NOTICE.txt',
                          'book/redistribution.json': args.redistribution})
     hashes = {name: digest_file(path) for name, path in sorted(contents.items())}
@@ -48,15 +48,15 @@ def build_package(args):
     executable = 'hayanagi.exe' if args.engine.suffix.lower() == '.exe' else 'hayanagi'
     if hashes[executable] != engine_hash:
         raise RuntimeError('Engine changed while checking its version')
-    if args.book and (json.loads(payloads['book/standard_book.json']) != metadata or
+    if args.book and (json.loads(payloads['book/hayanagi_book.json']) != metadata or
                       json.loads(payloads['book/redistribution.json']) != permission or
-                      hashes['book/standard_book.db'] != metadata['book_sha256']):
+                      hashes['book/hayanagi_book.db'] != metadata['book_sha256']):
         raise RuntimeError('Book or permission metadata changed while validating')
     usage = [version, f'{platform.system()} / {platform.machine()}', '',
              'ZIP全体を展開し、将棋GUIのUSIエンジン登録で同梱の実行ファイルを選んでください。']
     if args.book:
         usage.extend(['実行ファイルとbookフォルダーの位置関係を保ってください。',
-                      '標準設定（USI_OwnBook=true、BookDir=book、BookFile=standard_book.db）で定跡を読み込みます。',
+                      '標準設定（USI_OwnBook=true、BookDir=book、BookFile=hayanagi_book.db）で定跡を読み込みます。',
                       '出典と配布条件はbook/NOTICE.txtおよびbook/redistribution.jsonを参照してください。'])
     else:
         usage.append('このZIPに定跡は含まれていません。定跡を使う場合は、GUIからBookDirとBookFileを指定してください。')

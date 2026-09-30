@@ -421,7 +421,7 @@ def main():
     run = commands.add_parser('run')
     run.add_argument('--engine', type=Path, default=Path('build/hayanagi'))
     run.add_argument('--referee', type=Path, default=Path('build/hayanagi_match_referee'))
-    run.add_argument('--book', type=Path, default=Path('book/standard_book.db'))
+    run.add_argument('--book', type=Path, default=Path('book/hayanagi_book.db'))
     run.add_argument('--openings', type=Path, required=True)
     run.add_argument('--output', type=Path, required=True)
     run.add_argument('--nodes', type=positive, nargs='+', default=[10000, 50000])

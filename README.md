@@ -92,7 +92,7 @@ option name EnteringKingRule type combo default CSARule24 var NoEnteringKing var
 option name GenerateAllLegalMoves type check default true
 option name USI_OwnBook type check default true
 option name BookDir type string default book
-option name BookFile type combo default standard_book.db var no_book var standard_book.db var yaneura_book1.db var yaneura_book2.db var yaneura_book3.db var yaneura_book4.db var user_book1.db var user_book2.db var user_book3.db
+option name BookFile type combo default hayanagi_book.db var no_book var hayanagi_book.db
 option name TsumeMode type check default false
 usiok
 copyprotection checking
@@ -138,7 +138,7 @@ copyprotection ok
 - `go tsume <attack|defense> depth N movetime M`（詰み探索。[詳細](#詰み探索詰将棋の攻方玉方)）
 - `setoption name USI_OwnBook value <bool>`
 - `setoption name BookDir value <path>`
-- `setoption name BookFile value <file>`（`no_book` / `standard_book.db` / `yaneura_book1.db`〜`yaneura_book4.db` / `user_book1.db`〜`user_book3.db`）
+- `setoption name BookFile value <file>`（`no_book` / `hayanagi_book.db`、既定値は `hayanagi_book.db`）
 - `setoption name USI_Ponder value <bool>`
 - `setoption name MultiPV value N`
 - `setoption name USI_MultiPV value N`（`MultiPV` の別名）
@@ -196,7 +196,8 @@ copyprotection ok
 - `GenerateAllLegalMoves`
 - `TsumeMode`
 
-`USI_OwnBook` を有効にすると（デフォルトで有効）、`go` 時に定跡ファイルを参照し、現局面にヒットすれば探索せずに定跡手を返します。定跡ファイルはやねうら王の DB2016 フォーマット（`#YANEURAOU-DB2016 1.00`）に対応しています。`BookDir` で定跡フォルダ（デフォルトは実行ファイルからの相対パス `book`）、`BookFile` で定跡ファイル名（デフォルトは `standard_book.db`）を指定します。`BookFile` に `no_book` を指定すると定跡を無効にできます。
+`USI_OwnBook` を有効にすると（デフォルトで有効）、`go` 時に定跡ファイルを参照し、現局面にヒットすれば探索せずに定跡手を返します。定跡ファイルはやねうら王の DB2016 フォーマット（`#YANEURAOU-DB2016 1.00`）に対応しています。`BookDir` で定跡フォルダ（デフォルトは実行ファイルからの相対パス `book`）、`BookFile` で定跡ファイル名（デフォルトは `hayanagi_book.db`）を指定します。選択候補は `no_book` と `hayanagi_book.db` の２つで、`no_book` を指定すると定跡を無効にできます。
+以前のファイル名を保存したGUI設定では、`BookFile` を `hayanagi_book.db` に選び直してください。
 
 定跡は盤面・手番・持駒で照合し、SFEN の手数が異なる同一局面にもヒットします。
 ファイル内で先に現れる合法な候補手を採用します。千日手などの終局判定は定跡より優先し、
@@ -223,7 +224,7 @@ bsdtar -xf build/book-work/wdoor2025.7z -C build/book-work/csa --no-same-owner -
 
 ハッシュが一致することを確認してから展開してください。展開には7z対応の `bsdtar` または7-Zipが必要です。
 生成定跡の再配布条件は、2026-10-01時点で確認できていません。
-旧版 `book/standard_book.db` はコミット `fa2bfb1` に含まれ、既にリポジトリへ公開されています。
+現行定跡 `book/hayanagi_book.db` は旧名 `book/standard_book.db` でコミット `fa2bfb1` に含まれ、既にリポジトリへ公開されています。
 これは許諾確認済みであることを意味しません。追加生成する定跡本体と局面別記録はローカルに保持し、
 確認内容を [redistribution.json](book/redistribution.json) に記録します。
 サーバプログラムのGPLを棋譜データのライセンスとはみなしません。
@@ -240,13 +241,13 @@ python3 -B tools/build_book.py import \
   --source-sha256 423504903f211316ec40f9c3d8dcc2e5faf392fc4d1334ede1489242a9d09baa
 python3 -B tools/build_book.py export \
   --work-db build/book-work/floodgate2025.sqlite \
-  --output book/variants/local/standard_book.db \
+  --output book/variants/local/hayanagi_book.db \
   --min-count 3 --min-pairs 2 --pair-cap 16 \
   --max-positions 5000 --max-candidates 3 \
   --engine build/hayanagi --nodes 100000 --workers 4
 # ローカル候補を試す場合は、コピー元を明示して再構成します。
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
-  -DHAYANAGI_BOOK_SOURCE="$PWD/book/variants/local/standard_book.db"
+  -DHAYANAGI_BOOK_SOURCE="$PWD/book/variants/local/hayanagi_book.db"
 cmake --build build -j 4
 ```
 
@@ -266,17 +267,17 @@ cmake --build build -j 4
 採用候補の並び順は、偏りを抑えた出現頻度順を維持します。棋譜に付属する評価値は流用しません。
 `--engine` を省略すると頻度だけで生成し、評価値・深さは未解析を表す0になります。
 
-出力する `standard_book.db` は既存の DB2016 形式です。
+出力する `hayanagi_book.db` は既存の DB2016 形式です。
 同名の `.json` に入力・生成条件・ハッシュ・除外件数・検証棋譜での命中率、
 `.positions.jsonl` に各局面の代表手順・候補の支持数・解析結果を保存します。
 検証は未使用棋譜の再生による収録範囲の測定であり、対局成績の測定ではありません。
 SQLite は `build/book-work/` に置き、完了した解析を局面単位で保存します。
 中断後は同じ `export` コマンドで解析を再開できます。入力条件を変える場合は新しい作業DBに取り込み直してください。
 
-生成された `book/standard_book.db` がある場合、ビルド時に実行ファイル横へコピーされるため、
+生成された `book/hayanagi_book.db` がある場合、ビルド時に実行ファイル横の `book/hayanagi_book.db` へコピーされるため、
 既定の `USI_OwnBook=true` のまま追加設定なしで使えます。未収録局面では通常探索へ戻ります。
-ローカルの候補を使う場合は CMake の `HAYANAGI_BOOK_SOURCE` にそのファイルの絶対パスを指定します。
-既存のGUI設定では、`BookDir` と `BookFile` でも指定できます。
+ローカルの候補を使う場合は CMake の `HAYANAGI_BOOK_SOURCE` にそのファイルの絶対パスを指定します。コピー先の名前は `hayanagi_book.db` です。
+GUIから指定する場合は、候補定跡を `hayanagi_book.db` として配置し、`BookDir` でそのフォルダを選びます。
 本ツールでは評価関数の学習や自己対局による更新はまだ行いません。
 
 ```bash
@@ -305,7 +306,7 @@ python3 -B tools/match_book.py prepare \
   --output book/evaluation/openings-20260930.json --pairs 100 --seed 20260930
 python3 -B tools/match_book.py run \
   --engine build/hayanagi --referee build/hayanagi_match_referee \
-  --book book/standard_book.db --openings book/evaluation/openings-20260930.json \
+  --book book/hayanagi_book.db --openings book/evaluation/openings-20260930.json \
   --output book/evaluation/paired-20260930 --nodes 10000 50000 --max-plies 320 --workers 8
 python3 -B tools/match_book.py audit \
   --engine build/hayanagi --output book/evaluation/paired-20260930 --nodes 200000 --workers 8
@@ -555,7 +556,7 @@ python3 -B tools/validate_matches.py --output book/evaluation/search-fixes-20260
 旧版は `book/variants/20260930/`、予備候補は `book/variants/20261001/`、
 最終候補は `book/variants/20261001-reviewed/` に分けます。
 定跡本体と局面別の由来記録はローカルに保持し、集計・選別根拠・検証結果をGitに保存します。
-旧版は公開済み `book/standard_book.db` から復元できます。
+旧版は公開済み `book/hayanagi_book.db` から復元できます。以下の過去の検証用スナップショットは、記録との対応を保つため旧名 `standard_book.db` を維持しています。
 以下の比較用エンジンは、解析開始前に `build/hayanagi` をコピーして固定したものです。
 再実行時は別の出力先を指定してください。保存されたハッシュと違うエンジン・定跡・対局ツールでの再開は拒否されます。
 
@@ -646,7 +647,7 @@ Gitには検証後の棋譜を `games.zip` に圧縮して保存します。再�
 確認先と未確認事項は [redistribution.json](book/redistribution.json)、出典表示は [NOTICE.txt](book/NOTICE.txt) にあります。
 これは利用・再配布が全て禁止という法的判断ではありません。運営者への問い合わせは行っていません。
 
-`tools/package_release.py` は実行ファイルと `book/standard_book.db` を同じ親ディレクトリに配置し、
+`tools/package_release.py` は実行ファイルと `book/hayanagi_book.db` を同じ親ディレクトリに配置し、
 出典・生成条件・同梱物のSHA-256を付けたZIPを作ります。
 定跡の許諾が未確認の間は `--purpose preview` でローカルの配置確認用ZIPを作れます。
 定跡を同梱する `--purpose release` は、確認済み状態と根拠URL・許諾内容・対象アーカイブの一致を必要とします。
@@ -993,6 +994,7 @@ USI の `id name`、`--version` はすべてここから読みます。リリー
 - 事前の詰み確認と静止探索の探索量に上限を設け、通常探索の予算を確保しました。探索が完了しない場合の代替手も評価して選びます。
 - 相手に狙われた守りのない駒と、逃げ場の少ない飛車の危険性を評価に反映しました。
 - 定跡照合を手数の異なる同一局面に対応させ、使用手数の上限、`no_book`、終局条件、予想応手の合法性の扱いを改善しました。ビルド時に配置する定跡も選択できます。
+- 既定の定跡ファイル名を `hayanagi_book.db` に統一し、`BookFile` の選択候補を `no_book` と `hayanagi_book.db` に整理しました。
 - MSVC のビット演算と UTF-8 コンパイルに対応し、出典確認付きの配布 ZIP 作成ツールを追加しました。
 - 拡張・修正版の定跡候補は 11,409 局面・19,735 候補手です。棋力向上を確認できていないため既定の定跡は現行版を維持し、新候補はローカル検証用としています。再配布条件の確認状況は [book/redistribution.json](book/redistribution.json) に記録しています。
 

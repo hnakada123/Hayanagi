@@ -65,14 +65,20 @@ if(HAYANAGI_BUILD_BOOK_TOOLS)
 endif()
 
 # ローカルで生成した候補も、公開済み定跡を上書きせずに配置できる。
-set(HAYANAGI_BOOK_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/book/standard_book.db" CACHE FILEPATH
+set(HAYANAGI_BOOK_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/book/hayanagi_book.db" CACHE FILEPATH
     "実行ファイル横へコピーする定跡。空文字列ならコピーしない")
+# 改名前の既定値を保持したビルドディレクトリも、新しい配置へ移行する。
+if(HAYANAGI_BOOK_SOURCE STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}/book/standard_book.db"
+        AND NOT EXISTS "${HAYANAGI_BOOK_SOURCE}")
+    set(HAYANAGI_BOOK_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/book/hayanagi_book.db" CACHE FILEPATH
+        "実行ファイル横へコピーする定跡。空文字列ならコピーしない" FORCE)
+endif()
 if(HAYANAGI_BOOK_SOURCE AND EXISTS "${HAYANAGI_BOOK_SOURCE}")
     add_custom_target(hayanagi_book ALL
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:hayanagi>/book"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${HAYANAGI_BOOK_SOURCE}"
-            "$<TARGET_FILE_DIR:hayanagi>/book/standard_book.db"
+            "$<TARGET_FILE_DIR:hayanagi>/book/hayanagi_book.db"
         DEPENDS hayanagi "${HAYANAGI_BOOK_SOURCE}"
         VERBATIM)
 endif()
