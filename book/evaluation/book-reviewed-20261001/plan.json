@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "frozen_before_matches": true,
+  "holdout_pairs": 40,
+  "nodes": 50000,
+  "main_ms": 5000,
+  "byoyomi_ms": 100,
+  "margin_ms": 10,
+  "max_plies": 320,
+  "node_workers": 8,
+  "clock_workers": 4,
+  "clock_pairs": 40,
+  "all_three_pairings_and_color_swap": true,
+  "startpos_separate": true,
+  "expected_games": 492,
+  "engine_sha256": "833d9b8dc5ea50a8ba777264a3f619771b6ec74e63fbf70e8ac219160863354f",
+  "current_book_sha256": "a6ff056400fd7a643af0f2ad4d4da3cd634dffcade2715094c0f67fb5d64b429",
+  "candidate_book_sha256": "2330b73c916782aff9d086be1b0d320cc575200ec957603d54538d310de68148",
+  "openings_sha256": "98a0e586968717ec6a1afb4d82a6964d38f00829617fe977092c3d74ee1a58a5",
+  "reason_for_followup": "Two training-derived candidates failed a 10M-node review; re-screen all corpus candidates at those positions. Holdout match results were not used to choose these changes.",
+  "selection": "40 new game-level holdout positions, excluding all three preceding suites by SFEN and source game; no book-hit/score/outcome selection",
+  "execution": "Start after the preliminary comparison completes; no overlapping generation, node games, or additional search jobs during the final clock phase",
+  "limitations": [
+    "Smaller follow-up sample has wider uncertainty; no noninferiority margin was prespecified",
+    "Common opening positions may occur in training games; this is game-level holdout",
+    "Do not tune the candidate using these match outcomes"
+  ]
+}

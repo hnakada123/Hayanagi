@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "candidate_book_sha256": "2330b73c916782aff9d086be1b0d320cc575200ec957603d54538d310de68148",
+  "current_book_sha256": "a6ff056400fd7a643af0f2ad4d4da3cd634dffcade2715094c0f67fb5d64b429",
+  "candidate_positions": 11409,
+  "candidate_entries": 19735,
+  "decision": "Keep the current book as default; retain the expanded/reviewed candidate locally for further research",
+  "reason": "Coverage increased, but playing-strength improvement was not established. Candidate/no-book score was 50% at 50k nodes and 41.25% at the tested short clock; all six paired intervals include 50%.",
+  "results": [
+    {
+      "mode": "nodes",
+      "player": "candidate",
+      "opponent": "current",
+      "games": 80,
+      "wins": 41,
+      "losses": 39,
+      "draws": 0,
+      "score_rate": 0.5125,
+      "paired_95_percent_interval": [
+        0.4375,
+        0.5875
+      ]
+    },
+    {
+      "mode": "nodes",
+      "player": "candidate",
+      "opponent": "none",
+      "games": 80,
+      "wins": 40,
+      "losses": 40,
+      "draws": 0,
+      "score_rate": 0.5,
+      "paired_95_percent_interval": [
+        0.425,
+        0.575
+      ]
+    },
+    {
+      "mode": "nodes",
+      "player": "current",
+      "opponent": "none",
+      "games": 80,
+      "wins": 41,
+      "losses": 39,
+      "draws": 0,
+      "score_rate": 0.5125,
+      "paired_95_percent_interval": [
+        0.475,
+        0.55
+      ]
+    },
+    {
+      "mode": "clock",
+      "player": "candidate",
+      "opponent": "current",
+      "games": 80,
+      "wins": 37,
+      "losses": 43,
+      "draws": 0,
+      "score_rate": 0.4625,
+      "paired_95_percent_interval": [
+        0.35,
+        0.575
+      ]
+    },
+    {
+      "mode": "clock",
+      "player": "candidate",
+      "opponent": "none",
+      "games": 80,
+      "wins": 33,
+      "losses": 47,
+      "draws": 0,
+      "score_rate": 0.4125,
+      "paired_95_percent_interval": [
+        0.3125,
+        0.5125
+      ]
+    },
+    {
+      "mode": "clock",
+      "player": "current",
+      "opponent": "none",
+      "games": 80,
+      "wins": 42,
+      "losses": 38,
+      "draws": 0,
+      "score_rate": 0.525,
+      "paired_95_percent_interval": [
+        0.4375,
+        0.6125
+      ]
+    }
+  ],
+  "strict_unseen_analysis_root_pairs": 38,
+  "strict_unseen_candidate_vs_none_clock_score": 0.40789473684210525,
+  "deeply_reviewed_training_positions": 2,
+  "final_games": 492,
+  "preliminary_games": 852,
+  "total_games_validated": 1344,
+  "total_replayed_plies": 145605,
+  "final_time_forfeits": 0,
+  "release_layout_ready": true,
+  "generated_book_redistribution_confirmed": false,
+  "limitations": [
+    "Same engine and evaluator; no external rating calibration",
+    "Short clock only, 40 paired held-out starting positions",
+    "A supplementary subset of 38 also excludes all inspected saved analysis roots",
+    "The preliminary clock phase had a brief overlapping two-position analysis; final clock phase had no overlapping search/generation jobs",
+    "Game-level holdout may contain opening positions also present in training games",
+    "Bootstrap intervals do not adjust for multiple comparisons; opening families may correlate"
+  ]
+}

@@ -36,6 +36,12 @@ target_include_directories(hayanagi PRIVATE src)
 target_link_libraries(hayanagi PRIVATE hayanagi_tsume Threads::Threads)
 set_target_properties(hayanagi PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
 
+# 実行ファイルと説明書の配置。定跡同梱物は出典確認付きのpackage_release.pyで作成する。
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    install(TARGETS hayanagi RUNTIME DESTINATION . COMPONENT Runtime)
+    install(FILES README.md DESTINATION . COMPONENT Runtime)
+endif()
+
 # 単体テストは Hayanagi 自体をビルドするときだけ既定で有効にする
 # （ShogiBoardQ などから add_subdirectory されたときは無効）
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
@@ -58,14 +64,16 @@ if(HAYANAGI_BUILD_BOOK_TOOLS)
     list(APPEND HAYANAGI_TARGETS hayanagi_match_referee)
 endif()
 
-# The generated book is optional. Local generation does not require publishing it.
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/book/standard_book.db")
+# ローカルで生成した候補も、公開済み定跡を上書きせずに配置できる。
+set(HAYANAGI_BOOK_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/book/standard_book.db" CACHE FILEPATH
+    "実行ファイル横へコピーする定跡。空文字列ならコピーしない")
+if(HAYANAGI_BOOK_SOURCE AND EXISTS "${HAYANAGI_BOOK_SOURCE}")
     add_custom_target(hayanagi_book ALL
         COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:hayanagi>/book"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${CMAKE_CURRENT_SOURCE_DIR}/book/standard_book.db"
+            "${HAYANAGI_BOOK_SOURCE}"
             "$<TARGET_FILE_DIR:hayanagi>/book/standard_book.db"
-        DEPENDS hayanagi "${CMAKE_CURRENT_SOURCE_DIR}/book/standard_book.db"
+        DEPENDS hayanagi "${HAYANAGI_BOOK_SOURCE}"
         VERBATIM)
 endif()
 if(HAYANAGI_BUILD_TESTS)
@@ -98,6 +106,13 @@ if(HAYANAGI_BUILD_TESTS)
                 ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_search_regressions.py
                 --engine $<TARGET_FILE:hayanagi>
                 --referee $<TARGET_FILE:hayanagi_match_referee>)
+            add_test(NAME hayanagi_compare_books_tests COMMAND ${Python3_EXECUTABLE} -B
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_compare_books.py
+                --engine $<TARGET_FILE:hayanagi>
+                --referee $<TARGET_FILE:hayanagi_match_referee>)
+            add_test(NAME hayanagi_package_release_tests COMMAND ${Python3_EXECUTABLE} -B
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_package_release.py
+                --engine $<TARGET_FILE:hayanagi>)
         endif()
     endif()
     list(APPEND HAYANAGI_TARGETS hayanagi_tests)

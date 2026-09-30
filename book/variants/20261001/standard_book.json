@@ -1,0 +1,246 @@
+{
+  "schema_version": 1,
+  "source_url": "https://wdoor.c.u-tokyo.ac.jp/shogi/archive/wdoor2025.7z",
+  "source_archive_sha256": "423504903f211316ec40f9c3d8dcc2e5faf392fc4d1334ede1489242a9d09baa",
+  "corpus_sha256": "bab4a1d4a5b9349331fa8f3903ce2fac42b6a9337338a7cdc02cfd73f7ce959a",
+  "validator_sha256": "865505eca39c6d34778761b38e77e35d6a260db58bf810f16a9b73d6b518c7b8",
+  "import_settings": {
+    "max_ply": 30,
+    "min_rating": 3000.0,
+    "min_game_plies": 40,
+    "holdout_modulus": 10
+  },
+  "import_stats": {
+    "files": 128843,
+    "training_games": 52022,
+    "missing_rating": 20131,
+    "game_length": 9204,
+    "low_rating": 37218,
+    "unsupported_csa": 798,
+    "holdout_games": 5660,
+    "unfinished_or_abnormal": 3294,
+    "duplicate": 413,
+    "not_floodgate": 103
+  },
+  "generator_sha256": "95ce9c0fbfcf5c24f243c8ab51cdac9d33705da6fd3f6669beef4f26771ab19b",
+  "export_settings": {
+    "min_count": 3,
+    "min_pairs": 2,
+    "pair_cap": 16,
+    "max_positions": 12000,
+    "max_candidates": 3,
+    "first_moves": [
+      "7g7f",
+      "2g2f",
+      "5g5f"
+    ],
+    "nodes_per_search": 200000,
+    "searches_per_position": 2,
+    "engine_sha256": "833d9b8dc5ea50a8ba777264a3f619771b6ec74e63fbf70e8ac219160863354f",
+    "min_depth": 3,
+    "max_loss_cp": 150,
+    "analysis_version": 2,
+    "comparison": "fresh-process MultiPV of corpus candidates and discovered move at one completed depth",
+    "selection": "pair-capped frequency order among candidates passing optional search screening"
+  },
+  "book_sha256": "8fa01f2f5407a81e91eeae9e2094a24f4be64db27cd8dc46c74e97d7345b5438",
+  "positions": 11409,
+  "entries": 19734,
+  "rejected": {
+    "search_disagreement": 1609
+  },
+  "holdout": {
+    "games": 5660,
+    "method": "replay held-out games; not playing-strength measurement",
+    "per_ply": {
+      "1": {
+        "positions": 5660,
+        "hits": 5660,
+        "recorded_move_in_book": 5403
+      },
+      "2": {
+        "positions": 5660,
+        "hits": 5658,
+        "recorded_move_in_book": 5328
+      },
+      "3": {
+        "positions": 5660,
+        "hits": 5644,
+        "recorded_move_in_book": 5084
+      },
+      "4": {
+        "positions": 5660,
+        "hits": 5603,
+        "recorded_move_in_book": 5242
+      },
+      "5": {
+        "positions": 5660,
+        "hits": 4651,
+        "recorded_move_in_book": 4360
+      },
+      "6": {
+        "positions": 5660,
+        "hits": 5378,
+        "recorded_move_in_book": 5090
+      },
+      "7": {
+        "positions": 5660,
+        "hits": 5221,
+        "recorded_move_in_book": 4895
+      },
+      "8": {
+        "positions": 5660,
+        "hits": 5023,
+        "recorded_move_in_book": 4548
+      },
+      "9": {
+        "positions": 5660,
+        "hits": 4758,
+        "recorded_move_in_book": 4429
+      },
+      "10": {
+        "positions": 5660,
+        "hits": 4573,
+        "recorded_move_in_book": 4198
+      },
+      "11": {
+        "positions": 5660,
+        "hits": 4098,
+        "recorded_move_in_book": 3829
+      },
+      "12": {
+        "positions": 5660,
+        "hits": 4100,
+        "recorded_move_in_book": 3849
+      },
+      "13": {
+        "positions": 5660,
+        "hits": 3909,
+        "recorded_move_in_book": 3528
+      },
+      "14": {
+        "positions": 5660,
+        "hits": 3203,
+        "recorded_move_in_book": 2962
+      },
+      "15": {
+        "positions": 5660,
+        "hits": 3446,
+        "recorded_move_in_book": 3150
+      },
+      "16": {
+        "positions": 5660,
+        "hits": 2538,
+        "recorded_move_in_book": 2229
+      },
+      "17": {
+        "positions": 5660,
+        "hits": 2897,
+        "recorded_move_in_book": 2288
+      },
+      "18": {
+        "positions": 5660,
+        "hits": 2601,
+        "recorded_move_in_book": 2360
+      },
+      "19": {
+        "positions": 5660,
+        "hits": 2584,
+        "recorded_move_in_book": 2154
+      },
+      "20": {
+        "positions": 5660,
+        "hits": 2386,
+        "recorded_move_in_book": 1955
+      },
+      "21": {
+        "positions": 5660,
+        "hits": 2193,
+        "recorded_move_in_book": 1771
+      },
+      "22": {
+        "positions": 5660,
+        "hits": 2078,
+        "recorded_move_in_book": 1912
+      },
+      "23": {
+        "positions": 5660,
+        "hits": 1834,
+        "recorded_move_in_book": 1685
+      },
+      "24": {
+        "positions": 5660,
+        "hits": 1817,
+        "recorded_move_in_book": 1672
+      },
+      "25": {
+        "positions": 5660,
+        "hits": 1546,
+        "recorded_move_in_book": 1421
+      },
+      "26": {
+        "positions": 5660,
+        "hits": 1668,
+        "recorded_move_in_book": 1433
+      },
+      "27": {
+        "positions": 5660,
+        "hits": 1577,
+        "recorded_move_in_book": 1441
+      },
+      "28": {
+        "positions": 5660,
+        "hits": 1525,
+        "recorded_move_in_book": 1433
+      },
+      "29": {
+        "positions": 5660,
+        "hits": 1450,
+        "recorded_move_in_book": 1207
+      },
+      "30": {
+        "positions": 5660,
+        "hits": 1377,
+        "recorded_move_in_book": 1222
+      }
+    },
+    "first_miss": {
+      "10": 259,
+      "11": 506,
+      "12": 260,
+      "13": 194,
+      "14": 641,
+      "15": 197,
+      "16": 359,
+      "17": 229,
+      "18": 261,
+      "19": 137,
+      "2": 2,
+      "20": 125,
+      "21": 75,
+      "22": 93,
+      "23": 63,
+      "24": 50,
+      "25": 81,
+      "26": 26,
+      "27": 23,
+      "28": 23,
+      "29": 28,
+      "3": 14,
+      "30": 32,
+      "4": 42,
+      "5": 959,
+      "6": 138,
+      "7": 168,
+      "8": 217,
+      "9": 294,
+      "none_in_window": 164
+    }
+  },
+  "redistribution_status": "Not established by the archive download page; local generated artifact",
+  "limitations": [
+    "No self-play training or playing-strength claim",
+    "Search disagreement is a shallow screening signal, not proof of a bad move",
+    "Player names are used as pair identities; versions/aliases may be related"
+  ]
+}

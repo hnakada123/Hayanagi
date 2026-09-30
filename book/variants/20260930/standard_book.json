@@ -1,0 +1,244 @@
+{
+  "schema_version": 1,
+  "source_url": "https://wdoor.c.u-tokyo.ac.jp/shogi/archive/wdoor2025.7z",
+  "source_archive_sha256": "423504903f211316ec40f9c3d8dcc2e5faf392fc4d1334ede1489242a9d09baa",
+  "corpus_sha256": "bab4a1d4a5b9349331fa8f3903ce2fac42b6a9337338a7cdc02cfd73f7ce959a",
+  "validator_sha256": "865505eca39c6d34778761b38e77e35d6a260db58bf810f16a9b73d6b518c7b8",
+  "import_settings": {
+    "max_ply": 30,
+    "min_rating": 3000.0,
+    "min_game_plies": 40,
+    "holdout_modulus": 10
+  },
+  "import_stats": {
+    "files": 128843,
+    "training_games": 52022,
+    "missing_rating": 20131,
+    "game_length": 9204,
+    "low_rating": 37218,
+    "unsupported_csa": 798,
+    "holdout_games": 5660,
+    "unfinished_or_abnormal": 3294,
+    "duplicate": 413,
+    "not_floodgate": 103
+  },
+  "generator_sha256": "8fe5a1dbbecd7be30bb20c5cacc819bd61c34f6d1980ea03b01991167a4ceebe",
+  "export_settings": {
+    "min_count": 3,
+    "min_pairs": 2,
+    "pair_cap": 16,
+    "max_positions": 5000,
+    "max_candidates": 3,
+    "first_moves": [
+      "7g7f",
+      "2g2f",
+      "5g5f"
+    ],
+    "nodes_per_search": 100000,
+    "searches_per_position": 2,
+    "engine_sha256": "a9533f551f19bf00f5af1827b997157dab5e5c065fec450103bdf553c3223fdf",
+    "min_depth": 3,
+    "max_loss_cp": 150,
+    "selection": "pair-capped frequency order among candidates passing optional search screening"
+  },
+  "book_sha256": "a6ff056400fd7a643af0f2ad4d4da3cd634dffcade2715094c0f67fb5d64b429",
+  "positions": 4710,
+  "entries": 9561,
+  "rejected": {
+    "search_disagreement": 885
+  },
+  "holdout": {
+    "games": 5660,
+    "method": "replay held-out games; not playing-strength measurement",
+    "per_ply": {
+      "1": {
+        "positions": 5660,
+        "hits": 5660,
+        "recorded_move_in_book": 5403
+      },
+      "2": {
+        "positions": 5660,
+        "hits": 5654,
+        "recorded_move_in_book": 5325
+      },
+      "3": {
+        "positions": 5660,
+        "hits": 5632,
+        "recorded_move_in_book": 5075
+      },
+      "4": {
+        "positions": 5660,
+        "hits": 5552,
+        "recorded_move_in_book": 5184
+      },
+      "5": {
+        "positions": 5660,
+        "hits": 5400,
+        "recorded_move_in_book": 4791
+      },
+      "6": {
+        "positions": 5660,
+        "hits": 5236,
+        "recorded_move_in_book": 4405
+      },
+      "7": {
+        "positions": 5660,
+        "hits": 5043,
+        "recorded_move_in_book": 4818
+      },
+      "8": {
+        "positions": 5660,
+        "hits": 4742,
+        "recorded_move_in_book": 4346
+      },
+      "9": {
+        "positions": 5660,
+        "hits": 4396,
+        "recorded_move_in_book": 4101
+      },
+      "10": {
+        "positions": 5660,
+        "hits": 4168,
+        "recorded_move_in_book": 3645
+      },
+      "11": {
+        "positions": 5660,
+        "hits": 3609,
+        "recorded_move_in_book": 3419
+      },
+      "12": {
+        "positions": 5660,
+        "hits": 3579,
+        "recorded_move_in_book": 3359
+      },
+      "13": {
+        "positions": 5660,
+        "hits": 3298,
+        "recorded_move_in_book": 3013
+      },
+      "14": {
+        "positions": 5660,
+        "hits": 3129,
+        "recorded_move_in_book": 2906
+      },
+      "15": {
+        "positions": 5660,
+        "hits": 2325,
+        "recorded_move_in_book": 1863
+      },
+      "16": {
+        "positions": 5660,
+        "hits": 1986,
+        "recorded_move_in_book": 1706
+      },
+      "17": {
+        "positions": 5660,
+        "hits": 2326,
+        "recorded_move_in_book": 1728
+      },
+      "18": {
+        "positions": 5660,
+        "hits": 2128,
+        "recorded_move_in_book": 1885
+      },
+      "19": {
+        "positions": 5660,
+        "hits": 1945,
+        "recorded_move_in_book": 1810
+      },
+      "20": {
+        "positions": 5660,
+        "hits": 1833,
+        "recorded_move_in_book": 1654
+      },
+      "21": {
+        "positions": 5660,
+        "hits": 1788,
+        "recorded_move_in_book": 1719
+      },
+      "22": {
+        "positions": 5660,
+        "hits": 1636,
+        "recorded_move_in_book": 1514
+      },
+      "23": {
+        "positions": 5660,
+        "hits": 1477,
+        "recorded_move_in_book": 1400
+      },
+      "24": {
+        "positions": 5660,
+        "hits": 1285,
+        "recorded_move_in_book": 1245
+      },
+      "25": {
+        "positions": 5660,
+        "hits": 1257,
+        "recorded_move_in_book": 1192
+      },
+      "26": {
+        "positions": 5660,
+        "hits": 1235,
+        "recorded_move_in_book": 1100
+      },
+      "27": {
+        "positions": 5660,
+        "hits": 1171,
+        "recorded_move_in_book": 1096
+      },
+      "28": {
+        "positions": 5660,
+        "hits": 1188,
+        "recorded_move_in_book": 1147
+      },
+      "29": {
+        "positions": 5660,
+        "hits": 946,
+        "recorded_move_in_book": 837
+      },
+      "30": {
+        "positions": 5660,
+        "hits": 1110,
+        "recorded_move_in_book": 1040
+      }
+    },
+    "first_miss": {
+      "10": 268,
+      "11": 591,
+      "12": 329,
+      "13": 239,
+      "14": 257,
+      "15": 674,
+      "16": 452,
+      "17": 322,
+      "18": 227,
+      "19": 159,
+      "2": 6,
+      "20": 180,
+      "21": 85,
+      "22": 59,
+      "23": 54,
+      "24": 73,
+      "25": 48,
+      "26": 32,
+      "27": 23,
+      "28": 29,
+      "29": 21,
+      "3": 22,
+      "30": 10,
+      "4": 82,
+      "5": 162,
+      "6": 175,
+      "7": 212,
+      "8": 340,
+      "9": 365,
+      "none_in_window": 164
+    }
+  },
+  "redistribution_status": "Not established by the archive download page; local generated artifact",
+  "limitations": [
+    "No self-play training or playing-strength claim",
+    "Search disagreement is a shallow screening signal, not proof of a bad move",
+    "Player names are used as pair identities; versions/aliases may be related"
+  ]
+}

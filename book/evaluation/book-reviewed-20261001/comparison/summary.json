@@ -1,0 +1,513 @@
+{
+  "manifest": {
+    "engine_sha256": "833d9b8dc5ea50a8ba777264a3f619771b6ec74e63fbf70e8ac219160863354f",
+    "referee_sha256": "9361dbf2b11b89bd72d553b7347821a2a10ccba8157f5eb47442a4ab5329373c",
+    "current_sha256": "a6ff056400fd7a643af0f2ad4d4da3cd634dffcade2715094c0f67fb5d64b429",
+    "candidate_sha256": "2330b73c916782aff9d086be1b0d320cc575200ec957603d54538d310de68148",
+    "openings_sha256": "98a0e586968717ec6a1afb4d82a6964d38f00829617fe977092c3d74ee1a58a5",
+    "schema_version": 1,
+    "nodes": 50000,
+    "main_ms": 5000,
+    "byoyomi_ms": 100,
+    "margin_ms": 10,
+    "clock_pairs": 40,
+    "max_plies": 320,
+    "threads": 1,
+    "hash_mb": 16,
+    "expected_games": 492,
+    "entering_king_rule": "CSARule24",
+    "node_workers": 8,
+    "clock_workers": 4,
+    "cpu_affinity_cores": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "platform": "Linux",
+    "machine": "x86_64",
+    "job_order_seed": 20261001,
+    "runner_sha256": "79dab0b758d47b4fee6ff9dac9282a055693548920ab087dd9c61f58d68f60cc",
+    "player_sha256": "fc6c6202c269621b5cf5790c46282f22b23160707fd2d814e525ebf8b1c58b7c"
+  },
+  "completed_games": 492,
+  "complete": true,
+  "comparisons": {
+    "nodes:current:candidate": {
+      "holdout": {
+        "games": 80,
+        "complete_pairs": 40,
+        "a_wins": 39,
+        "a_losses": 41,
+        "draws": 0,
+        "a_score_rate": 0.4875,
+        "paired_bootstrap_95_percent_interval": [
+          0.4125,
+          0.5625
+        ],
+        "terminal_reasons": {
+          "checkmate": 80
+        },
+        "variants": {
+          "candidate": {
+            "moves": 3934,
+            "book_hits": 109,
+            "last_hit_then_miss_games": 28,
+            "median_exit_ply": 13.5,
+            "mean_book_move_ms": 0.17107235779962424,
+            "mean_search_move_ms": 131.14720007712606,
+            "total_book_ms": 18.64688700015904,
+            "total_search_ms": 501638.0402950072,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": null
+          },
+          "current": {
+            "moves": 3933,
+            "book_hits": 91,
+            "last_hit_then_miss_games": 22,
+            "median_exit_ply": 14.0,
+            "mean_book_move_ms": 0.17836324175752433,
+            "mean_search_move_ms": 131.58285605543728,
+            "total_book_ms": 16.231054999934713,
+            "total_search_ms": 505541.33296499006,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": null
+          }
+        }
+      },
+      "startpos": {
+        "games": 2,
+        "complete_pairs": 1,
+        "a_wins": 1,
+        "a_losses": 1,
+        "draws": 0,
+        "a_score_rate": 0.5,
+        "paired_bootstrap_95_percent_interval": null,
+        "terminal_reasons": {
+          "checkmate": 2
+        },
+        "variants": {
+          "candidate": {
+            "moves": 122,
+            "book_hits": 10,
+            "last_hit_then_miss_games": 2,
+            "median_exit_ply": 12.5,
+            "mean_book_move_ms": 0.12594029994943412,
+            "mean_search_move_ms": 166.7218654106973,
+            "total_book_ms": 1.2594029994943412,
+            "total_search_ms": 18672.848925998096,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": null
+          },
+          "current": {
+            "moves": 122,
+            "book_hits": 11,
+            "last_hit_then_miss_games": 2,
+            "median_exit_ply": 12.5,
+            "mean_book_move_ms": 0.34917036360969755,
+            "mean_search_move_ms": 167.6140905585828,
+            "total_book_ms": 3.840873999706673,
+            "total_search_ms": 18605.164052002692,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": null
+          }
+        }
+      }
+    },
+    "nodes:current:none": {
+      "holdout": {
+        "games": 80,
+        "complete_pairs": 40,
+        "a_wins": 41,
+        "a_losses": 39,
+        "draws": 0,
+        "a_score_rate": 0.5125,
+        "paired_bootstrap_95_percent_interval": [
+          0.475,
+          0.55
+        ],
+        "terminal_reasons": {
+          "checkmate": 80
+        },
+        "variants": {
+          "current": {
+            "moves": 3624,
+            "book_hits": 16,
+            "last_hit_then_miss_games": 12,
+            "median_exit_ply": 10.5,
+            "mean_book_move_ms": 0.39603068748306214,
+            "mean_search_move_ms": 135.89989990327646,
+            "total_book_ms": 6.336490999728994,
+            "total_search_ms": 490326.8388510214,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": null
+          },
+          "none": {
+            "moves": 3623,
+            "book_hits": 0,
+            "last_hit_then_miss_games": 0,
+            "median_exit_ply": null,
+            "mean_book_move_ms": null,
+            "mean_search_move_ms": 136.04155951724707,
+            "total_book_ms": 0,
+            "total_search_ms": 492878.57013098616,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": null
+          }
+        }
+      },
+      "startpos": {
+        "games": 2,
+        "complete_pairs": 1,
+        "a_wins": 1,
+        "a_losses": 1,
+        "draws": 0,
+        "a_score_rate": 0.5,
+        "paired_bootstrap_95_percent_interval": null,
+        "terminal_reasons": {
+          "checkmate": 2
+        },
+        "variants": {
+          "current": {
+            "moves": 97,
+            "book_hits": 4,
+            "last_hit_then_miss_games": 2,
+            "median_exit_ply": 5.5,
+            "mean_book_move_ms": 0.13712700013002177,
+            "mean_search_move_ms": 178.48193524731604,
+            "total_book_ms": 0.5485080005200871,
+            "total_search_ms": 16598.819978000392,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": null
+          },
+          "none": {
+            "moves": 97,
+            "book_hits": 0,
+            "last_hit_then_miss_games": 0,
+            "median_exit_ply": null,
+            "mean_book_move_ms": null,
+            "mean_search_move_ms": 179.03749585567434,
+            "total_book_ms": 0,
+            "total_search_ms": 17366.63709800041,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": null
+          }
+        }
+      }
+    },
+    "nodes:candidate:none": {
+      "holdout": {
+        "games": 80,
+        "complete_pairs": 40,
+        "a_wins": 40,
+        "a_losses": 40,
+        "draws": 0,
+        "a_score_rate": 0.5,
+        "paired_bootstrap_95_percent_interval": [
+          0.425,
+          0.575
+        ],
+        "terminal_reasons": {
+          "checkmate": 80
+        },
+        "variants": {
+          "candidate": {
+            "moves": 3653,
+            "book_hits": 29,
+            "last_hit_then_miss_games": 20,
+            "median_exit_ply": 11.0,
+            "mean_book_move_ms": 0.11302096550809501,
+            "mean_search_move_ms": 129.69175117715574,
+            "total_book_ms": 3.277607999734755,
+            "total_search_ms": 470002.90626601235,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": null
+          },
+          "none": {
+            "moves": 3653,
+            "book_hits": 0,
+            "last_hit_then_miss_games": 0,
+            "median_exit_ply": null,
+            "mean_book_move_ms": null,
+            "mean_search_move_ms": 128.56028909690497,
+            "total_book_ms": 0,
+            "total_search_ms": 469630.7360709939,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": null
+          }
+        }
+      },
+      "startpos": {
+        "games": 2,
+        "complete_pairs": 1,
+        "a_wins": 1,
+        "a_losses": 1,
+        "draws": 0,
+        "a_score_rate": 0.5,
+        "paired_bootstrap_95_percent_interval": null,
+        "terminal_reasons": {
+          "checkmate": 2
+        },
+        "variants": {
+          "candidate": {
+            "moves": 97,
+            "book_hits": 4,
+            "last_hit_then_miss_games": 2,
+            "median_exit_ply": 5.5,
+            "mean_book_move_ms": 0.08921350013224583,
+            "mean_search_move_ms": 126.33267824731843,
+            "total_book_ms": 0.3568540005289833,
+            "total_search_ms": 11748.939077000614,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": null
+          },
+          "none": {
+            "moves": 97,
+            "book_hits": 0,
+            "last_hit_then_miss_games": 0,
+            "median_exit_ply": null,
+            "mean_book_move_ms": null,
+            "mean_search_move_ms": 127.19198826801768,
+            "total_book_ms": 0,
+            "total_search_ms": 12337.622861997716,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": null
+          }
+        }
+      }
+    },
+    "clock:current:candidate": {
+      "holdout": {
+        "games": 80,
+        "complete_pairs": 40,
+        "a_wins": 43,
+        "a_losses": 37,
+        "draws": 0,
+        "a_score_rate": 0.5375,
+        "paired_bootstrap_95_percent_interval": [
+          0.425,
+          0.65
+        ],
+        "terminal_reasons": {
+          "checkmate": 80
+        },
+        "variants": {
+          "candidate": {
+            "moves": 4227,
+            "book_hits": 130,
+            "last_hit_then_miss_games": 31,
+            "median_exit_ply": 14,
+            "mean_book_move_ms": 0.1208103077400525,
+            "mean_search_move_ms": 133.2370552582441,
+            "total_book_ms": 15.705340006206825,
+            "total_search_ms": 545872.2153930261,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": 2421.0
+          },
+          "current": {
+            "moves": 4230,
+            "book_hits": 108,
+            "last_hit_then_miss_games": 24,
+            "median_exit_ply": 14.0,
+            "mean_book_move_ms": 0.10117209259769205,
+            "mean_search_move_ms": 132.297969450017,
+            "total_book_ms": 10.926586000550742,
+            "total_search_ms": 545332.2300729702,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": 2421.0
+          }
+        }
+      },
+      "startpos": {
+        "games": 2,
+        "complete_pairs": 1,
+        "a_wins": 1,
+        "a_losses": 1,
+        "draws": 0,
+        "a_score_rate": 0.5,
+        "paired_bootstrap_95_percent_interval": null,
+        "terminal_reasons": {
+          "checkmate": 2
+        },
+        "variants": {
+          "candidate": {
+            "moves": 125,
+            "book_hits": 10,
+            "last_hit_then_miss_games": 2,
+            "median_exit_ply": 12.5,
+            "mean_book_move_ms": 0.29315130000213685,
+            "mean_search_move_ms": 130.64155938262283,
+            "total_book_ms": 2.9315130000213685,
+            "total_search_ms": 15023.779329001627,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": 2702.5
+          },
+          "current": {
+            "moves": 125,
+            "book_hits": 11,
+            "last_hit_then_miss_games": 2,
+            "median_exit_ply": 12.5,
+            "mean_book_move_ms": 0.12354590903255898,
+            "mean_search_move_ms": 130.98039920173744,
+            "total_book_ms": 1.3590049993581488,
+            "total_search_ms": 14931.765508998069,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": 2779.0
+          }
+        }
+      }
+    },
+    "clock:current:none": {
+      "holdout": {
+        "games": 80,
+        "complete_pairs": 40,
+        "a_wins": 42,
+        "a_losses": 38,
+        "draws": 0,
+        "a_score_rate": 0.525,
+        "paired_bootstrap_95_percent_interval": [
+          0.4375,
+          0.6125
+        ],
+        "terminal_reasons": {
+          "checkmate": 80
+        },
+        "variants": {
+          "current": {
+            "moves": 4085,
+            "book_hits": 15,
+            "last_hit_then_miss_games": 13,
+            "median_exit_ply": 9,
+            "mean_book_move_ms": 0.1084202000129153,
+            "mean_search_move_ms": 133.62706470540093,
+            "total_book_ms": 1.6263030001937295,
+            "total_search_ms": 543862.1533509818,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": 2420.0
+          },
+          "none": {
+            "moves": 4083,
+            "book_hits": 0,
+            "last_hit_then_miss_games": 0,
+            "median_exit_ply": null,
+            "mean_book_move_ms": null,
+            "mean_search_move_ms": 134.3468147678153,
+            "total_book_ms": 0,
+            "total_search_ms": 548538.0446969898,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": 2250.0
+          }
+        }
+      },
+      "startpos": {
+        "games": 2,
+        "complete_pairs": 1,
+        "a_wins": 1,
+        "a_losses": 1,
+        "draws": 0,
+        "a_score_rate": 0.5,
+        "paired_bootstrap_95_percent_interval": null,
+        "terminal_reasons": {
+          "checkmate": 2
+        },
+        "variants": {
+          "current": {
+            "moves": 159,
+            "book_hits": 3,
+            "last_hit_then_miss_games": 2,
+            "median_exit_ply": 4.5,
+            "mean_book_move_ms": 0.090894333122075,
+            "mean_search_move_ms": 118.8974044038367,
+            "total_book_ms": 0.272682999366225,
+            "total_search_ms": 18547.995086998526,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": 2082.0
+          },
+          "none": {
+            "moves": 159,
+            "book_hits": 0,
+            "last_hit_then_miss_games": 0,
+            "median_exit_ply": null,
+            "mean_book_move_ms": null,
+            "mean_search_move_ms": 114.15044225785942,
+            "total_book_ms": 0,
+            "total_search_ms": 18149.920318999648,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": 1844.5
+          }
+        }
+      }
+    },
+    "clock:candidate:none": {
+      "holdout": {
+        "games": 80,
+        "complete_pairs": 40,
+        "a_wins": 33,
+        "a_losses": 47,
+        "draws": 0,
+        "a_score_rate": 0.4125,
+        "paired_bootstrap_95_percent_interval": [
+          0.3125,
+          0.5125
+        ],
+        "terminal_reasons": {
+          "checkmate": 79,
+          "impasse": 1
+        },
+        "variants": {
+          "candidate": {
+            "moves": 4061,
+            "book_hits": 35,
+            "last_hit_then_miss_games": 24,
+            "median_exit_ply": 10.5,
+            "mean_book_move_ms": 0.18155311433604635,
+            "mean_search_move_ms": 135.4648585807283,
+            "total_book_ms": 6.3543590017616225,
+            "total_search_ms": 545381.5206460122,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": 2420.0
+          },
+          "none": {
+            "moves": 4067,
+            "book_hits": 0,
+            "last_hit_then_miss_games": 0,
+            "median_exit_ply": null,
+            "mean_book_move_ms": null,
+            "mean_search_move_ms": 132.89414805064146,
+            "total_book_ms": 0,
+            "total_search_ms": 540480.5001219588,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": 2250.0
+          }
+        }
+      },
+      "startpos": {
+        "games": 2,
+        "complete_pairs": 1,
+        "a_wins": 1,
+        "a_losses": 1,
+        "draws": 0,
+        "a_score_rate": 0.5,
+        "paired_bootstrap_95_percent_interval": null,
+        "terminal_reasons": {
+          "checkmate": 2
+        },
+        "variants": {
+          "candidate": {
+            "moves": 87,
+            "book_hits": 3,
+            "last_hit_then_miss_games": 2,
+            "median_exit_ply": 4.5,
+            "mean_book_move_ms": 0.08288233326917786,
+            "mean_search_move_ms": 142.80565180951857,
+            "total_book_ms": 0.24864699980753358,
+            "total_search_ms": 11995.674751999559,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": 2084.0
+          },
+          "none": {
+            "moves": 87,
+            "book_hits": 0,
+            "last_hit_then_miss_games": 0,
+            "median_exit_ply": null,
+            "mean_book_move_ms": null,
+            "mean_search_move_ms": 143.30282781606232,
+            "total_book_ms": 0,
+            "total_search_ms": 12467.346019997422,
+            "median_remaining_ms_at_own_move_on_or_after_ply30": 1846.5
+          }
+        }
+      }
+    }
+  },
+  "limitations": [
+    "Same engine and evaluator; no external rating calibration",
+    "Intervals resample color-swapped opening pairs; related opening families may correlate",
+    "Clock games are not deterministic; OS scheduling and other system load remain",
+    "Clock consumption includes IPC latency, rounded up to milliseconds",
+    "Ply-cap draws and time forfeits are listed separately",
+    "Remaining clock comparisons follow different trajectories; not a causal estimate of saved time",
+    "Per-comparison intervals are not multiplicity-adjusted"
+  ]
+}

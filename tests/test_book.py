@@ -118,6 +118,21 @@ class ImportTests(unittest.TestCase):
             repeated = subprocess.run(screened, check=True, capture_output=True, text=True)
             self.assertIn('1 cached, 0 pending', repeated.stdout)
             self.assertEqual(measured, (root / 'screened.db').read_bytes())
+            review = root / 'review.json'
+            review_data = {'engine_sha256': book.digest_file(ENGINE),
+                           'positions': [{'sfen': details['sfen'], 'history': details['history']}]}
+            review.write_text(json.dumps(review_data))
+            deeper = screened + ['--review-positions', str(review), '--review-nodes', '40000']
+            result = subprocess.run(deeper, check=True, capture_output=True, text=True)
+            self.assertIn('0 cached, 1 pending', result.stdout)
+            self.assertEqual(json.loads((root / 'screened.positions.jsonl').read_text())['nodes_per_search'], 40000)
+            self.assertEqual(json.loads((root / 'screened.json').read_text())['deep_review']['positions'], 1)
+            self.assertIn('1 cached, 0 pending', subprocess.run(deeper, check=True, capture_output=True, text=True).stdout)
+            review_data['engine_sha256'] = 'wrong engine'
+            review.write_text(json.dumps(review_data))
+            refused = subprocess.run(deeper, capture_output=True, text=True)
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn('different engine', refused.stderr)
 
     def test_pair_cap_and_holdout_do_not_change_training_support(self):
         with sqlite3.connect(':memory:') as db:
@@ -154,6 +169,16 @@ class ImportTests(unittest.TestCase):
         self.assertNotIn('error', result)
         self.assertEqual(set(result['candidates']), {'7g7f', '2g2f'})
         self.assertGreater(result['baseline']['depth'], 0)
+        self.assertTrue(all(s['depth'] == result['baseline']['depth'] for s in result['candidates'].values()))
+        self.assertEqual(result['comparison_depth'], result['baseline']['depth'])
+        self.assertIn(result['discovery']['pv'][0], result['comparison_moves'])
+
+    def test_reserve_multipv_slot_for_discovered_move(self):
+        result = subprocess.run([sys.executable, '-B', str(ROOT / 'tools/build_book.py'),
+                                 'export', '--work-db', 'unused.sqlite', '--engine', str(ENGINE),
+                                 '--max-candidates', '32'], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn('reserve one MultiPV slot', result.stderr)
 
 
 class RuntimeTests(unittest.TestCase):

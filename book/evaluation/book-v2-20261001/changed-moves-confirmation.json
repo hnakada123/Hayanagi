@@ -1,0 +1,240 @@
+{
+  "schema_version": 1,
+  "engine_sha256": "833d9b8dc5ea50a8ba777264a3f619771b6ec74e63fbf70e8ac219160863354f",
+  "nodes_per_search": 10000000,
+  "positions_sha256": "dc616f1c1b22ffff15b3fae51fa38a7378b5756e0831677a1d9327ce49e621b7",
+  "selection": "Training-derived cases where the 2M-node result favors the old move by over 100cp or the candidate is over 150cp below its discovered comparator; no match outcomes used",
+  "positions": [
+    {
+      "sfen": "lnsgk1snl/1r4g2/p1pppp1p1/6p1p/1p5P1/2P6/PPSPPPP1P/6SR1/LN1GKG1NL w Bb 14",
+      "history": [
+        "2g2f",
+        "4a3b",
+        "7g7f",
+        "8c8d",
+        "2f2e",
+        "8d8e",
+        "8h7g",
+        "1c1d",
+        "7i6h",
+        "3c3d",
+        "3i3h",
+        "2b7g+",
+        "6h7g"
+      ],
+      "old_move": "7a7b",
+      "new_move": "3a2b",
+      "screened_gap_cp": 212,
+      "comparison_depth": 6,
+      "analysis": {
+        "engine": [
+          "id name Hayanagi 1.4.0"
+        ],
+        "baseline": {
+          "score": -21,
+          "score_type": "cp",
+          "score_value": -21,
+          "depth": 10,
+          "pv": [
+            "5a6b",
+            "B*5f",
+            "3b3c",
+            "4g4f",
+            "B*5d",
+            "3h4g",
+            "4c4d",
+            "5i6h",
+            "8b8d",
+            "6h7h"
+          ],
+          "nodes": 7160609
+        },
+        "candidates": {
+          "3a2b": {
+            "score": -203,
+            "score_type": "cp",
+            "score_value": -203,
+            "depth": 10,
+            "pv": [
+              "3a2b",
+              "B*4e",
+              "5a6b",
+              "4e3d",
+              "8b8d",
+              "3d5f",
+              "2a3c",
+              "7g6f",
+              "B*4e",
+              "6f7e"
+            ],
+            "nodes": 7160609
+          },
+          "7a7b": {
+            "score": -52,
+            "score_type": "cp",
+            "score_value": -52,
+            "depth": 10,
+            "pv": [
+              "7a7b",
+              "5i4h",
+              "5a6b",
+              "B*5f",
+              "8b8d",
+              "2e2d",
+              "3a2b",
+              "2d2c",
+              "3b2c",
+              "2h2c"
+            ],
+            "nodes": 7160609
+          }
+        },
+        "discovery": {
+          "score": 3,
+          "score_type": "cp",
+          "score_value": 3,
+          "depth": 9,
+          "pv": [
+            "5a6b",
+            "5i6h",
+            "2a3c",
+            "6h7h",
+            "B*4d",
+            "4i5h",
+            "9c9d",
+            "B*4a"
+          ],
+          "nodes": 5523825
+        },
+        "comparison_depth": 10,
+        "comparison_moves": [
+          "3a2b",
+          "5a6b",
+          "7a7b"
+        ]
+      },
+      "new_minus_old_cp": -151,
+      "new_loss_to_comparison_best_cp": 182
+    },
+    {
+      "sfen": "lnsgkgsnl/1r5b1/p1ppppp1p/7p1/1p7/9/PPPPPPP1P/1B5R1/LNSGKGSNL b p 7",
+      "history": [
+        "2g2f",
+        "8c8d",
+        "2f2e",
+        "8d8e",
+        "2e2d",
+        "2c2d"
+      ],
+      "old_move": "6i7h",
+      "new_move": "2h2d",
+      "screened_gap_cp": 314,
+      "comparison_depth": 7,
+      "analysis": {
+        "engine": [
+          "id name Hayanagi 1.4.0"
+        ],
+        "baseline": {
+          "score": -130,
+          "score_type": "cp",
+          "score_value": -130,
+          "depth": 12,
+          "pv": [
+            "7g7f",
+            "8b8d",
+            "8h6f",
+            "8d5d",
+            "8i7g",
+            "3c3d",
+            "6f2b",
+            "3a2b",
+            "B*6e",
+            "5d4d",
+            "7i6h",
+            "B*2e"
+          ],
+          "nodes": 4691166
+        },
+        "candidates": {
+          "2h2d": {
+            "score": -331,
+            "score_type": "cp",
+            "score_value": -331,
+            "depth": 12,
+            "pv": [
+              "2h2d",
+              "8e8f",
+              "P*2c",
+              "8f8g+",
+              "2c2b+",
+              "3a2b",
+              "2d2h",
+              "8g8h",
+              "7i8h",
+              "P*2g",
+              "2h5h",
+              "B*6e"
+            ],
+            "nodes": 4691166
+          },
+          "6i7h": {
+            "score": -169,
+            "score_type": "cp",
+            "score_value": -169,
+            "depth": 12,
+            "pv": [
+              "6i7h",
+              "8b8d",
+              "7g7f",
+              "8d5d",
+              "8h6f",
+              "9c9d",
+              "8i7g",
+              "3a3b",
+              "5i6i",
+              "8a9c",
+              "7g6e",
+              "7a6b"
+            ],
+            "nodes": 4691166
+          }
+        },
+        "discovery": {
+          "score": -111,
+          "score_type": "cp",
+          "score_value": -111,
+          "depth": 13,
+          "pv": [
+            "7g7f",
+            "8b8d",
+            "8h6f",
+            "8d5d",
+            "8i7g",
+            "4a3b",
+            "5i4h",
+            "9c9d",
+            "4h3h",
+            "3a4b",
+            "5g5f",
+            "8a9c",
+            "7g6e"
+          ],
+          "nodes": 5167633
+        },
+        "comparison_depth": 12,
+        "comparison_moves": [
+          "2h2d",
+          "6i7h",
+          "7g7f"
+        ]
+      },
+      "new_minus_old_cp": -162,
+      "new_loss_to_comparison_best_cp": 201
+    }
+  ],
+  "all_pvs_legal": true,
+  "new_better_by_over_150": 0,
+  "new_worse_by_over_150": 2,
+  "new_more_than_150_below_comparison_best": 2,
+  "limitation": "Selected training-derived positions only, same evaluator; this does not establish global move correctness"
+}

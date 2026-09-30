@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "frozen_before_candidate_export_and_matches": true,
+  "source_engine_commit": "fa2bfb18507b822b92ad321f71076e05cc837448",
+  "engine_sha256": "833d9b8dc5ea50a8ba777264a3f619771b6ec74e63fbf70e8ac219160863354f",
+  "openings_sha256": "9ced1533dbda963d120c02d1504296ed9a922edc5c706c256a01923f4539a66a",
+  "current_book_sha256": "a6ff056400fd7a643af0f2ad4d4da3cd634dffcade2715094c0f67fb5d64b429",
+  "candidate_generation": {
+    "max_positions": 12000,
+    "max_candidates": 3,
+    "min_count": 3,
+    "min_pairs": 2,
+    "pair_cap": 16,
+    "nodes_per_search": 200000,
+    "analysis_version": 2,
+    "max_ply": 30
+  },
+  "matches": {
+    "variants": [
+      "current",
+      "candidate",
+      "none"
+    ],
+    "all_three_pairings": true,
+    "color_swap": true,
+    "holdout_node_pairs_per_comparison": 100,
+    "holdout_clock_pairs_per_comparison": 40,
+    "clock_subset": "first 40 lexicographically sorted holdout IDs",
+    "startpos_pairs_per_comparison_and_mode": 1,
+    "nodes_per_move": 50000,
+    "main_ms": 5000,
+    "byoyomi_ms": 100,
+    "margin_ms": 10,
+    "max_plies": 320,
+    "node_workers": 8,
+    "clock_workers": 4,
+    "threads": 1,
+    "hash_mb": 16,
+    "expected_node_games": 606,
+    "expected_clock_games": 246,
+    "expected_games": 852,
+    "clock_games_start_after_generation_and_node_games": true
+  },
+  "limitations": [
+    "A short clock control is used; no claim about tournament time controls",
+    "No candidate changes will use these holdout match outcomes",
+    "No predetermined strength superiority or noninferiority margin; report paired intervals"
+  ]
+}

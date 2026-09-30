@@ -1,0 +1,583 @@
+{
+  "schema_version": 1,
+  "seed": 20261002,
+  "pairs": 40,
+  "source_corpus_sha256": "bab4a1d4a5b9349331fa8f3903ce2fac42b6a9337338a7cdc02cfd73f7ce959a",
+  "exclusions": {
+    "book/evaluation/openings-20260930.json": "105cd7a2aaaca82254374613d97c9003d14c07cf4ca1334804be90dc3949f5a6",
+    "book/evaluation/search-fixes-20260930/openings.json": "1029a327cc02a6df1128830f1f74c43709296a72d71ec09a53a6d47a5e13c36a",
+    "book/evaluation/book-v2-20261001/openings.json": "9ced1533dbda963d120c02d1504296ed9a922edc5c706c256a01923f4539a66a"
+  },
+  "sampling": "round-robin prefixes 4/6/8; unique SFEN and source game; no book-hit/score/match-outcome selection",
+  "selected_by_prefix_length": {
+    "4": 14,
+    "6": 13,
+    "8": 13
+  },
+  "limitation": "Game-level holdout; common opening positions may also occur in training games",
+  "openings": [
+    {
+      "id": "startpos",
+      "group": "startpos",
+      "moves": []
+    },
+    {
+      "moves": [
+        "7g7f",
+        "7a7b",
+        "2g2f",
+        "9c9d"
+      ],
+      "sfen": "ln1gkgsnl/1rs4b1/1pppppppp/p8/9/2P4P1/PP1PPPP1P/1B5R1/LNSGKGSNL b - 5",
+      "source_game": "775103ac2f48b2ccf9b04174d690c9869a46046fceb795679c531db1b1423ae7",
+      "id": "holdout_001",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "2g2f",
+        "8c8d",
+        "6i7h",
+        "4a3b",
+        "1g1f",
+        "8d8e"
+      ],
+      "sfen": "lnsgk1snl/1r4gb1/p1ppppppp/9/1p7/7PP/PPPPPPP2/1BG4R1/LNS1KGSNL b - 7",
+      "source_game": "ae4bd7ce9dc607812708470cfc56ea9d9467f83d9efc662ecff6c57122b256c9",
+      "id": "holdout_002",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "9c9d",
+        "1g1f",
+        "8c8d",
+        "5g5f",
+        "8d8e",
+        "8h7g",
+        "1c1d"
+      ],
+      "sfen": "lnsgkgsnl/1r5b1/2pppppp1/p7p/1p7/2P1P3P/PPBP1PPP1/7R1/LNSGKGSNL b - 9",
+      "source_game": "33b61a56992ee5ae2f0022b04dcc7a830424ed698a31e99d28a51b7fa2b5fb61",
+      "id": "holdout_003",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "8c8d",
+        "8h7g",
+        "8d8e"
+      ],
+      "sfen": "lnsgkgsnl/1r5b1/p1ppppppp/9/1p7/2P6/PPBPPPPPP/7R1/LNSGKGSNL b - 5",
+      "source_game": "00b589021d3daffab3ea51cd9d76a44cef71d1c2504658958dce39f77ce89384",
+      "id": "holdout_004",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "4a3b",
+        "1g1f",
+        "3c3d",
+        "6g6f",
+        "7c7d"
+      ],
+      "sfen": "lnsgk1snl/1r4gb1/pp1ppp1pp/2p3p2/9/2PP4P/PP2PPPP1/1B5R1/LNSGKGSNL b - 7",
+      "source_game": "f94735b6c443291143a980d4d7632a1ffd5d040d17735c292e9d50e3834cb932",
+      "id": "holdout_005",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "2g2f",
+        "8c8d",
+        "2f2e",
+        "8d8e",
+        "6i7h",
+        "4a3b",
+        "2e2d",
+        "2c2d"
+      ],
+      "sfen": "lnsgk1snl/1r4gb1/p1ppppp1p/7p1/1p7/9/PPPPPPP1P/1BG4R1/LNS1KGSNL b p 9",
+      "source_game": "04cdf8f8f6f9b41ac94dbd151d8158d8368c4f8d3f01a42e3ccc39d6774d82a4",
+      "id": "holdout_006",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "2g2f",
+        "1c1d",
+        "2f2e",
+        "7a6b"
+      ],
+      "sfen": "ln1gkgsnl/1r1s3b1/pppppppp1/8p/7P1/9/PPPPPPP1P/1B5R1/LNSGKGSNL b - 5",
+      "source_game": "1d96070e69188fb9e8bab7b8947d3b58d26275fcccf2acd726e597d1776ec7f8",
+      "id": "holdout_007",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "2g2f",
+        "3c3d",
+        "7g7f",
+        "4a3b",
+        "2f2e",
+        "2b3c"
+      ],
+      "sfen": "lnsgk1snl/1r4g2/ppppppbpp/6p2/7P1/2P6/PP1PPPP1P/1B5R1/LNSGKGSNL b - 7",
+      "source_game": "076340f0823007e7d247fb6b751b4214edba02a04f38ed6bd756d996abfbe207",
+      "id": "holdout_008",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "3c3d",
+        "9g9f",
+        "8c8d",
+        "5g5f",
+        "8d8e",
+        "5f5e",
+        "8e8f"
+      ],
+      "sfen": "lnsgkgsnl/1r5b1/p1pppp1pp/6p2/4P4/PpP6/1P1P1PPPP/1B5R1/LNSGKGSNL b - 9",
+      "source_game": "764c2f729dfce7cbccb66251423d689bed8ee5d8b529cffafec06784987c43fa",
+      "id": "holdout_009",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "8c8d",
+        "5g5f",
+        "5c5d"
+      ],
+      "sfen": "lnsgkgsnl/1r5b1/p1pp1pppp/1p2p4/9/2P1P4/PP1P1PPPP/1B5R1/LNSGKGSNL b - 5",
+      "source_game": "46da1c5e03de07be22a23e3a50714b7a411554912d470b536e02f8b2b8f231c8",
+      "id": "holdout_010",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "8c8d",
+        "6i7h",
+        "8d8e",
+        "8h7g",
+        "4a3b"
+      ],
+      "sfen": "lnsgk1snl/1r4gb1/p1ppppppp/9/1p7/2P6/PPBPPPPPP/2G4R1/LNS1KGSNL b - 7",
+      "source_game": "12eeca8e656478cbf3cde5347006cbf578b521f177a1e14d72e36222e8cc752d",
+      "id": "holdout_011",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "4a3b",
+        "2g2f",
+        "1c1d",
+        "1g1f",
+        "3c3d",
+        "2f2e",
+        "8c8d"
+      ],
+      "sfen": "lnsgk1snl/1r4gb1/p1pppp1p1/1p4p1p/7P1/2P5P/PP1PPPP2/1B5R1/LNSGKGSNL b - 9",
+      "source_game": "606fd2d09825ab106262647a8c36a456d72134a72f4929d6d25ed4dcd7ebb4b3",
+      "id": "holdout_012",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "4a3b",
+        "8h7g",
+        "3c3d"
+      ],
+      "sfen": "lnsgk1snl/1r4gb1/pppppp1pp/6p2/9/2P6/PPBPPPPPP/7R1/LNSGKGSNL b - 5",
+      "source_game": "884154785a0db7869e33ad3922b69db4fa01c8dc6e38899efef08ba36743794d",
+      "id": "holdout_013",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "3c3d",
+        "1g1f",
+        "3d3e",
+        "3i4h",
+        "8b3b"
+      ],
+      "sfen": "lnsgkgsnl/6rb1/pppppp1pp/9/6p2/2P5P/PP1PPPPP1/1B3S1R1/LNSGKG1NL b - 7",
+      "source_game": "2f7050b0496dbca1ec0ad0e6ef1174bea025a6f8c4b4e39f345bc73c2027c020",
+      "id": "holdout_014",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "4a3b",
+        "2g2f",
+        "9c9d",
+        "2f2e",
+        "9d9e",
+        "5i6h",
+        "8b5b"
+      ],
+      "sfen": "lnsgk1snl/4r1gb1/1pppppppp/9/p6P1/2P6/PP1PPPP1P/1B1K3R1/LNSG1GSNL b - 9",
+      "source_game": "a461071682af74267ac47d962c689ee3a2d8a706cd6b9bb5b78cec41cf42ecf8",
+      "id": "holdout_015",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "2g2f",
+        "8b5b",
+        "2f2e",
+        "4a3b"
+      ],
+      "sfen": "lnsgk1snl/4r1gb1/ppppppppp/9/7P1/9/PPPPPPP1P/1B5R1/LNSGKGSNL b - 5",
+      "source_game": "1b7badb6ad7353636ccc17acadcb5efdc79c44d767bfdaa4aeaf4394d007af2a",
+      "id": "holdout_016",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "4a3b",
+        "2h7h",
+        "3c3d",
+        "6g6f",
+        "1c1d"
+      ],
+      "sfen": "lnsgk1snl/1r4gb1/pppppp1p1/6p1p/9/2PP5/PP2PPPPP/1BR6/LNSGKGSNL b - 7",
+      "source_game": "3e70123040b4e3c3004e0d2e777acd404ae470ca71d9399890399b45d45fe0c3",
+      "id": "holdout_017",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "4a3b",
+        "5g5f",
+        "3c3d",
+        "5f5e",
+        "3a4b",
+        "2h5h",
+        "8b5b"
+      ],
+      "sfen": "lnsgk2nl/4rsgb1/pppppp1pp/6p2/4P4/2P6/PP1P1PPPP/1B2R4/LNSGKGSNL b - 9",
+      "source_game": "08f4afa85ab4b11d086451ed218a59cc21e44f33202d05c7e29be5cc3e4a6722",
+      "id": "holdout_018",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "2g2f",
+        "7c7d",
+        "2f2e",
+        "3c3d"
+      ],
+      "sfen": "lnsgkgsnl/1r5b1/pp1ppp1pp/2p3p2/7P1/9/PPPPPPP1P/1B5R1/LNSGKGSNL b - 5",
+      "source_game": "aa59e53eda315bdb6d46c8b35b0610f14e6077ed43b391275e6d84a36da3c070",
+      "id": "holdout_019",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "3c3d",
+        "2h5h",
+        "2b8h+",
+        "7i8h",
+        "B*4e"
+      ],
+      "sfen": "lnsgkgsnl/1r7/pppppp1pp/6p2/5b3/2P6/PP1PPPPPP/1S2R4/LN1GKGSNL b B 7",
+      "source_game": "cd44e6c05383af112367c2d3f597eea4f35d905b28ffad1c5b0d9f3968bea19c",
+      "id": "holdout_020",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "2g2f",
+        "3c3d",
+        "7g7f",
+        "4c4d",
+        "3i4h",
+        "3a3b",
+        "3g3f",
+        "3b4c"
+      ],
+      "sfen": "lnsgkg1nl/1r5b1/ppppps1pp/5pp2/9/2P3PP1/PP1PPP2P/1B3S1R1/LNSGKG1NL b - 9",
+      "source_game": "2abc5ee2ef58ae700f7ea82c9ad049663022674cfadc5c28f48208337e40e6cf",
+      "id": "holdout_021",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "3c3d",
+        "3i4h",
+        "4a3b"
+      ],
+      "sfen": "lnsgk1snl/1r4gb1/pppppp1pp/6p2/9/2P6/PP1PPPPPP/1B3S1R1/LNSGKG1NL b - 5",
+      "source_game": "fd0d9c6ce8f6596fa6d2a349e98f467a8383b8c7d18931167bea52cc8a3e2767",
+      "id": "holdout_022",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "2g2f",
+        "3c3d",
+        "7g7f",
+        "4c4d",
+        "7i7h",
+        "3a4b"
+      ],
+      "sfen": "lnsgkg1nl/1r3s1b1/ppppp2pp/5pp2/9/2P4P1/PP1PPPP1P/1BS4R1/LN1GKGSNL b - 7",
+      "source_game": "1a77e1fac393c9358db78bdc162b5ffb52d347b6e70f5fc9bd6f97ecfdc78e7e",
+      "id": "holdout_023",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "2g2f",
+        "3c3d",
+        "7g7f",
+        "4c4d",
+        "2f2e",
+        "2b3c",
+        "5i6h",
+        "8b4b"
+      ],
+      "sfen": "lnsgkgsnl/5r3/ppppp1bpp/5pp2/7P1/2P6/PP1PPPP1P/1B1K3R1/LNSG1GSNL b - 9",
+      "source_game": "b05e13569cda9745946f2df161b239e1a5f04a916b5035b9a7db672e7eeb948e",
+      "id": "holdout_024",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "5c5d",
+        "3i4h",
+        "7a6b"
+      ],
+      "sfen": "ln1gkgsnl/1r1s3b1/pppp1pppp/4p4/9/2P6/PP1PPPPPP/1B3S1R1/LNSGKG1NL b - 5",
+      "source_game": "0bcf643e83bf085f34e8541ecc1284775e291127122877d9209498d9be7f2a54",
+      "id": "holdout_025",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "2g2f",
+        "3c3d",
+        "7g7f",
+        "5c5d",
+        "2f2e",
+        "4a3b"
+      ],
+      "sfen": "lnsgk1snl/1r4gb1/pppp1p1pp/4p1p2/7P1/2P6/PP1PPPP1P/1B5R1/LNSGKGSNL b - 7",
+      "source_game": "6afe98ee2ef2da563fb41bedf13412a5e6a1b037ed6629d937320c9c73c5792d",
+      "id": "holdout_026",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "8c8d",
+        "7i7h",
+        "3c3d",
+        "7h7g",
+        "8d8e",
+        "2g2f",
+        "3a3b"
+      ],
+      "sfen": "lnsgkg1nl/1r4sb1/p1pppp1pp/6p2/1p7/2P4P1/PPSPPPP1P/1B5R1/LN1GKGSNL b - 9",
+      "source_game": "4d0aaa9e93e896499d5d18dbfe85578de15c8292d9d0e6feaa43cf39bcde55d2",
+      "id": "holdout_027",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "8c8d",
+        "2h6h",
+        "8d8e"
+      ],
+      "sfen": "lnsgkgsnl/1r5b1/p1ppppppp/9/1p7/2P6/PP1PPPPPP/1B1R5/LNSGKGSNL b - 5",
+      "source_game": "2718d784e703ccac87fb24d09e9b663bbf5c2c6d4901570e432c34583bb7a0a5",
+      "id": "holdout_028",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "8c8d",
+        "6g6f",
+        "3a3b",
+        "2h6h",
+        "8d8e"
+      ],
+      "sfen": "lnsgkg1nl/1r4sb1/p1ppppppp/9/1p7/2PP5/PP2PPPPP/1B1R5/LNSGKGSNL b - 7",
+      "source_game": "23347ee8bd5b773752594616ae61b9614a2459686453321d131f7953e2c89ba1",
+      "id": "holdout_029",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "2g2f",
+        "8b5b",
+        "2f2e",
+        "4a3b",
+        "5i6h",
+        "9c9d",
+        "9g9f",
+        "5a6b"
+      ],
+      "sfen": "lnsg2snl/3kr1gb1/1pppppppp/p8/7P1/P8/1PPPPPP1P/1B1K3R1/LNSG1GSNL b - 9",
+      "source_game": "ec153e42fe552f04306795a22cd09c2f1accb43d61d22328bab31081d6057a01",
+      "id": "holdout_030",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "2g2f",
+        "3c3d",
+        "2h5h",
+        "9c9d"
+      ],
+      "sfen": "lnsgkgsnl/1r5b1/1ppppp1pp/p5p2/9/7P1/PPPPPPP1P/1B2R4/LNSGKGSNL b - 5",
+      "source_game": "fc548dda2e7a0bce71749b9a158e012f5820fa60afccbdc85d06b35de0eccf06",
+      "id": "holdout_031",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "8c8d",
+        "6i7h",
+        "4a3b",
+        "9g9f",
+        "3c3d"
+      ],
+      "sfen": "lnsgk1snl/1r4gb1/p1pppp1pp/1p4p2/9/P1P6/1P1PPPPPP/1BG4R1/LNS1KGSNL b - 7",
+      "source_game": "bed2181a540f1ae5187c7bb126bb3ffee678688b20c8c8fee294d9879a46c548",
+      "id": "holdout_032",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "8c8d",
+        "1g1f",
+        "3c3d",
+        "1f1e",
+        "8d8e",
+        "8h2b+",
+        "3a2b"
+      ],
+      "sfen": "lnsgkg1nl/1r5s1/p1pppp1pp/6p2/1p6P/2P6/PP1PPPPP1/7R1/LNSGKGSNL b Bb 9",
+      "source_game": "10d2b71a7cec4df3269d8439eaf71a4bb0459bf428fc17bff6dfd6caf006bf52",
+      "id": "holdout_033",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "4a3b",
+        "6i7h",
+        "7c7d"
+      ],
+      "sfen": "lnsgk1snl/1r4gb1/pp1pppppp/2p6/9/2P6/PP1PPPPPP/1BG4R1/LNS1KGSNL b - 5",
+      "source_game": "c75d5e2c105f916937489595dd6553afeb526214ebb93de1176d957c9ec245f1",
+      "id": "holdout_034",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "2g2f",
+        "8c8d",
+        "3i3h",
+        "8d8e",
+        "6i7h",
+        "4a3b"
+      ],
+      "sfen": "lnsgk1snl/1r4gb1/p1ppppppp/9/1p7/7P1/PPPPPPP1P/1BG3SR1/LNS1KG1NL b - 7",
+      "source_game": "160ad53caddaed9cb4ca2add5afe575042653a8e1db34b2cc99162f7bffa451a",
+      "id": "holdout_035",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "3c3d",
+        "1g1f",
+        "8c8d",
+        "6g6f",
+        "5a4b",
+        "1f1e",
+        "7c7d"
+      ],
+      "sfen": "lnsg1gsnl/1r3k1b1/p2ppp1pp/1pp3p2/8P/2PP5/PP2PPPP1/1B5R1/LNSGKGSNL b - 9",
+      "source_game": "48eba5dafd0f9cfa00f931d870d39085132c9f8d8981013cf049f5ad31f8752c",
+      "id": "holdout_036",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "4a3b",
+        "6i7h",
+        "9c9d"
+      ],
+      "sfen": "lnsgk1snl/1r4gb1/1pppppppp/p8/9/2P6/PP1PPPPPP/1BG4R1/LNS1KGSNL b - 5",
+      "source_game": "097b0094def26a770c856cd4bd1b654a2ed6004ac480654b17c16cfd15409f7f",
+      "id": "holdout_037",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "2g2f",
+        "8c8d",
+        "2f2e",
+        "3c3d",
+        "2e2d",
+        "2c2d"
+      ],
+      "sfen": "lnsgkgsnl/1r5b1/p1pppp2p/1p4pp1/9/9/PPPPPPP1P/1B5R1/LNSGKGSNL b p 7",
+      "source_game": "44a3327c8c9ede23ba6114bb7246c5524fff2793aad6ac030bb34d8a60ca83a5",
+      "id": "holdout_038",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "8c8d",
+        "7i6h",
+        "3c3d",
+        "6h7g",
+        "3a4b",
+        "5g5f",
+        "7a6b"
+      ],
+      "sfen": "ln1gkg1nl/1r1s1s1b1/p1pppp1pp/1p4p2/9/2P1P4/PPSP1PPPP/1B5R1/LN1GKGSNL b - 9",
+      "source_game": "e651a91ec8ba82d5b5fceca1a0e724d0392ca4ccd5f4a91f00817970cf8ca65c",
+      "id": "holdout_039",
+      "group": "holdout"
+    },
+    {
+      "moves": [
+        "7g7f",
+        "9c9d",
+        "2h7h",
+        "3c3d"
+      ],
+      "sfen": "lnsgkgsnl/1r5b1/1ppppp1pp/p5p2/9/2P6/PP1PPPPPP/1BR6/LNSGKGSNL b - 5",
+      "source_game": "e633c82caee2379ceb56f5df8f710bf8c16847384f5854c5d40499681a57f916",
+      "id": "holdout_040",
+      "group": "holdout"
+    }
+  ]
+}

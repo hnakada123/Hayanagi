@@ -9,3 +9,10 @@ compile_commands.json
 .DS_Store
 *.swp
 *.swo
+
+# 再配布条件の確認中に作成する定跡本体・局面別の由来記録はローカルに保持する。
+/book/variants/*/*.db
+/book/variants/*/*.positions.jsonl
+# 比較棋譜は検証済みgames.zipを保存し、展開済みの個別JSONはローカルに保持する。
+/book/evaluation/*/comparison/games/
+__pycache__/

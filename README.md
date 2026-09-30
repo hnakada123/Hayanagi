@@ -222,8 +222,11 @@ bsdtar -xf build/book-work/wdoor2025.7z -C build/book-work/csa --no-same-owner -
 ```
 
 ハッシュが一致することを確認してから展開してください。展開には7z対応の `bsdtar` または7-Zipが必要です。
-配布ページでは生成定跡の再配布条件までは確認できていないため、生成物はローカル検証用として扱います。
-サーバプログラムのライセンスを棋譜データのライセンスとみなさず、公開時にはデータの利用条件を別途確認します。
+生成定跡の再配布条件は、2026-10-01時点で確認できていません。
+旧版 `book/standard_book.db` はコミット `fa2bfb1` に含まれ、既にリポジトリへ公開されています。
+これは許諾確認済みであることを意味しません。追加生成する定跡本体と局面別記録はローカルに保持し、
+確認内容を [redistribution.json](book/redistribution.json) に記録します。
+サーバプログラムのGPLを棋譜データのライセンスとはみなしません。
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -237,12 +240,13 @@ python3 -B tools/build_book.py import \
   --source-sha256 423504903f211316ec40f9c3d8dcc2e5faf392fc4d1334ede1489242a9d09baa
 python3 -B tools/build_book.py export \
   --work-db build/book-work/floodgate2025.sqlite \
-  --output book/standard_book.db \
+  --output book/variants/local/standard_book.db \
   --min-count 3 --min-pairs 2 --pair-cap 16 \
   --max-positions 5000 --max-candidates 3 \
   --engine build/hayanagi --nodes 100000 --workers 4
-# 生成後に再構成すると、実行ファイルと同じディレクトリの book/ に定跡をコピーします。
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+# ローカル候補を試す場合は、コピー元を明示して再構成します。
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DHAYANAGI_BOOK_SOURCE="$PWD/book/variants/local/standard_book.db"
 cmake --build build -j 4
 ```
 
@@ -253,9 +257,11 @@ cmake --build build -j 4
 対局者名はエンジンの独立性を保証するものではありません。
 初手候補は既定で `7g7f`・`2g2f`・`5g5f`（`--first-moves` で変更可能）です。
 
-`--engine` を指定すると、候補局面ごとに定跡を無効にした新しい Hayanagi プロセスを起動し、
-全合法手の探索と、棋譜由来候補に制限した MultiPV 探索を各10万ノード行います。
-深さ3以上の完了探索を必要とし、全合法手の探索結果より150以上低い評価や、負けの詰み評価がついた候補を除外します。
+`--engine` を指定すると、まず定跡を無効にした新しい Hayanagi プロセスで全合法手を探索します。
+別の新しいプロセスで、その最善手と棋譜由来候補をまとめて MultiPV 探索します。
+各探索は既定で10万ノードです。全候補が完了した同じ深さ（3以上）の評価値を比較し、
+最良候補より150を超えて低い評価や、負けの詰み評価がついた候補を除外します。
+解析方式の版番号をキャッシュキーに含め、以前の異なる深さの評価値を使う記録は再利用しません。
 これは浅い探索による選別であり、定跡手の正しさや棋力向上の証明ではありません。
 採用候補の並び順は、偏りを抑えた出現頻度順を維持します。棋譜に付属する評価値は流用しません。
 `--engine` を省略すると頻度だけで生成し、評価値・深さは未解析を表す0になります。
@@ -269,6 +275,8 @@ SQLite は `build/book-work/` に置き、完了した解析を局面単位で�
 
 生成された `book/standard_book.db` がある場合、ビルド時に実行ファイル横へコピーされるため、
 既定の `USI_OwnBook=true` のまま追加設定なしで使えます。未収録局面では通常探索へ戻ります。
+ローカルの候補を使う場合は CMake の `HAYANAGI_BOOK_SOURCE` にそのファイルの絶対パスを指定します。
+既存のGUI設定では、`BookDir` と `BookFile` でも指定できます。
 本ツールでは評価関数の学習や自己対局による更新はまだ行いません。
 
 ```bash
@@ -531,6 +539,135 @@ python3 -B tools/validate_matches.py --output book/evaluation/search-fixes-20260
 両対局群の棋譜は `tools/validate_matches.py` で再生し、合法手・終局理由・先後の組合せ・勝敗・定跡ヒットを照合しました。
 `build/hayanagi` と `build-hayanagi/hayanagi` の両方で、追加設定なしに独自定跡を読み込み、
 初手 `2g2f` を返すことも確認しています。
+
+### 収録範囲の拡大と３条件比較（2026-10-01）
+
+最終候補は11,409局面・19,735候補手です。旧版の4,710局面・9,561候補手から収録範囲を広げました。
+支持数の条件を維持して対象を5,000局面から12,000局面へ広げ、
+通常探索の修正後エンジンで各探索20万ノードの選別を行います。
+旧版から先頭候補が変わった序盤の12局面を200万ノードで追加解析し、
+評価が不安定だった２局面を1,000万ノードで確認したところ、候補が選別基準を外れました。
+その２局面は、棋譜由来の全候補を1,000万ノードで再選別しています。
+根拠は [changed-moves-confirmation.json](book/evaluation/book-v2-20261001/changed-moves-confirmation.json)、
+最終選択は [reviewed-positions.json](book/evaluation/book-reviewed-20261001/reviewed-positions.json) にあります。
+自エンジンの評価による修正で、全候補手の正しさを証明するものではありません。
+
+旧版は `book/variants/20260930/`、予備候補は `book/variants/20261001/`、
+最終候補は `book/variants/20261001-reviewed/` に分けます。
+定跡本体と局面別の由来記録はローカルに保持し、集計・選別根拠・検証結果をGitに保存します。
+旧版は公開済み `book/standard_book.db` から復元できます。
+以下の比較用エンジンは、解析開始前に `build/hayanagi` をコピーして固定したものです。
+再実行時は別の出力先を指定してください。保存されたハッシュと違うエンジン・定跡・対局ツールでの再開は拒否されます。
+
+```bash
+python3 -B tools/build_book.py export \
+  --work-db build/book-work/floodgate2025.sqlite \
+  --output book/variants/20261001-reviewed/standard_book.db \
+  --min-count 3 --min-pairs 2 --pair-cap 16 --max-positions 12000 --max-candidates 3 \
+  --engine build/book-evaluation-bin/hayanagi-book-v2 --nodes 200000 --workers 12 \
+  --review-positions book/evaluation/book-v2-20261001/review-positions.json --review-nodes 10000000
+python3 -B tools/validate_generated_book.py --book book/variants/20261001-reviewed/standard_book.db
+python3 -B tools/compare_books.py \
+  --engine build/book-evaluation-bin/hayanagi-book-v2 \
+  --current book/variants/20260930/standard_book.db \
+  --candidate book/variants/20261001-reviewed/standard_book.db \
+  --openings book/evaluation/book-reviewed-20261001/openings.json \
+  --output book/evaluation/book-reviewed-20261001/comparison
+python3 -B tools/validate_book_comparison.py \
+  --current book/variants/20260930/standard_book.db \
+  --candidate book/variants/20261001-reviewed/standard_book.db \
+  --output book/evaluation/book-reviewed-20261001/comparison \
+  --work-db build/book-work/floodgate2025.sqlite --archive-games
+```
+
+最終検証の条件は対局開始前に [plan.json](book/evaluation/book-reviewed-20261001/plan.json) に固定しています。
+検証局面は、過去３つの検証集合と局面・元棋譜が重ならない未使用40棋譜から１局面ずつ抽出しました。
+先頭4/6/8手を順番に選び、定跡命中や評価値・対局結果では選別しません。
+元棋譜が学習から除外されていることも [openings.validation.json](book/evaluation/book-reviewed-20261001/openings.validation.json) で照合します。
+分離は棋譜単位であり、学習棋譜と同一の定跡局面が現れることはあります。
+過去の原因解析の根局面まで追加照合すると２局面に重複があったため、
+予定した40局面の結果を保存したうえで、重複を除いた38局面の補足集計も行います。
+`validate_book_comparison.py --prior-analysis` で検査し、対局結果による除外は行いません。
+抽出は `tools/prepare_book_comparison.py --pairs 40 --seed 20261002` で行い、
+`--exclude-openings` に過去３つの開始局面ファイルを指定します。
+
+現行版・最終候補・定跡なしの全３組を先後交換します。
+５万ノード制と持ち時間制で、それぞれ40局面を使用します。
+各組・各条件に初期局面の２局を別枠で加え、合計492局です。
+持ち時間は各５秒＋秒読み100ms、エンジンの余裕10msです。
+各開始局面で双方の時計を５秒に設定し、固定した開始手順の消費時間は加算しません。
+実消費時間を毎手切り上げて差し引き、定跡で節約した時間を後の探索に使えます。
+生成とノード制対局を終えてから、４物理コアに分けて持ち時間制対局を行います。
+短い持ち時間での比較であり、大会の持ち時間や他エンジンへの一般化は保証しません。
+
+`games/` に時計と定跡照合を含む全記録、`summary.json` に先後ペア単位の集計を保存します。
+Gitには検証後の棋譜を `games.zip` に圧縮して保存します。再生検証ツールはZIPも直接読み込めます。
+同じ条件で対局を再開する場合は、先にZIP内のJSONを `games/` へ展開します。
+再生検証は合法手・定跡の選択順・時計の繰り越し・時間切れ・勝敗・集計を確認します。
+異なる対局経路の残り時間の差は、定跡による時間節約の厳密な因果推定とはみなしません。
+先行した852局の予備比較は `book/evaluation/book-v2-20261001/` に保存します。
+その時計条件の一部は２局面の再選別処理と実行が重なったため、時間の比較は参考扱いとし、
+最終候補の時計条件では追加解析・生成・ノード制対局を同時に実行しません。
+
+最終492局と予備852局、計1,344局の再生検証を完了しました。
+最終検証の40局面・先後交換80局ずつの結果は次のとおりです。
+
+| 条件 | 得点率を示す側／相手 | 勝・負・分 | 得点率 | ペア単位の95%区間 |
+| --- | --- | --- | --- | --- |
+| ５万ノード | 最終候補／現行版 | 41・39・0 | 51.25% | 43.75–58.75% |
+| ５万ノード | 最終候補／定跡なし | 40・40・0 | 50.00% | 42.50–57.50% |
+| ５万ノード | 現行版／定跡なし | 41・39・0 | 51.25% | 47.50–55.00% |
+| ５秒＋100ms | 最終候補／現行版 | 37・43・0 | 46.25% | 35.00–57.50% |
+| ５秒＋100ms | 最終候補／定跡なし | 33・47・0 | 41.25% | 31.25–51.25% |
+| ５秒＋100ms | 現行版／定跡なし | 42・38・0 | 52.50% | 43.75–61.25% |
+
+全ての区間が50%を含み、候補版の棋力向上は確認できませんでした。
+過去の解析との重複を除いた38局面でも、候補版の対定跡なし得点率はノード制48.68%、持ち時間制40.79%でした。
+初期局面の別枠は全組・両条件とも１勝１敗、最終検証の時間切れは０局です。
+そのため、既定の定跡には現行版を採用し、収録を拡大した候補版はローカルの検証用として保存します。
+
+持ち時間制の対定跡なしでは、定跡を使えた対局は現行版13/80局、候補版24/80局でした。
+候補版の定跡応答は平均0.18ms、通常探索は平均135msで、残り時間に節約分を繰り越す動作は確認できました。
+定跡を使った対局での離脱手数の中央値は現行版９手目、候補版10.5手目でした。
+ただし、開始手順を固定した試験での集計であり、初手からの全対局を代表する標本ではありません。
+局面と対局経路が異なるため、応答時間の差をそのまま因果的な節約量とはみなしません。
+収録範囲の拡大や時間の節約が、今回の対局成績の改善につながったとは判断できません。
+
+集計は [summary.json](book/evaluation/book-reviewed-20261001/comparison/summary.json)、
+再生確認は [validation.json](book/evaluation/book-reviewed-20261001/comparison/validation.json)、
+38局面の補足集計は [novelty.json](book/evaluation/book-reviewed-20261001/comparison/novelty.json)、
+採用判断は [findings.json](book/evaluation/book-reviewed-20261001/findings.json) に保存しています。
+
+### 配布物の配置確認
+
+[公式アーカイブ](https://wdoor.c.u-tokyo.ac.jp/shogi/)と
+[公開方針の記録](https://wdoor.c.u-tokyo.ac.jp/shogi/history/history.html)では棋譜の公開を確認しましたが、
+生成定跡の再配布に適用できる明示的な条件は、確認したページでは見つかりませんでした。
+確認先と未確認事項は [redistribution.json](book/redistribution.json)、出典表示は [NOTICE.txt](book/NOTICE.txt) にあります。
+これは利用・再配布が全て禁止という法的判断ではありません。運営者への問い合わせは行っていません。
+
+`tools/package_release.py` は実行ファイルと `book/standard_book.db` を同じ親ディレクトリに配置し、
+出典・生成条件・同梱物のSHA-256を付けたZIPを作ります。
+定跡の許諾が未確認の間は `--purpose preview` でローカルの配置確認用ZIPを作れます。
+定跡を同梱する `--purpose release` は、確認済み状態と根拠URL・許諾内容・対象アーカイブの一致を必要とします。
+定跡なしの実行ファイルだけのZIPも作れます。コマンドはGitHubへの公開操作を行いません。
+
+```bash
+python3 -B tools/package_release.py --engine build/hayanagi \
+  --book book/variants/20261001-reviewed/standard_book.db --purpose preview \
+  --output build/release-candidate/hayanagi-book-preview.zip
+python3 -B tools/package_release.py --engine build/hayanagi --purpose release \
+  --output build/release-candidate/hayanagi-engine.zip
+cmake --install build --prefix "$PWD/build/release-stage" --component Runtime
+```
+
+通常のCMake installは実行ファイルと説明書を配置します。
+ローカルで候補定跡を既定として使うには、次のようにビルド先へコピーします。
+
+```bash
+cmake -S . -B build -DHAYANAGI_BOOK_SOURCE="$PWD/book/variants/20261001-reviewed/standard_book.db"
+cmake --build build -j 4
+```
 
 ### 通常探索のオプション
 

@@ -27,6 +27,7 @@ START_ROWS = [
 MOVE_RE = re.compile(r'[+-](?:00|[1-9][1-9])[1-9][1-9](?:FU|KY|KE|GI|KI|KA|HI|OU|TO|NY|NK|NG|UM|RY)')
 GOOD_ENDINGS = {'%TORYO', '%SENNICHITE', '%JISHOGI', '%KACHI'}
 SCHEMA_VERSION = 1
+ANALYSIS_VERSION = 2
 
 
 def digest_file(path):
@@ -317,17 +318,36 @@ def analyze_position(pos, executable, nodes):
                     (' moves ' + ' '.join(pos['history']) if pos['history'] else ''))
         engine.send(f'go nodes {nodes}')
         baseline = parse_search(engine.until('bestmove ', timeout=120))
-        moves = [e['move'] for e in pos['entries']]
-        engine.send(f'setoption name MultiPV value {len(moves)}')
+    if not baseline:
+        return {'error': 'incomplete_search', 'engine': identity}
+    discovered = max(baseline[max(baseline)].values(), key=lambda x: x['score'])
+    requested = [e['move'] for e in pos['entries']]
+    moves = sorted(set(requested) | {discovered['pv'][0]})
+    # 比較対象を同じ完了深さで測る。候補探索への置換表の持越しも避ける。
+    with LineProcess([str(executable.resolve())]) as engine:
+        engine.send('usi')
+        engine.until('usiok')
+        engine.send('setoption name USI_OwnBook value false\n'
+                    'setoption name USI_AnalyseMode value true\n'
+                    'setoption name USI_LimitStrength value false\n'
+                    'setoption name Threads value 1\nsetoption name Hash value 16\n'
+                    f'setoption name MultiPV value {len(moves)}\nisready')
+        engine.until('readyok')
+        engine.send('usinewgame\nposition startpos' +
+                    (' moves ' + ' '.join(pos['history']) if pos['history'] else ''))
         engine.send(f'go nodes {nodes} searchmoves ' + ' '.join(moves))
         restricted = parse_search(engine.until('bestmove ', timeout=120))
         engine.send('quit')
         complete = [d for d, scores in restricted.items() if set(moves) <= set(scores)]
-        if not baseline or not complete:
+        if not complete:
             return {'error': 'incomplete_search', 'engine': identity}
         depth = max(complete)
-        base = max(baseline[max(baseline)].values(), key=lambda x: x['score'])
-        return {'engine': identity, 'baseline': base, 'candidates': restricted[depth]}
+        measured = restricted[depth]
+        base = max(measured.values(), key=lambda x: x['score'])
+        return {'engine': identity, 'baseline': base,
+                'candidates': {move: measured[move] for move in requested},
+                'discovery': discovered, 'comparison_depth': depth,
+                'comparison_moves': moves}
 
 
 def evaluate_holdout(db, exported):
@@ -364,11 +384,31 @@ def export_book(args):
         print(f'{len(candidates)} candidate positions', flush=True)
         analyses = {}
         engine_hash = digest_file(args.engine) if args.engine else None
+        review = None
+        review_keys = set()
+        if args.review_positions:
+            if not args.engine or args.review_nodes <= args.nodes:
+                raise ValueError('Deep review requires --engine and review-nodes greater than nodes')
+            review = json.loads(args.review_positions.read_text())
+            if review['engine_sha256'] != engine_hash:
+                raise ValueError('Deep review refers to a different engine')
+            requested = {key(p['sfen']): p for p in review['positions']}
+            if len(requested) != len(review['positions']):
+                raise ValueError('Duplicate deep-review position')
+            for pos in candidates:
+                if pos['key'] in requested:
+                    if requested[pos['key']]['history'] != pos['history']:
+                        raise ValueError('Deep-review history differs from selected corpus history')
+                    review_keys.add(pos['key'])
+            if review_keys != set(requested):
+                raise ValueError('Deep-review position absent from selected corpus candidates')
+        def analysis_budget(pos):
+            return args.review_nodes if pos['key'] in review_keys else args.nodes
         if args.engine:
             pending = []
             for pos in candidates:
                 cache_id = hashlib.sha256(json.dumps(
-                    [SCHEMA_VERSION, engine_hash, args.nodes, pos['history'],
+                    [SCHEMA_VERSION, ANALYSIS_VERSION, engine_hash, analysis_budget(pos), pos['history'],
                      [e['move'] for e in pos['entries']]], sort_keys=True).encode()).hexdigest()
                 row = db.execute('SELECT result FROM analysis WHERE id=?', (cache_id,)).fetchone()
                 if row:
@@ -377,7 +417,7 @@ def export_book(args):
                     pending.append((cache_id, pos))
             print(f'analysis: {len(analyses)} cached, {len(pending)} pending', flush=True)
             with ThreadPoolExecutor(max_workers=args.workers) as pool:
-                futures = {pool.submit(analyze_position, pos, args.engine, args.nodes): (cid, pos['key'])
+                futures = {pool.submit(analyze_position, pos, args.engine, analysis_budget(pos)): (cid, pos['key'])
                            for cid, pos in pending}
                 try:
                     for n, future in enumerate(as_completed(futures), 1):
@@ -417,7 +457,8 @@ def export_book(args):
             if entries:
                 exported[pos['key']] = entries
                 provenance.append({'sfen': pos['sfen'], 'history': pos['history'], 'entries': entries,
-                                   'analysis': analysis})
+                                   'analysis': analysis,
+                                   'nodes_per_search': analysis_budget(pos) if args.engine else 0})
         if START_KEY not in exported:
             raise ValueError('Analysis rejected all first moves; no book written')
         provenance.sort(key=lambda p: p['sfen'])
@@ -430,12 +471,16 @@ def export_book(args):
             text.extend(f'{e["move"]} {e["ponder"]} {e["score"]} {e["depth"]} {e["count"]}'
                         for e in pos['entries'])
         content = ('\n'.join(text) + '\n').encode('ascii')
+        if args.engine and digest_file(args.engine) != engine_hash:
+            raise RuntimeError('Engine changed during book generation')
         report = dict(metadata, generator_sha256=digest_file(Path(__file__)), export_settings={
             'min_count': args.min_count, 'min_pairs': args.min_pairs, 'pair_cap': args.pair_cap,
             'max_positions': args.max_positions, 'max_candidates': args.max_candidates,
             'first_moves': args.first_moves, 'nodes_per_search': args.nodes if args.engine else 0,
             'searches_per_position': 2 if args.engine else 0, 'engine_sha256': engine_hash,
             'min_depth': args.min_depth, 'max_loss_cp': args.max_loss,
+            'analysis_version': ANALYSIS_VERSION,
+            'comparison': 'fresh-process MultiPV of corpus candidates and discovered move at one completed depth',
             'selection': 'pair-capped frequency order among candidates passing optional search screening'},
             book_sha256=hashlib.sha256(content).hexdigest(), positions=len(provenance),
             entries=sum(len(p['entries']) for p in provenance), rejected=dict(rejected),
@@ -444,6 +489,9 @@ def export_book(args):
             limitations=['No self-play training or playing-strength claim',
                          'Search disagreement is a shallow screening signal, not proof of a bad move',
                          'Player names are used as pair identities; versions/aliases may be related'])
+        if review is not None:
+            report['deep_review'] = {'positions': len(review_keys), 'nodes_per_search': args.review_nodes,
+                                     'input_sha256': digest_file(args.review_positions), 'input': review}
         # Write supporting evidence before replacing the usable book.
         atomic_write(args.output.with_suffix('.json'), json.dumps(report, ensure_ascii=False, indent=2).encode() + b'\n')
         atomic_write(args.output.with_suffix('.positions.jsonl'), b''.join(
@@ -488,6 +536,8 @@ def main():
     export.add_argument('--first-moves', nargs='+', default=['7g7f', '2g2f', '5g5f'])
     export.add_argument('--engine', type=Path, help='optional Hayanagi USI binary for tactical screening')
     export.add_argument('--nodes', type=positive, default=100000)
+    export.add_argument('--review-positions', type=Path, help='同じ学習局面を深く再選別するJSON')
+    export.add_argument('--review-nodes', type=positive, default=10000000)
     export.add_argument('--workers', type=positive, default=4)
     export.add_argument('--min-depth', type=positive, default=3)
     export.add_argument('--max-loss', type=positive, default=150)
@@ -499,8 +549,10 @@ def main():
             parser.error('source-sha256 must be a lowercase SHA-256 digest')
         import_games(args)
     else:
+        if args.engine and args.max_candidates > 31:
+            parser.error('max-candidates must be <=31 with --engine (reserve one MultiPV slot for the discovered move)')
         if args.max_candidates > 32:
-            parser.error('max-candidates must be <=32 (Hayanagi MultiPV limit)')
+            parser.error('max-candidates must be <=32')
         export_book(args)
 
 

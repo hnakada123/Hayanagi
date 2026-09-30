@@ -120,16 +120,19 @@ class Player(LineProcess):
         self.send('usinewgame')
 
     def search(self, history, nodes):
+        return self.search_command(history, f'go nodes {nodes}')
+
+    def search_command(self, history, command, timeout=120):
         self.send(position_command(history))
         started = time.monotonic()
-        self.send(f'go nodes {nodes}')
-        lines = self.until('bestmove ', timeout=120)
+        self.send(command)
+        lines = self.until('bestmove ', timeout=timeout)
         elapsed_ms = (time.monotonic() - started) * 1000
         scores = parse_search(lines)
         score = max(scores[max(scores)].values(), key=lambda x: x['score']) if scores else None
         return {'move': lines[-1].split()[1],
                 'book_hit': any(line.startswith('info string book hit ') for line in lines),
-                'score': score, 'elapsed_ms': round(elapsed_ms, 3)}
+                'score': score, 'elapsed_ms': elapsed_ms}
 
 
 def book_score(outcome, side, book_side):

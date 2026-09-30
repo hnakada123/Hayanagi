@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "checked_on": "2026-10-01",
+  "status": "unconfirmed",
+  "source_archive_sha256": "423504903f211316ec40f9c3d8dcc2e5faf392fc4d1334ede1489242a9d09baa",
+  "scope": "Floodgate 2025 records and Hayanagi opening books derived from them",
+  "sources_reviewed": [
+    {
+      "url": "https://wdoor.c.u-tokyo.ac.jp/shogi/",
+      "finding": "Official annual archives and SHA-256 values are published. No explicit redistribution terms for generated books were found on this page."
+    },
+    {
+      "url": "https://wdoor.c.u-tokyo.ac.jp/shogi/history/history.html",
+      "finding": "The historical service notice says server logs and game records are public. It does not specify a license for redistribution of derived books."
+    },
+    {
+      "url": "https://wdoor.c.u-tokyo.ac.jp/shogi/history/sourceforge/",
+      "finding": "The GPL statement describes the server software; it is not a verified license for the game-record archive."
+    },
+    {
+      "url": "https://github.com/shogi-server/shogi-server/releases/tag/2026-04-10",
+      "finding": "Officially linked archive mirror. The release description identifies kifu archives, without explicit terms for derived-book redistribution."
+    }
+  ],
+  "permission_evidence_url": null,
+  "permission_text": null,
+  "release_book_ready": false,
+  "already_published": {
+    "commit": "fa2bfb18507b822b92ad321f71076e05cc837448",
+    "book_sha256": "a6ff056400fd7a643af0f2ad4d4da3cd634dffcade2715094c0f67fb5d64b429",
+    "note": "The original generated book was included in the previously requested push. Publication is not evidence that redistribution terms were verified."
+  },
+  "next_step": "Obtain an explicit applicable data/derived-book permission statement or confirmation from the archive operator before marking the book ready for a release bundle.",
+  "limitation": "This records the pages inspected, not a legal conclusion that all use or redistribution is prohibited. No third party has been contacted."
+}
