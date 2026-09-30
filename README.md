@@ -71,7 +71,7 @@ quit
 
 ```text
 id name Hayanagi 1.5.0
-id author OpenAI
+id author hnakada123
 option name USI_Ponder type check default false
 option name MultiPV type spin default 1 min 1 max 32
 option name USI_ShowCurrLine type check default false

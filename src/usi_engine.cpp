@@ -373,7 +373,7 @@ void UsiEngine::handle_line(const std::string& line) {
     if (debug_.load()) ProtocolOutput{} << "info string debug received " << line << std::endl;
     if (line == "usi") {
         ProtocolOutput{} << "id name " << kEngineName << " " << kEngineVersion << std::endl;
-        ProtocolOutput{} << "id author OpenAI" << std::endl;
+        ProtocolOutput{} << "id author hnakada123" << std::endl;
         ProtocolOutput{} << "option name USI_Ponder type check default "
                   << (kDefaultUsiPonder ? "true" : "false") << std::endl;
         ProtocolOutput{} << "option name MultiPV type spin default " << kDefaultMultiPv << " min 1 max "
