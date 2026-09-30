@@ -1,0 +1,1855 @@
+{
+  "schema_version": 1,
+  "id": "10000-holdout_081-b",
+  "opening_id": "holdout_081",
+  "group": "holdout",
+  "opening_moves": [
+    "2g2f",
+    "7c7d"
+  ],
+  "nodes_per_move": 10000,
+  "book_side": "b",
+  "book_score": 1.0,
+  "terminal_reason": "checkmate",
+  "final_sfen": "+P2k5/1S1G5/1p1prg1+P1/2p2pp1+N/BP1n5/2P3PR1/3P1P+n1P/1S3+sg1K/3G4L w N2L3Pbsl2p 94",
+  "plies": 93,
+  "moves": [
+    "2g2f",
+    "7c7d",
+    "2f2e",
+    "3c3d",
+    "7g7f",
+    "2b8h",
+    "7i8h",
+    "B*9e",
+    "8i7g",
+    "8a7c",
+    "B*5e",
+    "3a2b",
+    "9g9f",
+    "9e8d",
+    "5i4h",
+    "5c5d",
+    "5e4f",
+    "2a3c",
+    "2e2d",
+    "4a3b",
+    "2d2c",
+    "2b2c",
+    "P*2d",
+    "2c1d",
+    "4h3h",
+    "3c4e",
+    "3i4h",
+    "8b5b",
+    "3g3f",
+    "5d5e",
+    "2i3g",
+    "4e3g",
+    "4f3g",
+    "N*4e",
+    "3g4f",
+    "9c9d",
+    "N*2c",
+    "1a1b",
+    "2c1a+",
+    "3b3c",
+    "3h2i",
+    "4c4d",
+    "8g8f",
+    "5a6b",
+    "8f8e",
+    "8d9c",
+    "9f9e",
+    "9d9e",
+    "9i9e",
+    "9c8b",
+    "P*9b",
+    "P*2g",
+    "2h2g",
+    "P*2f",
+    "2g2f",
+    "5e5f",
+    "9b9a+",
+    "5f5g+",
+    "P*5c",
+    "5b5c",
+    "1a1b",
+    "5g4h",
+    "4i4h",
+    "6b5a",
+    "9e9b+",
+    "5a4a",
+    "9b8b",
+    "7a8b",
+    "1b1c",
+    "S*5g",
+    "7g6e",
+    "7c6e",
+    "4f8b+",
+    "5g4h+",
+    "1c1d",
+    "4a5a",
+    "B*9e",
+    "N*6b",
+    "2d2c+",
+    "G*3h",
+    "2i1h",
+    "3c4c",
+    "S*7b",
+    "4e3g+",
+    "7b6a+",
+    "5a6a",
+    "8b7b",
+    "6a7b",
+    "G*7c",
+    "7b7a",
+    "S*8b",
+    "7a6a",
+    "7c6b"
+  ],
+  "book_hit_plies": [
+    3
+  ],
+  "first_book_miss_ply": 5,
+  "permanent_exit_ply": 5,
+  "elapsed_seconds": 2.297,
+  "events": [
+    {
+      "move": "2f2e",
+      "book_hit": true,
+      "score": null,
+      "elapsed_ms": 0.189,
+      "ply": 3,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "3c3d",
+      "book_hit": false,
+      "score": {
+        "score": 6,
+        "score_type": "cp",
+        "score_value": 6,
+        "depth": 4,
+        "pv": [
+          "3c3d",
+          "7g7f",
+          "8b5b",
+          "8h7g"
+        ],
+        "nodes": 3876
+      },
+      "elapsed_ms": 21.517,
+      "ply": 4,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "7g7f",
+      "book_hit": false,
+      "score": {
+        "score": -6,
+        "score_type": "cp",
+        "score_value": -6,
+        "depth": 3,
+        "pv": [
+          "7g7f",
+          "8b5b",
+          "8h7g"
+        ],
+        "nodes": 1525
+      },
+      "elapsed_ms": 19.108,
+      "ply": 5,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "2b8h",
+      "book_hit": false,
+      "score": {
+        "score": 24,
+        "score_type": "cp",
+        "score_value": 24,
+        "depth": 4,
+        "pv": [
+          "2b8h",
+          "7i8h",
+          "B*5e",
+          "B*4e"
+        ],
+        "nodes": 3954
+      },
+      "elapsed_ms": 23.405,
+      "ply": 6,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "7i8h",
+      "book_hit": false,
+      "score": {
+        "score": 20,
+        "score_type": "cp",
+        "score_value": 20,
+        "depth": 4,
+        "pv": [
+          "7i8h",
+          "B*9e",
+          "B*7g",
+          "9c9d"
+        ],
+        "nodes": 9629
+      },
+      "elapsed_ms": 24.908,
+      "ply": 7,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "B*9e",
+      "book_hit": false,
+      "score": {
+        "score": -20,
+        "score_type": "cp",
+        "score_value": -20,
+        "depth": 3,
+        "pv": [
+          "B*9e"
+        ],
+        "nodes": 479
+      },
+      "elapsed_ms": 28.31,
+      "ply": 8,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "8i7g",
+      "book_hit": false,
+      "score": {
+        "score": 72,
+        "score_type": "cp",
+        "score_value": 72,
+        "depth": 4,
+        "pv": [
+          "8i7g",
+          "8a7c",
+          "B*5e",
+          "3a2b"
+        ],
+        "nodes": 9175
+      },
+      "elapsed_ms": 23.334,
+      "ply": 9,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "8a7c",
+      "book_hit": false,
+      "score": {
+        "score": -72,
+        "score_type": "cp",
+        "score_value": -72,
+        "depth": 3,
+        "pv": [
+          "8a7c",
+          "B*5e",
+          "3a2b"
+        ],
+        "nodes": 7865
+      },
+      "elapsed_ms": 31.273,
+      "ply": 10,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "B*5e",
+      "book_hit": false,
+      "score": {
+        "score": 79,
+        "score_type": "cp",
+        "score_value": 79,
+        "depth": 3,
+        "pv": [
+          "B*5e",
+          "3a2b",
+          "5i4h"
+        ],
+        "nodes": 4564
+      },
+      "elapsed_ms": 16.091,
+      "ply": 11,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "3a2b",
+      "book_hit": false,
+      "score": {
+        "score": -78,
+        "score_type": "cp",
+        "score_value": -78,
+        "depth": 3,
+        "pv": [
+          "3a2b",
+          "9g9f",
+          "9e8d"
+        ],
+        "nodes": 2738
+      },
+      "elapsed_ms": 23.548,
+      "ply": 12,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "9g9f",
+      "book_hit": false,
+      "score": {
+        "score": 74,
+        "score_type": "cp",
+        "score_value": 74,
+        "depth": 4,
+        "pv": [
+          "9g9f",
+          "9e8d",
+          "2h5h",
+          "8b5b"
+        ],
+        "nodes": 9821
+      },
+      "elapsed_ms": 20.56,
+      "ply": 13,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "9e8d",
+      "book_hit": false,
+      "score": {
+        "score": -74,
+        "score_type": "cp",
+        "score_value": -74,
+        "depth": 3,
+        "pv": [
+          "9e8d",
+          "2h5h",
+          "8b5b"
+        ],
+        "nodes": 2572
+      },
+      "elapsed_ms": 19.659,
+      "ply": 14,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "5i4h",
+      "book_hit": false,
+      "score": {
+        "score": 57,
+        "score_type": "cp",
+        "score_value": 57,
+        "depth": 3,
+        "pv": [
+          "5i4h",
+          "5c5d",
+          "5e4f"
+        ],
+        "nodes": 8303
+      },
+      "elapsed_ms": 20.431,
+      "ply": 15,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "5c5d",
+      "book_hit": false,
+      "score": {
+        "score": -52,
+        "score_type": "cp",
+        "score_value": -52,
+        "depth": 3,
+        "pv": [
+          "5c5d",
+          "5e6f",
+          "8d6f"
+        ],
+        "nodes": 2394
+      },
+      "elapsed_ms": 17.229,
+      "ply": 16,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "5e4f",
+      "book_hit": false,
+      "score": {
+        "score": 35,
+        "score_type": "cp",
+        "score_value": 35,
+        "depth": 4,
+        "pv": [
+          "5e4f",
+          "2a3c",
+          "2e2d",
+          "2c2d"
+        ],
+        "nodes": 8338
+      },
+      "elapsed_ms": 20.107,
+      "ply": 17,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "2a3c",
+      "book_hit": false,
+      "score": {
+        "score": -35,
+        "score_type": "cp",
+        "score_value": -35,
+        "depth": 4,
+        "pv": [
+          "2a3c",
+          "2e2d",
+          "2c2d",
+          "2h2d"
+        ],
+        "nodes": 6325
+      },
+      "elapsed_ms": 23.353,
+      "ply": 18,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "2e2d",
+      "book_hit": false,
+      "score": {
+        "score": 35,
+        "score_type": "cp",
+        "score_value": 35,
+        "depth": 3,
+        "pv": [
+          "2e2d"
+        ],
+        "nodes": 376
+      },
+      "elapsed_ms": 28.007,
+      "ply": 19,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "4a3b",
+      "book_hit": false,
+      "score": {
+        "score": -54,
+        "score_type": "cp",
+        "score_value": -54,
+        "depth": 3,
+        "pv": [
+          "4a3b",
+          "4h3h"
+        ],
+        "nodes": 3933
+      },
+      "elapsed_ms": 32.356,
+      "ply": 20,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "2d2c",
+      "book_hit": false,
+      "score": {
+        "score": 60,
+        "score_type": "cp",
+        "score_value": 60,
+        "depth": 3,
+        "pv": [
+          "2d2c",
+          "2b2c",
+          "4h3h"
+        ],
+        "nodes": 4676
+      },
+      "elapsed_ms": 30.249,
+      "ply": 21,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "2b2c",
+      "book_hit": false,
+      "score": {
+        "score": -65,
+        "score_type": "cp",
+        "score_value": -65,
+        "depth": 4,
+        "pv": [
+          "2b2c",
+          "P*2d",
+          "2c1d",
+          "4h3h"
+        ],
+        "nodes": 9334
+      },
+      "elapsed_ms": 22.609,
+      "ply": 22,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "P*2d",
+      "book_hit": false,
+      "score": {
+        "score": 65,
+        "score_type": "cp",
+        "score_value": 65,
+        "depth": 3,
+        "pv": [
+          "P*2d",
+          "2c1d",
+          "4h3h"
+        ],
+        "nodes": 2644
+      },
+      "elapsed_ms": 25.917,
+      "ply": 23,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "2c1d",
+      "book_hit": false,
+      "score": {
+        "score": -32,
+        "score_type": "cp",
+        "score_value": -32,
+        "depth": 3,
+        "pv": [
+          "2c1d"
+        ],
+        "nodes": 1858
+      },
+      "elapsed_ms": 21.818,
+      "ply": 24,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "4h3h",
+      "book_hit": false,
+      "score": {
+        "score": 26,
+        "score_type": "cp",
+        "score_value": 26,
+        "depth": 3,
+        "pv": [
+          "4h3h",
+          "3c4e",
+          "3i4h"
+        ],
+        "nodes": 2057
+      },
+      "elapsed_ms": 33.614,
+      "ply": 25,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "3c4e",
+      "book_hit": false,
+      "score": {
+        "score": -1,
+        "score_type": "cp",
+        "score_value": -1,
+        "depth": 4,
+        "pv": [
+          "3c4e",
+          "3i4h",
+          "8b5b",
+          "6g6f"
+        ],
+        "nodes": 6368
+      },
+      "elapsed_ms": 23.384,
+      "ply": 26,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "3i4h",
+      "book_hit": false,
+      "score": {
+        "score": 1,
+        "score_type": "cp",
+        "score_value": 1,
+        "depth": 3,
+        "pv": [
+          "3i4h",
+          "8b5b",
+          "1g1f"
+        ],
+        "nodes": 2884
+      },
+      "elapsed_ms": 34.578,
+      "ply": 27,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "8b5b",
+      "book_hit": false,
+      "score": {
+        "score": -1,
+        "score_type": "cp",
+        "score_value": -1,
+        "depth": 3,
+        "pv": [
+          "8b5b"
+        ],
+        "nodes": 1076
+      },
+      "elapsed_ms": 34.113,
+      "ply": 28,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "3g3f",
+      "book_hit": false,
+      "score": {
+        "score": 4,
+        "score_type": "cp",
+        "score_value": 4,
+        "depth": 3,
+        "pv": [
+          "3g3f",
+          "5d5e",
+          "2i3g"
+        ],
+        "nodes": 5321
+      },
+      "elapsed_ms": 38.587,
+      "ply": 29,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "5d5e",
+      "book_hit": false,
+      "score": {
+        "score": -45,
+        "score_type": "cp",
+        "score_value": -45,
+        "depth": 3,
+        "pv": [
+          "5d5e",
+          "2i3g",
+          "4c4d"
+        ],
+        "nodes": 4711
+      },
+      "elapsed_ms": 25.657,
+      "ply": 30,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "2i3g",
+      "book_hit": false,
+      "score": {
+        "score": 10,
+        "score_type": "cp",
+        "score_value": 10,
+        "depth": 4,
+        "pv": [
+          "2i3g",
+          "4e3g",
+          "4f3g",
+          "N*4e"
+        ],
+        "nodes": 9277
+      },
+      "elapsed_ms": 25.38,
+      "ply": 31,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "4e3g",
+      "book_hit": false,
+      "score": {
+        "score": 24,
+        "score_type": "cp",
+        "score_value": 24,
+        "depth": 4,
+        "pv": [
+          "4e3g",
+          "4f3g",
+          "N*4e",
+          "3g4f"
+        ],
+        "nodes": 9457
+      },
+      "elapsed_ms": 24.492,
+      "ply": 32,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "4f3g",
+      "book_hit": false,
+      "score": {
+        "score": -24,
+        "score_type": "cp",
+        "score_value": -24,
+        "depth": 3,
+        "pv": [
+          "4f3g",
+          "N*4e"
+        ],
+        "nodes": 2619
+      },
+      "elapsed_ms": 18.714,
+      "ply": 33,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "N*4e",
+      "book_hit": false,
+      "score": {
+        "score": 33,
+        "score_type": "cp",
+        "score_value": 33,
+        "depth": 3,
+        "pv": [
+          "N*4e",
+          "3g4f"
+        ],
+        "nodes": 5548
+      },
+      "elapsed_ms": 18.683,
+      "ply": 34,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "3g4f",
+      "book_hit": false,
+      "score": {
+        "score": 1,
+        "score_type": "cp",
+        "score_value": 1,
+        "depth": 3,
+        "pv": [
+          "3g4f",
+          "9c9d",
+          "N*2c"
+        ],
+        "nodes": 5305
+      },
+      "elapsed_ms": 26.047,
+      "ply": 35,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "9c9d",
+      "book_hit": false,
+      "score": {
+        "score": -1,
+        "score_type": "cp",
+        "score_value": -1,
+        "depth": 2,
+        "pv": [
+          "9c9d"
+        ],
+        "nodes": 142
+      },
+      "elapsed_ms": 34.111,
+      "ply": 36,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "N*2c",
+      "book_hit": false,
+      "score": {
+        "score": 213,
+        "score_type": "cp",
+        "score_value": 213,
+        "depth": 3,
+        "pv": [
+          "N*2c",
+          "1a1b",
+          "2c1a+"
+        ],
+        "nodes": 4875
+      },
+      "elapsed_ms": 22.035,
+      "ply": 37,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "1a1b",
+      "book_hit": false,
+      "score": {
+        "score": -224,
+        "score_type": "cp",
+        "score_value": -224,
+        "depth": 3,
+        "pv": [
+          "1a1b",
+          "2c1a+",
+          "3b3c"
+        ],
+        "nodes": 5072
+      },
+      "elapsed_ms": 29.514,
+      "ply": 38,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "2c1a+",
+      "book_hit": false,
+      "score": {
+        "score": 229,
+        "score_type": "cp",
+        "score_value": 229,
+        "depth": 3,
+        "pv": [
+          "2c1a+",
+          "3b3c",
+          "3h2i"
+        ],
+        "nodes": 2228
+      },
+      "elapsed_ms": 29.168,
+      "ply": 39,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "3b3c",
+      "book_hit": false,
+      "score": {
+        "score": -220,
+        "score_type": "cp",
+        "score_value": -220,
+        "depth": 3,
+        "pv": [
+          "3b3c",
+          "3h2i",
+          "5a6b"
+        ],
+        "nodes": 3684
+      },
+      "elapsed_ms": 29.108,
+      "ply": 40,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "3h2i",
+      "book_hit": false,
+      "score": {
+        "score": 232,
+        "score_type": "cp",
+        "score_value": 232,
+        "depth": 3,
+        "pv": [
+          "3h2i",
+          "P*2e",
+          "1a1b"
+        ],
+        "nodes": 3881
+      },
+      "elapsed_ms": 32.284,
+      "ply": 41,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "4c4d",
+      "book_hit": false,
+      "score": {
+        "score": -225,
+        "score_type": "cp",
+        "score_value": -225,
+        "depth": 3,
+        "pv": [
+          "4c4d",
+          "8g8f",
+          "5a6b"
+        ],
+        "nodes": 4945
+      },
+      "elapsed_ms": 30.785,
+      "ply": 42,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "8g8f",
+      "book_hit": false,
+      "score": {
+        "score": 225,
+        "score_type": "cp",
+        "score_value": 225,
+        "depth": 2,
+        "pv": [
+          "8g8f",
+          "5a6b"
+        ],
+        "nodes": 191
+      },
+      "elapsed_ms": 26.009,
+      "ply": 43,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "5a6b",
+      "book_hit": false,
+      "score": {
+        "score": -250,
+        "score_type": "cp",
+        "score_value": -250,
+        "depth": 3,
+        "pv": [
+          "5a6b",
+          "8f8e",
+          "8d9c"
+        ],
+        "nodes": 5865
+      },
+      "elapsed_ms": 31.025,
+      "ply": 44,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "8f8e",
+      "book_hit": false,
+      "score": {
+        "score": 238,
+        "score_type": "cp",
+        "score_value": 238,
+        "depth": 3,
+        "pv": [
+          "8f8e",
+          "8d9c",
+          "4i3h"
+        ],
+        "nodes": 4915
+      },
+      "elapsed_ms": 29.391,
+      "ply": 45,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "8d9c",
+      "book_hit": false,
+      "score": {
+        "score": -253,
+        "score_type": "cp",
+        "score_value": -253,
+        "depth": 3,
+        "pv": [
+          "8d9c",
+          "9f9e",
+          "9d9e"
+        ],
+        "nodes": 3540
+      },
+      "elapsed_ms": 37.809,
+      "ply": 46,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "9f9e",
+      "book_hit": false,
+      "score": {
+        "score": 253,
+        "score_type": "cp",
+        "score_value": 253,
+        "depth": 3,
+        "pv": [
+          "9f9e",
+          "9d9e",
+          "9i9e"
+        ],
+        "nodes": 3297
+      },
+      "elapsed_ms": 32.626,
+      "ply": 47,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "9d9e",
+      "book_hit": false,
+      "score": {
+        "score": -300,
+        "score_type": "cp",
+        "score_value": -300,
+        "depth": 3,
+        "pv": [
+          "9d9e",
+          "9i9e",
+          "9c8b"
+        ],
+        "nodes": 5034
+      },
+      "elapsed_ms": 35.778,
+      "ply": 48,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "9i9e",
+      "book_hit": false,
+      "score": {
+        "score": 367,
+        "score_type": "cp",
+        "score_value": 367,
+        "depth": 4,
+        "pv": [
+          "9i9e",
+          "9c8b",
+          "P*9b",
+          "P*9c"
+        ],
+        "nodes": 9276
+      },
+      "elapsed_ms": 21.753,
+      "ply": 49,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "9c8b",
+      "book_hit": false,
+      "score": {
+        "score": -367,
+        "score_type": "cp",
+        "score_value": -367,
+        "depth": 3,
+        "pv": [
+          "9c8b",
+          "P*9b",
+          "P*9c"
+        ],
+        "nodes": 3055
+      },
+      "elapsed_ms": 24.222,
+      "ply": 50,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "P*9b",
+      "book_hit": false,
+      "score": {
+        "score": 564,
+        "score_type": "cp",
+        "score_value": 564,
+        "depth": 3,
+        "pv": [
+          "P*9b",
+          "P*2g",
+          "2h2g"
+        ],
+        "nodes": 3225
+      },
+      "elapsed_ms": 28.005,
+      "ply": 51,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "P*2g",
+      "book_hit": false,
+      "score": {
+        "score": -597,
+        "score_type": "cp",
+        "score_value": -597,
+        "depth": 3,
+        "pv": [
+          "P*2g",
+          "2h2g",
+          "P*9c"
+        ],
+        "nodes": 2690
+      },
+      "elapsed_ms": 28.926,
+      "ply": 52,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "2h2g",
+      "book_hit": false,
+      "score": {
+        "score": 800,
+        "score_type": "cp",
+        "score_value": 800,
+        "depth": 5,
+        "pv": [
+          "2h2g",
+          "P*2f",
+          "2g2f",
+          "1d1e",
+          "2f2e"
+        ],
+        "nodes": 9694
+      },
+      "elapsed_ms": 28.456,
+      "ply": 53,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "P*2f",
+      "book_hit": false,
+      "score": {
+        "score": -809,
+        "score_type": "cp",
+        "score_value": -809,
+        "depth": 3,
+        "pv": [
+          "P*2f",
+          "2g2f",
+          "1d1e"
+        ],
+        "nodes": 2725
+      },
+      "elapsed_ms": 32.44,
+      "ply": 54,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "2g2f",
+      "book_hit": false,
+      "score": {
+        "score": 1247,
+        "score_type": "cp",
+        "score_value": 1247,
+        "depth": 4,
+        "pv": [
+          "2g2f",
+          "5e5f",
+          "9b9a+",
+          "5f5g+"
+        ],
+        "nodes": 9268
+      },
+      "elapsed_ms": 33.831,
+      "ply": 55,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "5e5f",
+      "book_hit": false,
+      "score": {
+        "score": -1247,
+        "score_type": "cp",
+        "score_value": -1247,
+        "depth": 3,
+        "pv": [
+          "5e5f",
+          "9b9a+",
+          "5f5g+"
+        ],
+        "nodes": 6465
+      },
+      "elapsed_ms": 34.228,
+      "ply": 56,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "9b9a+",
+      "book_hit": false,
+      "score": {
+        "score": 1247,
+        "score_type": "cp",
+        "score_value": 1247,
+        "depth": 3,
+        "pv": [
+          "9b9a+",
+          "5f5g+"
+        ],
+        "nodes": 4375
+      },
+      "elapsed_ms": 33.053,
+      "ply": 57,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "5f5g+",
+      "book_hit": false,
+      "score": {
+        "score": -1333,
+        "score_type": "cp",
+        "score_value": -1333,
+        "depth": 3,
+        "pv": [
+          "5f5g+",
+          "P*5c",
+          "5b5c"
+        ],
+        "nodes": 8778
+      },
+      "elapsed_ms": 25.802,
+      "ply": 58,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "P*5c",
+      "book_hit": false,
+      "score": {
+        "score": 1333,
+        "score_type": "cp",
+        "score_value": 1333,
+        "depth": 2,
+        "pv": [
+          "P*5c"
+        ],
+        "nodes": 1076
+      },
+      "elapsed_ms": 27.298,
+      "ply": 59,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "5b5c",
+      "book_hit": false,
+      "score": {
+        "score": -1333,
+        "score_type": "cp",
+        "score_value": -1333,
+        "depth": 3,
+        "pv": [
+          "5b5c",
+          "1a1b",
+          "5g4h"
+        ],
+        "nodes": 6443
+      },
+      "elapsed_ms": 27.815,
+      "ply": 60,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "1a1b",
+      "book_hit": false,
+      "score": {
+        "score": 1333,
+        "score_type": "cp",
+        "score_value": 1333,
+        "depth": 2,
+        "pv": [
+          "1a1b",
+          "5g4h"
+        ],
+        "nodes": 2725
+      },
+      "elapsed_ms": 31.358,
+      "ply": 61,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "5g4h",
+      "book_hit": false,
+      "score": {
+        "score": -1333,
+        "score_type": "cp",
+        "score_value": -1333,
+        "depth": 1,
+        "pv": [
+          "5g4h"
+        ],
+        "nodes": 190
+      },
+      "elapsed_ms": 26.498,
+      "ply": 62,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "4i4h",
+      "book_hit": false,
+      "score": {
+        "score": 1333,
+        "score_type": "cp",
+        "score_value": 1333,
+        "depth": 1,
+        "pv": [
+          "4i4h"
+        ],
+        "nodes": 163
+      },
+      "elapsed_ms": 27.874,
+      "ply": 63,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "6b5a",
+      "book_hit": false,
+      "score": null,
+      "elapsed_ms": 19.196,
+      "ply": 64,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "9e9b+",
+      "book_hit": false,
+      "score": {
+        "score": 1648,
+        "score_type": "cp",
+        "score_value": 1648,
+        "depth": 1,
+        "pv": [
+          "9e9b+"
+        ],
+        "nodes": 266
+      },
+      "elapsed_ms": 27.604,
+      "ply": 65,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "5a4a",
+      "book_hit": false,
+      "score": null,
+      "elapsed_ms": 28.008,
+      "ply": 66,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "9b8b",
+      "book_hit": false,
+      "score": {
+        "score": 2608,
+        "score_type": "cp",
+        "score_value": 2608,
+        "depth": 2,
+        "pv": [
+          "9b8b",
+          "7a8b"
+        ],
+        "nodes": 6637
+      },
+      "elapsed_ms": 23.48,
+      "ply": 67,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "7a8b",
+      "book_hit": false,
+      "score": {
+        "score": -2608,
+        "score_type": "cp",
+        "score_value": -2608,
+        "depth": 2,
+        "pv": [
+          "7a8b",
+          "1b1c"
+        ],
+        "nodes": 3216
+      },
+      "elapsed_ms": 19.826,
+      "ply": 68,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "1b1c",
+      "book_hit": false,
+      "score": {
+        "score": 2608,
+        "score_type": "cp",
+        "score_value": 2608,
+        "depth": 1,
+        "pv": [
+          "1b1c"
+        ],
+        "nodes": 365
+      },
+      "elapsed_ms": 21.126,
+      "ply": 69,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "S*5g",
+      "book_hit": false,
+      "score": {
+        "score": -2580,
+        "score_type": "cp",
+        "score_value": -2580,
+        "depth": 1,
+        "pv": [
+          "S*5g"
+        ],
+        "nodes": 6088
+      },
+      "elapsed_ms": 18.605,
+      "ply": 70,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "7g6e",
+      "book_hit": false,
+      "score": {
+        "score": 2588,
+        "score_type": "cp",
+        "score_value": 2588,
+        "depth": 1,
+        "pv": [
+          "7g6e"
+        ],
+        "nodes": 6910
+      },
+      "elapsed_ms": 25.92,
+      "ply": 71,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "7c6e",
+      "book_hit": false,
+      "score": {
+        "score": -2611,
+        "score_type": "cp",
+        "score_value": -2611,
+        "depth": 1,
+        "pv": [
+          "7c6e"
+        ],
+        "nodes": 9192
+      },
+      "elapsed_ms": 18.056,
+      "ply": 72,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "4f8b+",
+      "book_hit": false,
+      "score": {
+        "score": 2611,
+        "score_type": "cp",
+        "score_value": 2611,
+        "depth": 1,
+        "pv": [
+          "4f8b+"
+        ],
+        "nodes": 8910
+      },
+      "elapsed_ms": 24.718,
+      "ply": 73,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "5g4h+",
+      "book_hit": false,
+      "score": {
+        "score": -2611,
+        "score_type": "cp",
+        "score_value": -2611,
+        "depth": 1,
+        "pv": [
+          "5g4h+"
+        ],
+        "nodes": 5002
+      },
+      "elapsed_ms": 19.174,
+      "ply": 74,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "1c1d",
+      "book_hit": false,
+      "score": {
+        "score": 2611,
+        "score_type": "cp",
+        "score_value": 2611,
+        "depth": 1,
+        "pv": [
+          "1c1d"
+        ],
+        "nodes": 1243
+      },
+      "elapsed_ms": 23.542,
+      "ply": 75,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "4a5a",
+      "book_hit": false,
+      "score": null,
+      "elapsed_ms": 23.032,
+      "ply": 76,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "B*9e",
+      "book_hit": false,
+      "score": {
+        "score": 3134,
+        "score_type": "cp",
+        "score_value": 3134,
+        "depth": 1,
+        "pv": [
+          "B*9e"
+        ],
+        "nodes": 6978
+      },
+      "elapsed_ms": 17.254,
+      "ply": 77,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "N*6b",
+      "book_hit": false,
+      "score": {
+        "score": -3134,
+        "score_type": "cp",
+        "score_value": -3134,
+        "depth": 2,
+        "pv": [
+          "N*6b",
+          "2d2c+"
+        ],
+        "nodes": 5988
+      },
+      "elapsed_ms": 19.133,
+      "ply": 78,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "2d2c+",
+      "book_hit": false,
+      "score": {
+        "score": 3134,
+        "score_type": "cp",
+        "score_value": 3134,
+        "depth": 1,
+        "pv": [
+          "2d2c+"
+        ],
+        "nodes": 2958
+      },
+      "elapsed_ms": 24.263,
+      "ply": 79,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "G*3h",
+      "book_hit": false,
+      "score": {
+        "score": -3130,
+        "score_type": "cp",
+        "score_value": -3130,
+        "depth": 1,
+        "pv": [
+          "G*3h"
+        ],
+        "nodes": 5467
+      },
+      "elapsed_ms": 23.355,
+      "ply": 80,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "2i1h",
+      "book_hit": false,
+      "score": {
+        "score": 3157,
+        "score_type": "cp",
+        "score_value": 3157,
+        "depth": 2,
+        "pv": [
+          "2i1h",
+          "3c4c"
+        ],
+        "nodes": 7290
+      },
+      "elapsed_ms": 22.927,
+      "ply": 81,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "3c4c",
+      "book_hit": false,
+      "score": {
+        "score": -3157,
+        "score_type": "cp",
+        "score_value": -3157,
+        "depth": 1,
+        "pv": [
+          "3c4c"
+        ],
+        "nodes": 7322
+      },
+      "elapsed_ms": 26.839,
+      "ply": 82,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "S*7b",
+      "book_hit": false,
+      "score": {
+        "score": 3199,
+        "score_type": "cp",
+        "score_value": 3199,
+        "depth": 1,
+        "pv": [
+          "S*7b"
+        ],
+        "nodes": 608
+      },
+      "elapsed_ms": 26.356,
+      "ply": 83,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "4e3g+",
+      "book_hit": false,
+      "score": {
+        "score": -3302,
+        "score_type": "cp",
+        "score_value": -3302,
+        "depth": 2,
+        "pv": [
+          "4e3g+",
+          "7b6a+"
+        ],
+        "nodes": 3001
+      },
+      "elapsed_ms": 29.488,
+      "ply": 84,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "7b6a+",
+      "book_hit": false,
+      "score": {
+        "score": 3302,
+        "score_type": "cp",
+        "score_value": 3302,
+        "depth": 1,
+        "pv": [
+          "7b6a+"
+        ],
+        "nodes": 1410
+      },
+      "elapsed_ms": 27.388,
+      "ply": 85,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "5a6a",
+      "book_hit": false,
+      "score": {
+        "score": -4214,
+        "score_type": "cp",
+        "score_value": -4214,
+        "depth": 3,
+        "pv": [
+          "5a6a",
+          "G*7b",
+          "6a5a"
+        ],
+        "nodes": 9695
+      },
+      "elapsed_ms": 21.992,
+      "ply": 86,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "8b7b",
+      "book_hit": false,
+      "score": {
+        "score": 29995,
+        "score_type": "mate",
+        "score_value": 5,
+        "depth": 5,
+        "pv": [
+          "8b7b",
+          "6a7b",
+          "G*7c",
+          "7b7a",
+          "S*7b"
+        ],
+        "nodes": 617
+      },
+      "elapsed_ms": 1.19,
+      "ply": 87,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "6a7b",
+      "book_hit": false,
+      "score": {
+        "score": -3292,
+        "score_type": "cp",
+        "score_value": -3292,
+        "depth": 3,
+        "pv": [
+          "6a7b",
+          "S*7c",
+          "7b7a"
+        ],
+        "nodes": 3835
+      },
+      "elapsed_ms": 26.72,
+      "ply": 88,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "G*7c",
+      "book_hit": false,
+      "score": {
+        "score": 29995,
+        "score_type": "mate",
+        "score_value": 5,
+        "depth": 5,
+        "pv": [
+          "G*7c",
+          "7b7a",
+          "S*8b",
+          "7a6a",
+          "7c6b"
+        ],
+        "nodes": 214
+      },
+      "elapsed_ms": 0.723,
+      "ply": 89,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "7b7a",
+      "book_hit": false,
+      "score": {
+        "score": -29998,
+        "score_type": "mate",
+        "score_value": -2,
+        "depth": 3,
+        "pv": [
+          "7b7a",
+          "S*7b"
+        ],
+        "nodes": 1727
+      },
+      "elapsed_ms": 24.229,
+      "ply": 90,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "S*8b",
+      "book_hit": false,
+      "score": {
+        "score": 29997,
+        "score_type": "mate",
+        "score_value": 3,
+        "depth": 5,
+        "pv": [
+          "S*8b",
+          "7a6a",
+          "7c6b"
+        ],
+        "nodes": 88
+      },
+      "elapsed_ms": 0.568,
+      "ply": 91,
+      "side": "b",
+      "player": "book"
+    },
+    {
+      "move": "7a6a",
+      "book_hit": false,
+      "score": {
+        "score": -29998,
+        "score_type": "mate",
+        "score_value": -2,
+        "depth": 3,
+        "pv": [
+          "7a6a",
+          "7c6b"
+        ],
+        "nodes": 2413
+      },
+      "elapsed_ms": 24.784,
+      "ply": 92,
+      "side": "w",
+      "player": "no_book"
+    },
+    {
+      "move": "7c6b",
+      "book_hit": false,
+      "score": {
+        "score": 29999,
+        "score_type": "mate",
+        "score_value": 1,
+        "depth": 5,
+        "pv": [
+          "7c6b"
+        ],
+        "nodes": 2
+      },
+      "elapsed_ms": 0.525,
+      "ply": 93,
+      "side": "b",
+      "player": "book"
+    }
+  ]
+}

@@ -23,6 +23,7 @@ public:
 private:
     std::unordered_map<std::string, std::vector<BookEntry>> entries_;
     bool loaded_ = false;
+    int max_ply_ = 0;
 };
 
 }  // namespace shogi

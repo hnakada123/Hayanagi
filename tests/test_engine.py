@@ -313,7 +313,9 @@ class EngineTests(unittest.TestCase):
             lines = self.engine.until('bestmove ')
             counts = [int(re.search(r' nodes (\d+)', line).group(1))
                       for line in lines if line.startswith('info depth ')]
-            self.assertEqual(counts, [30] * 30)
+            # 30 fallback evaluations plus 30 depth-1 leaves. Every worker's
+            # partial batch and the coordinator's fallback work must be counted.
+            self.assertEqual(counts, [60] * 30)
 
     def assert_no_result(self, timeout=0.1):
         deadline = time.monotonic() + timeout

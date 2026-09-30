@@ -646,11 +646,12 @@ void UsiEngine::start_search(const std::string& line) {
     const bool valid = position_valid_ && snapshot.find_king(Color::Black) >= 0 &&
                        snapshot.find_king(Color::White) >= 0;
 
-    if (valid && !analyse_mode_ && !options.limit_strength && usi_own_book_ && book_.is_loaded() &&
+    if (valid && !analyse_mode_ && !options.limit_strength && usi_own_book_ &&
+        book_file_ != "no_book" && book_.is_loaded() &&
         !options.ponder && !options.infinite) {
         const std::string sfen = snapshot.to_sfen();
         const auto* entries = book_.lookup(sfen);
-        if (entries && !entries->empty()) {
+        if (entries && !entries->empty() && !snapshot.terminal_status().is_terminal()) {
             const auto selected = std::find_if(entries->begin(), entries->end(), [&](const BookEntry& entry) {
                 if (options.restrict_searchmoves && std::find(options.searchmoves.begin(),
                         options.searchmoves.end(), entry.best_move) == options.searchmoves.end()) return false;
@@ -663,7 +664,10 @@ void UsiEngine::start_search(const std::string& line) {
                           << " depth " << entry.depth << " count " << entry.count << std::endl;
                 ProtocolOutput out;
                 out << "bestmove " << entry.best_move;
-                if (usi_ponder_.load() && entry.ponder_move != "none") {
+                Position after = snapshot;
+                after.apply_usi_move(entry.best_move);
+                if (usi_ponder_.load() && entry.ponder_move != "none" &&
+                    !after.terminal_status().is_terminal() && after.apply_usi_move(entry.ponder_move)) {
                     out << " ponder " << entry.ponder_move;
                 }
                 out << std::endl;

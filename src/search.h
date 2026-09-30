@@ -136,11 +136,14 @@ private:
     std::unique_ptr<ParallelTeam> team_;
     const std::atomic_size_t* mate_cutoff_ = nullptr;
     std::size_t mate_index_ = 0;
+    std::uint64_t mate_probe_node_limit_ = 0;
+    int mate_probe_time_limit_ms_ = 0;
     std::array<std::array<Move, 2>, kMaxDepth> killer_moves_{};
     std::array<std::array<std::array<int, kSquareCount>, kHistoryFromBuckets>, 2> history_{};
 
     int negamax(const Position& position, int depth, int ply, int alpha, int beta);
-    int quiescence(const Position& position, int ply, int alpha, int beta);
+    int quiescence(const Position& position, int ply, int alpha, int beta, int qply = 0);
+    bool mate_in_one(const Position& position, Move* mating_move = nullptr);
     int evaluate(const Position& position) const;
     int elapsed_ms() const;
     bool should_stop();

@@ -1,0 +1,162 @@
+{
+  "schema_version": 1,
+  "manifest": {
+    "schema_version": 1,
+    "engine_sha256": "4d78a654eebad62ee41967efd45d00108aaa564319336f41f2bff7cce2858f34",
+    "book_sha256": "a6ff056400fd7a643af0f2ad4d4da3cd634dffcade2715094c0f67fb5d64b429",
+    "referee_sha256": "11756620c5085b473c46c8cc33487b5a10ed6f8f83f15c12d4d354acfa9055c5",
+    "openings_sha256": "1029a327cc02a6df1128830f1f74c43709296a72d71ec09a53a6d47a5e13c36a",
+    "nodes_per_move": [
+      10000,
+      50000
+    ],
+    "max_plies": 320,
+    "threads": 1,
+    "hash_mb": 16,
+    "entering_king_rule": "CSARule24",
+    "resign_value": 99999,
+    "fresh_processes_per_game": true,
+    "paired_color_swap": true,
+    "primary_measure": "mean book score; win=1, draw=0.5, loss=0",
+    "exit_offsets_plies": [
+      0,
+      4,
+      8
+    ],
+    "substantial_drop_cp": 200,
+    "expected_games": 404
+  },
+  "completed_games": 404,
+  "complete": true,
+  "conditions": {
+    "10000": {
+      "holdout": {
+        "games": 200,
+        "complete_pairs": 100,
+        "book_wins": 108,
+        "book_losses": 92,
+        "draws": 0,
+        "score_rate": 0.54,
+        "paired_bootstrap_95_percent_interval": [
+          0.5,
+          0.58
+        ],
+        "by_book_color": {
+          "b": {
+            "0.0": 52,
+            "1.0": 48
+          },
+          "w": {
+            "0.0": 40,
+            "1.0": 60
+          }
+        },
+        "terminal_reasons": {
+          "checkmate": 200
+        },
+        "games_with_book_hit": 50,
+        "median_book_hits": 0.0,
+        "median_exit_ply": 9.0,
+        "unique_full_game_sequences": 139
+      },
+      "startpos": {
+        "games": 2,
+        "complete_pairs": 1,
+        "book_wins": 1,
+        "book_losses": 1,
+        "draws": 0,
+        "score_rate": 0.5,
+        "paired_bootstrap_95_percent_interval": null,
+        "by_book_color": {
+          "b": {
+            "0.0": 1
+          },
+          "w": {
+            "1.0": 1
+          }
+        },
+        "terminal_reasons": {
+          "checkmate": 2
+        },
+        "games_with_book_hit": 2,
+        "median_book_hits": 2.5,
+        "median_exit_ply": 6.5,
+        "unique_full_game_sequences": 2
+      }
+    },
+    "50000": {
+      "holdout": {
+        "games": 200,
+        "complete_pairs": 100,
+        "book_wins": 107,
+        "book_losses": 92,
+        "draws": 1,
+        "score_rate": 0.5375,
+        "paired_bootstrap_95_percent_interval": [
+          0.4925,
+          0.5825
+        ],
+        "by_book_color": {
+          "b": {
+            "1.0": 57,
+            "0.0": 42,
+            "0.5": 1
+          },
+          "w": {
+            "1.0": 50,
+            "0.0": 50
+          }
+        },
+        "terminal_reasons": {
+          "checkmate": 197,
+          "impasse": 2,
+          "repetition": 1
+        },
+        "games_with_book_hit": 51,
+        "median_book_hits": 0.0,
+        "median_exit_ply": 8,
+        "unique_full_game_sequences": 137
+      },
+      "startpos": {
+        "games": 2,
+        "complete_pairs": 1,
+        "book_wins": 1,
+        "book_losses": 1,
+        "draws": 0,
+        "score_rate": 0.5,
+        "paired_bootstrap_95_percent_interval": null,
+        "by_book_color": {
+          "b": {
+            "0.0": 1
+          },
+          "w": {
+            "1.0": 1
+          }
+        },
+        "terminal_reasons": {
+          "checkmate": 2
+        },
+        "games_with_book_hit": 2,
+        "median_book_hits": 2.0,
+        "median_exit_ply": 5.5,
+        "unique_full_game_sequences": 2
+      }
+    }
+  },
+  "interval_method": {
+    "method": "percentile bootstrap over color-swapped opening pairs",
+    "confidence": 0.95,
+    "resamples": 10000,
+    "seed": 20260930
+  },
+  "limitations": [
+    "Conditional on this fixed held-out opening suite and same-engine opposition",
+    "Prefix lengths are balanced and distinct positions sampled uniformly; this is not natural opening-frequency weighting",
+    "Two color-swapped games are resampled together; related opening families may still correlate",
+    "Startpos is deterministic and reported separately, not counted as repeated independent samples",
+    "Fixed nodes measure move choice; saved book time is not transferred to later moves",
+    "Ply-cap draws are artificial and listed separately",
+    "Post-exit evaluation uses Hayanagi itself and excludes mate/missing scores from CP averages",
+    "Bootstrap intervals are per condition, without multiplicity correction"
+  ]
+}

@@ -28,7 +28,7 @@ Hayanagi は、C++17 で実装した USI プロトコル対応の最小構成将
 - CMake 3.16 以上
 - C++17 対応コンパイラ
   - GCC / Clang を想定（`__builtin_ctzll` などの組み込み関数を使います）
-- Python 3（回帰テストとベンチマークスクリプトのみ。標準ライブラリだけで動きます）
+- Python 3（回帰テスト・ベンチマーク・定跡生成ツール。標準ライブラリだけで動きます）
 
 ## ビルド
 
@@ -44,6 +44,8 @@ cmake --build build
 | `build/hayanagi` | USI エンジン実行ファイル |
 | `build/libhayanagi_tsume.a` | `Position` と `TsumeSearch` の静的ライブラリ（GUI 組み込み用） |
 | `build/hayanagi_tests` | C++ 単体テスト（Hayanagi を最上位でビルドしたときだけ生成） |
+| `build/hayanagi_book_positions` | 定跡生成用の棋譜検査・SFEN変換（`HAYANAGI_BUILD_BOOK_TOOLS` で制御） |
+| `build/hayanagi_match_referee` | 定跡比較対局用の合法手・終局判定（同オプションで制御） |
 
 コンパイル警告は `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wno-sign-conversion` を有効にしており、GCC と Clang のどちらでも警告なしでビルドできます（Clang の `-Wconversion` は `-Wsign-conversion` を含むため、GCC と同じ意味になるよう明示的に無効にしています）。
 
@@ -196,6 +198,342 @@ copyprotection ok
 
 `USI_OwnBook` を有効にすると（デフォルトで有効）、`go` 時に定跡ファイルを参照し、現局面にヒットすれば探索せずに定跡手を返します。定跡ファイルはやねうら王の DB2016 フォーマット（`#YANEURAOU-DB2016 1.00`）に対応しています。`BookDir` で定跡フォルダ（デフォルトは実行ファイルからの相対パス `book`）、`BookFile` で定跡ファイル名（デフォルトは `standard_book.db`）を指定します。`BookFile` に `no_book` を指定すると定跡を無効にできます。
 
+定跡は盤面・手番・持駒で照合し、SFEN の手数が異なる同一局面にもヒットします。
+ファイル内で先に現れる合法な候補手を採用します。千日手などの終局判定は定跡より優先し、
+予想応手も合法性を確認します。生成ツールが出力する `# HAYANAGI_MAX_PLY 30` は、
+実際の対局で30手目まで定跡を使う指定です。このコメントがない外部定跡には手数制限を加えません。
+
+### Hayanagi の定跡生成
+
+`tools/build_book.py` は、Floodgate の平手・通常初期局面の CSA 棋譜から定跡を生成します。
+Python 標準ライブラリと、CMake で生成される `hayanagi_book_positions` を使います。
+補助プログラムは Hayanagi 本体の `Position` を使用し、序盤の抽出範囲を超えて棋譜全体の合法性を検査します。
+KIF、駒落ち、任意の開始局面、CSA の複数レコードをカンマで連結した行は、この取り込み器の対象外です。
+
+初版の入力は [Floodgate 公式アーカイブ](https://wdoor.c.u-tokyo.ac.jp/shogi/) の2025年分です。
+取得先と公式掲載の SHA-256 は以下のとおりです。大量の棋譜ページを個別取得せず、アーカイブを一度取得します。
+
+```bash
+mkdir -p build/book-work/csa
+curl -fL https://wdoor.c.u-tokyo.ac.jp/shogi/archive/wdoor2025.7z -o build/book-work/wdoor2025.7z
+sha256sum build/book-work/wdoor2025.7z
+# 423504903f211316ec40f9c3d8dcc2e5faf392fc4d1334ede1489242a9d09baa
+bsdtar -xf build/book-work/wdoor2025.7z -C build/book-work/csa --no-same-owner --no-same-permissions
+```
+
+ハッシュが一致することを確認してから展開してください。展開には7z対応の `bsdtar` または7-Zipが必要です。
+配布ページでは生成定跡の再配布条件までは確認できていないため、生成物はローカル検証用として扱います。
+サーバプログラムのライセンスを棋譜データのライセンスとみなさず、公開時にはデータの利用条件を別途確認します。
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j 4
+python3 -B tools/build_book.py import \
+  --input build/book-work/csa/2025 \
+  --validator build/hayanagi_book_positions \
+  --work-db build/book-work/floodgate2025.sqlite \
+  --max-ply 30 --min-rating 3000 --min-game-plies 40 \
+  --source-url https://wdoor.c.u-tokyo.ac.jp/shogi/archive/wdoor2025.7z \
+  --source-sha256 423504903f211316ec40f9c3d8dcc2e5faf392fc4d1334ede1489242a9d09baa
+python3 -B tools/build_book.py export \
+  --work-db build/book-work/floodgate2025.sqlite \
+  --output book/standard_book.db \
+  --min-count 3 --min-pairs 2 --pair-cap 16 \
+  --max-positions 5000 --max-candidates 3 \
+  --engine build/hayanagi --nodes 100000 --workers 4
+# 生成後に再構成すると、実行ファイルと同じディレクトリの book/ に定跡をコピーします。
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j 4
+```
+
+取込時は、両対局者の記録レート3000以上、40手以上、通常の終局記録がある棋譜を対象にします。
+棋譜全体の指し手列で重複を除き、そのハッシュで約10%を検証用に分離します。
+各局面の候補手には3局以上・異なる対局者の組み合わせ2組以上の支持を要求します。
+同じ組み合わせによる寄与は選択用の重みでは16局までに抑え、実際の出現回数は別に保持します。
+対局者名はエンジンの独立性を保証するものではありません。
+初手候補は既定で `7g7f`・`2g2f`・`5g5f`（`--first-moves` で変更可能）です。
+
+`--engine` を指定すると、候補局面ごとに定跡を無効にした新しい Hayanagi プロセスを起動し、
+全合法手の探索と、棋譜由来候補に制限した MultiPV 探索を各10万ノード行います。
+深さ3以上の完了探索を必要とし、全合法手の探索結果より150以上低い評価や、負けの詰み評価がついた候補を除外します。
+これは浅い探索による選別であり、定跡手の正しさや棋力向上の証明ではありません。
+採用候補の並び順は、偏りを抑えた出現頻度順を維持します。棋譜に付属する評価値は流用しません。
+`--engine` を省略すると頻度だけで生成し、評価値・深さは未解析を表す0になります。
+
+出力する `standard_book.db` は既存の DB2016 形式です。
+同名の `.json` に入力・生成条件・ハッシュ・除外件数・検証棋譜での命中率、
+`.positions.jsonl` に各局面の代表手順・候補の支持数・解析結果を保存します。
+検証は未使用棋譜の再生による収録範囲の測定であり、対局成績の測定ではありません。
+SQLite は `build/book-work/` に置き、完了した解析を局面単位で保存します。
+中断後は同じ `export` コマンドで解析を再開できます。入力条件を変える場合は新しい作業DBに取り込み直してください。
+
+生成された `book/standard_book.db` がある場合、ビルド時に実行ファイル横へコピーされるため、
+既定の `USI_OwnBook=true` のまま追加設定なしで使えます。未収録局面では通常探索へ戻ります。
+本ツールでは評価関数の学習や自己対局による更新はまだ行いません。
+
+```bash
+python3 -B tests/test_book.py --engine build/hayanagi --validator build/hayanagi_book_positions
+```
+
+### 定跡あり／なしの対局検証
+
+`tools/match_book.py` は、同じ Hayanagi の定跡あり／なしを先後入れ替えで比較します。
+評価関数・定跡ファイルは更新せず、固定した生成物の効果を測定します。
+１手のノード数、Threads=1、Hash=16 MiB、MultiPV=1、先読みなし、棋力制限なしを両者で揃え、
+対局ごとに新しいプロセスを起動します。前の対局の置換表は引き継ぎません。
+合法手・終局は `hayanagi_match_referee` が着手履歴を保持して判定します。
+この判定器は Hayanagi の `Position` を共用し、USI の `resign` を千日手の負けと誤認しません。
+
+次の例では、生成時に未使用とした棋譜から100局面を固定します。
+初手が▲２六歩・▲７六歩・▲５六歩の棋譜から、2・4・6・8手進んだ局面を各25個抽出し、
+盤面・手番・持駒の同じ局面を重複させません。定跡に当たるかどうかや評価値では選別しません。
+この集合は多様な序盤を比較するためのもので、実戦での出現頻度を再現した標本ではありません。
+通常の初期局面も別枠で検証し、同じ決定的な対局を繰り返して統計上の局数を増やしません。
+
+```bash
+cmake --build build -j 4
+python3 -B tools/match_book.py prepare \
+  --work-db build/book-work/floodgate2025.sqlite \
+  --output book/evaluation/openings-20260930.json --pairs 100 --seed 20260930
+python3 -B tools/match_book.py run \
+  --engine build/hayanagi --referee build/hayanagi_match_referee \
+  --book book/standard_book.db --openings book/evaluation/openings-20260930.json \
+  --output book/evaluation/paired-20260930 --nodes 10000 50000 --max-plies 320 --workers 8
+python3 -B tools/match_book.py audit \
+  --engine build/hayanagi --output book/evaluation/paired-20260930 --nodes 200000 --workers 8
+```
+
+上記は100局面×先後2局×探索量2条件の400局と、初期局面からの4局、計404局です。
+入玉は両者とも `CSARule24` とし、評価値による投了は無効です。
+320手で打ち切った場合は `runner_ply_cap` の引き分けとして、千日手・持将棋と区別します。
+定跡による時間節約を後の手へ再配分しない、ノード数固定の比較です。
+
+`games/` に全着手・探索評価・定跡ヒット・終局理由を対局ごとに保存し、
+`summary.json` に定跡側の勝敗と得点率（勝ち1、引き分け0.5、負け0）を集計します。
+95%区間は先後2局を１組として10,000回再抽出するブートストラップで求めます。
+各探索条件の区間であり、多重比較の補正はしません。関連する戦型同士の相関や、
+同一エンジン相手への偏りがあるため、一般的な棋力・対人レーティングへ換算しません。
+
+`audit` は最後の定跡ヒット後に定跡側が通常探索へ戻った局面と、その4手後・8手後を、
+定跡なし・１局面20万ノードの新しい Hayanagi プロセスで解析します。
+先後入れ替え対局の同じ色・同じ手数も参考対照として解析しますが、そこに至る手順や相手の定跡設定は異なります。
+200以上の評価低下を集計し、終了済みの局面や詰み評価は通常の評価値平均から分離します。
+Hayanagi 自身の評価なので、強い外部エンジンによる独立した正しさの検証ではありません。
+詳細は `exit_windows.json` と `audit/` に残します。
+
+エンジン・定跡・判定器・開始局面のハッシュと条件は `manifest.json` に固定します。
+同じコマンドを再実行すると完了した対局・解析を再利用します。
+条件やファイルを変更して比較する場合は、別の出力ディレクトリを指定してください。
+
+2026-09-30 の生成定跡では、上記404局と定跡離脱前後の813局面の再解析を完了しました。
+未使用棋譜の100局面について、定跡側の成績は次のとおりです。
+
+| １手の探索量 | 勝・負・分 | 得点率 | 95%区間 | 定跡が使われた対局 |
+| --- | --- | --- | --- | --- |
+| 10,000ノード | 112・88・0 | 56.0% | 51.0–61.0% | 73/200局 |
+| 50,000ノード | 89・105・6 | 46.0% | 41.25–50.75% | 69/200局 |
+
+１万ノードでは改善が見られましたが、５万ノードでは改善を確認できませんでした。
+通常の初期局面からの別枠対局も、それぞれ1勝1敗、0勝2敗です。
+この結果だけでは、定跡による一貫した棋力向上を確認したとは判断できません。
+
+定跡が使われた対局では、最後の定跡ヒット後に通常探索へ戻る手数の中央値は7手目・8手目でした。
+その局面の20万ノード評価が定跡側から見て−200以下だった例は、両条件ともありませんでした。
+８手後までに評価値が200以上低下した例は7/73局（9.6%）・4/69局（5.8%）、
+平均変化は+24・+75でした。参考対照の定跡なし側では15/73局・12/69局でしたが、
+対局経路と相手の設定も異なるため、この差を定跡単独の因果効果とは解釈しません。
+最大の低下は１万ノードの `holdout_017` 先手で、離脱時+95から８手後−1479でした。
+
+全404局・42,448手を再生し、合法性・終局理由・勝敗・開始局面の組合せを照合しました。
+320手打切りはなく、終局理由は詰み395局、持将棋判定2局、千日手6局、連続王手の千日手1局です。
+集計は [summary.json](book/evaluation/paired-20260930/summary.json)、
+再生検証は [validation.json](book/evaluation/paired-20260930/validation.json)、
+離脱前後の評価は [exit_windows.json](book/evaluation/paired-20260930/exit_windows.json) に保存しています。
+次の改良では、定跡が続く範囲の拡大と、離脱後に大きく評価を落とした局面の追加検証が候補です。
+
+### 対局結果からの原因調査
+
+`tools/diagnose_book.py` は、保存済みの対局と定跡離脱後の解析結果を使って、
+定跡手と通常探索のどちらに改善候補があるかを調べます。
+定跡を実際に使った５万ノード条件の敗局について、自分の手番ごとに終局まで50万ノードで再解析します。
+以前の検証で離脱後８手以内に評価が200以上落ちた対局も、勝敗を問わず対象にします。
+
+全対局で実際に使われた定跡手、最初の通常探索の手、評価急落の直前の手などを抽出します。
+各局面の全合法手探索と、実戦の手・再探索の推奨手に制限した MultiPV 探索を、
+別々の新しいプロセスで各200万ノード実行します。候補間の評価差は、
+全候補の正確な評価がそろった同じ完了深さで計算します。
+全定跡手と、通常探索で200以上の差または詰みの差が出た手は、各1,000万ノードで再確認します。
+
+```bash
+python3 -B tools/diagnose_book.py \
+  --matches book/evaluation/paired-20260930 \
+  --output book/evaluation/diagnosis-20260930 --workers 8
+```
+
+条件と入力のハッシュは `manifest.json`、対象局面は `plan.json` に固定し、
+解析は `analysis/` に保存します。同じコマンドで中断後に再開できます。
+`comparisons.json` に実戦手・代替手・SFEN・手順・完了深さ・評価差、
+`trajectories.json` に敗局の評価推移、`loss_classification.json` に分類を残します。
+終局直前の自分の手は「次の自分の手番との評価差」で拾えないため、
+予備解析で−200以上または勝ちの詰み評価なのに直後に負けた未調査の最終着手を、
+`terminal_followup.json` で補足します。
+補足対象と条件は `terminal_followup/manifest.json` に別途固定します。
+通常探索の問題候補は予備解析から選ぶため、すべての着手の網羅的な品質検査ではありません。
+Hayanagi 自身の評価関数による診断なので、評価関数の偏りや深さによる評価変動は残ります。
+評価差は改善候補を示すもので、着手を変えれば勝敗が逆転するという証明ではありません。
+今回の結果を改良に使う場合、改良後の最終評価には別の未使用局面を用意します。
+
+2026-09-30 の原因調査では、2,500局面を予備解析し、376件の着手と終局直前の補足2件を比較しました。
+評価差の確認は上限1,000万ノード、同じ完了深さの MultiPV で行いました。
+
+| 調査対象 | 結果 |
+| --- | --- |
+| 実際に使われた定跡手100件 | 代替手との評価差は最大81。150以上の差は0件 |
+| 定跡を使った５万ノード条件の41敗 | 37局に通常探索の問題候補、追加検査で1局に詰み探索のルール判定不具合、残る3局は原因未特定 |
+| 初期局面からの５万ノード条件の2敗 | 両局に通常探索の問題候補 |
+| 上記43敗の定跡離脱時点 | 200万ノード評価は最低−31、平均+50.1。−200以下は0局 |
+
+通常探索の問題候補は、代替手との差200以上、または詰み評価の差が再確認できたものです。
+本調査は通常探索の候補を選別しており、すべての悪手を検出したわけではありません。
+37局の分類は [loss_classification.json](book/evaluation/diagnosis-20260930/loss_classification.json)、
+追加検査を含む結論は [findings.json](book/evaluation/diagnosis-20260930/findings.json) に保存しています。
+主分類の「未特定4局」のうち `50000-holdout_049-b` は、追加検査で次の不具合が判明しました。
+
+- **詰み探索での連続王手の千日手の見落とし**：`50000-holdout_049-b` の67手目は、
+  `6a7a` を指すと直ちに連続王手の千日手で負けますが、エンジンは `mate 3` を返してこの手を選びます。
+  `Search::mate_search_attack` / `mate_search_defense` は再帰中に `terminal_status()` を確認していません。
+  同じ局面・５万ノードでも、全合法手を `searchmoves` に指定して冒頭の詰み探索を省くと、
+  `3a4a` を選び、この即時の負けを避けます。これ自体は以後の勝利の保証ではありません。
+  再現手順と生出力は [perpetual_check_probe.json](book/evaluation/diagnosis-20260930/perpetual_check_probe.json) にあります。
+- **深さ１での１手詰めの見落とし**：`50000-holdout_070-b` の59手目▲９一角成は、
+  △７八飛打で詰みます。対局時の完了深さは1でした。代替の▲８八金打なら、同じ飛打に▲同金と取れます。
+  この違いは評価値だけでなく、合法手と終局判定でも確認しました。
+  記録は [mate_validation.json](book/evaluation/diagnosis-20260930/mate_validation.json) にあります。
+- **離脱直後の戦術上の見落とし**：`50000-holdout_099-b` の17手目▲７七桂は−529、
+  代替の▲７七銀は−9で、深さ10の比較で差520でした。▲７七銀は△８八角打に備えられます。
+  また `10000-holdout_017-b` の９手目▲２五歩打は飛車の退路を塞ぎ、
+  ▲２八飛との差は深さ13で1489でした。この対局は最後には勝っており、局所的な失敗と勝敗は区別しています。
+
+別途、`50000-holdout_042-b` の123手目では、50万ノードでも深さ１を完了できず、
+静止探索で予算を使い切る挙動を再現しました。詰み探索を省く条件でも発生します。
+５万ノードの元対局で評価値が出なかった通常着手は、定跡側・定跡なし側とも53回でした。
+この問題だけで定跡側の得点差を説明できるとは判断していません。
+再現記録は [search_budget_probe.json](book/evaluation/diagnosis-20260930/search_budget_probe.json) にあります。
+
+今回の優先修正箇所は、詰み探索中の終局ルール判定と、浅い探索で即詰みを見落とす挙動です。
+定跡の大幅な評価劣化は今回の範囲では確認されませんでしたが、Hayanagi自身の評価による結果です。
+元の得点率46%の95%区間も50%を含むため、定跡が一般に棋力を下げたと断定する結果ではありません。
+報告した1,132本の読み筋を合法手として再生し、評価差の計算とエンジン・定跡のハッシュを照合済みです。
+詳細は [validation.json](book/evaluation/diagnosis-20260930/validation.json) に保存しています。
+
+### 原因調査で見つかった探索の修正
+
+上記の調査後、通常対局の詰み探索でも着手履歴を更新し、各節点で終局ルールを確認するようにしました。
+履歴を更新しない `make_move` では、終局判定を追加するだけでは連続王手の千日手を検出できないため、
+この探索では履歴を保存する `do_move` を使います。
+深さ１の末端でも、駒を取らない王手・駒打ちによる１手詰めを確認します。
+
+静止探索は通常探索の深さとは別に最大６手までとし、境界で王手されている場合は合法な応手を評価します。
+冒頭の５手詰め探索にもノード・時間の部分予算を設けました。
+反復深化が完了しない場合にも評価済みの合法手を返すため、先に浅い候補比較を行います。
+極端に小さい探索量では、この比較自体が完了する保証はありません。
+王手になる駒取りは、単純な駒の交換損だけを理由に静止探索から除外しません。
+
+評価関数には、敵に攻撃され味方に守られていない歩以外の駒の割引と、
+飛車の安全な移動先が少ない場合の減点を追加しました。どちらも先後共通の規則で、特定の棋譜や手順は参照しません。
+係数は手作業による初期値です。駒の利きに基づく近似であり、学習済み評価関数や完全な戦術判定ではありません。
+
+修正前と同じ棋譜履歴・ノード数で、新しいプロセスから探索した結果です。
+
+| 再現例 | 修正前 | 修正後 |
+| --- | --- | --- |
+| `049`・67手目、５万ノード | `6a7a` を３手詰めと誤認し、連続王手で即負け | `4d4b+` を選択し、即負けを回避 |
+| `070`・59手目、５万ノード | `6d9a+` の直後に１手詰め | `G*6h` を選択。深さ１制限でも即詰みを回避 |
+| `042`・123手目、５万ノード | 深さ１を完了せず `5i4i` | 深さ４まで完了して `P*6c` |
+| `099`・17手目、５万ノード | 角打ちを許す `8i7g` | `6g6f` |
+| `017`・９手目、１万ノード | 飛車の退路を塞ぐ `P*2e` | `2d2f` |
+
+上限1,000万ノードの候補制限 MultiPV でも比較し、最後の２例は修正前の評価関数でも、
+新しい着手がそれぞれ500・1701高い評価でした（各比較は同じ完了深さ11・14）。
+詰み・千日手・読み筋は合法手として再生して検証します。
+元対局の５万ノード条件で評価値が出なかった106着手は、すべて新しい探索で評価値が出ました。
+１万ノード条件では168着手中151着手で改善し、17着手では完了した反復の評価値が出ませんでした。
+局面の再生は重複を含み、両条件合計の独立した入力履歴は200件です。
+
+テスト入力は `tests/fixtures/search_regressions.json` にあり、大きな棋譜データを必要としません。
+修正前バイナリでは８件のサブテストが失敗し、修正後はすべて成功します。
+連続王手、深さ１の即詰み回避、静止探索の予算、微小予算での初手制限は１・４スレッドで検証します。
+
+```bash
+ctest --test-dir build --output-on-failure
+python3 -B tests/test_engine.py build/hayanagi
+python3 -B tests/test_search_regressions.py \
+  --engine build/hayanagi --referee build/hayanagi_match_referee \
+  --report book/evaluation/search-fixes-20260930/regressions-after.json
+```
+
+個別局面の比較は [comparisons.json](book/evaluation/search-fixes-20260930/comparisons.json)、
+評価値の出力状況は [score-coverage.json](book/evaluation/search-fixes-20260930/score-coverage.json)、
+再発防止テストの記録は [regressions-after.json](book/evaluation/search-fixes-20260930/regressions-after.json) に保存しています。
+通常の戦術ミスがすべてなくなったという結果ではありません。
+追加比較した `083` の55手目では、新しい選択手が深い探索で以前の手より低く評価される例もあります。
+局面ごとの改善と、対局全体の改善は分けて検証します。
+
+対局評価には、以前の100局面とSFENが重複しない新しい100局面を固定しました。
+短い手順では未使用局面が少ないため、2・4・6・8手の内訳は5・32・32・31局面です。
+以前の集合と分布が異なるので、得点率をそのまま前後比較しません。
+修正前後の直接対戦は両者とも定跡を切り、同じ新局面・探索量・先後交換で比較します。
+定跡あり／なしの比較は別に実施します。
+
+```bash
+python3 -B tools/match_book.py prepare \
+  --work-db build/book-work/floodgate2025.sqlite \
+  --exclude-openings book/evaluation/openings-20260930.json \
+  --output book/evaluation/search-fixes-20260930/openings.json --pairs 100 --seed 20260931
+python3 -B tools/match_search.py \
+  --engine build/book-evaluation-bin/hayanagi-after-search-fixes \
+  --baseline build/book-evaluation-bin/hayanagi-before-search-fixes \
+  --openings book/evaluation/search-fixes-20260930/openings.json \
+  --output book/evaluation/search-fixes-20260930/engine-matches --workers 6
+python3 -B tools/match_book.py run \
+  --engine build/book-evaluation-bin/hayanagi-after-search-fixes \
+  --openings book/evaluation/search-fixes-20260930/openings.json \
+  --output book/evaluation/search-fixes-20260930/book-matches --workers 6
+python3 -B tools/validate_matches.py --output book/evaluation/search-fixes-20260930/engine-matches
+python3 -B tools/validate_matches.py --output book/evaluation/search-fixes-20260930/book-matches
+```
+
+`build/book-evaluation-bin/` の実行ファイルは、この修正の前後に保存したローカルの比較用コピーです。
+対局条件と実行ファイルのハッシュは各 `manifest.json` に固定しています。
+異なるビルドで再評価する際は別の出力ディレクトリを使います。
+
+修正前後の直接対戦404局を完了しました。新しい100局面の先後交換200局について、修正後の成績は次のとおりです。
+
+| １手の探索量 | 修正後の勝・負・分 | 得点率 | 先後ペア単位の95%区間 |
+| --- | --- | --- | --- |
+| 10,000ノード | 116・83・1 | 58.25% | 51.5–65.0% |
+| 50,000ノード | 111・87・2 | 56.0% | 49.5–62.25% |
+
+初期局面の別枠は両条件とも1勝1敗でした。１万ノード条件で改善が見られましたが、
+５万ノード条件の区間は50%を含みます。ノード数固定・この相手と開始局面に対する結果であり、
+同じ持ち時間での向上や一般的なレーティングを保証しません。
+対局記録と集計は [engine-matches/summary.json](book/evaluation/search-fixes-20260930/engine-matches/summary.json) にあります。
+
+修正後エンジン同士の定跡あり／なし404局も完了しました。同じ新規100局面での定跡側の成績です。
+
+| １手の探索量 | 定跡側の勝・負・分 | 得点率 | 先後ペア単位の95%区間 |
+| --- | --- | --- | --- |
+| 10,000ノード | 108・92・0 | 54.0% | 50.0–58.0% |
+| 50,000ノード | 107・92・1 | 53.75% | 49.25–58.25% |
+
+どちらの区間も50%を含むため、定跡単独の優位性が確立したとは判断しません。
+修正前後のエンジン比較と混ぜずに、[book-matches/summary.json](book/evaluation/search-fixes-20260930/book-matches/summary.json) に保存しています。
+両対局群の棋譜は `tools/validate_matches.py` で再生し、合法手・終局理由・先後の組合せ・勝敗・定跡ヒットを照合しました。
+`build/hayanagi` と `build-hayanagi/hayanagi` の両方で、追加設定なしに独自定跡を読み込み、
+初手 `2g2f` を返すことも確認しています。
+
+### 通常探索のオプション
+
 `MultiPV` を有効にすると、`info ... multipv N pv ...` を順位ごとに出力します。`GenerateAllLegalMoves` は互換性維持のため残していますが、現在は探索強度を落とさないよう no-op です。
 
 `USI_LimitStrength` は既定で false です。true にすると `USI_Strength`（既定1、範囲-15〜6）に応じて
@@ -314,7 +652,8 @@ Hayanagi では利用者登録用の `register` / `registration` を除いて実
 ### `Book`
 
 - やねうら王の定跡フォーマット（`#YANEURAOU-DB2016 1.00`）を読み込みます。
-- SFEN 文字列をキーとして定跡手を検索します。
+- SFEN の盤面・手番・持駒をキーとして定跡手を検索します。手数違いの同一局面も照合します。
+- Hayanagi 生成定跡の手数上限は `# HAYANAGI_MAX_PLY` コメントから読み込みます。
 
 ### `UsiEngine`
 

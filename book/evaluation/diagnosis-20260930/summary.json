@@ -1,0 +1,112 @@
+{
+  "complete": true,
+  "manifest": {
+    "version": 1,
+    "engine_sha256": "a9533f551f19bf00f5af1827b997157dab5e5c065fec450103bdf553c3223fdf",
+    "referee_sha256": "11756620c5085b473c46c8cc33487b5a10ed6f8f83f15c12d4d354acfa9055c5",
+    "book_sha256": "a6ff056400fd7a643af0f2ad4d4da3cd634dffcade2715094c0f67fb5d64b429",
+    "games_sha256": "56a7e12e0172f8f29d04ceb53ad7169117b6bfeffa40cc9eb9d657a54ac091cb",
+    "windows_sha256": "8496076601b7fdf1704f7f55f60c2017a1d6e48536a5108e23d410dac29a9d80",
+    "scan_nodes": 500000,
+    "compare_nodes": 2000000,
+    "confirm_nodes": 10000000,
+    "threads": 1,
+    "hash_mb": 16,
+    "book_gap_threshold_cp": 150,
+    "normal_gap_threshold_cp": 200,
+    "selection": "all book moves and first exits; full own-turn trajectories of 50000-node book-hit losses; all prior >=200cp early drops; top 3 and first >=100cp trajectory drop while before >=-200cp",
+    "confirmation": "all book moves; all initially >=200cp or mate-choice ordinary moves",
+    "score_perspective": "side to move; paired MultiPV at a shared completed depth",
+    "fresh_process_per_search": true
+  },
+  "scan_positions": 2500,
+  "compared_position_moves": 376,
+  "scan_positions_without_completed_score": 1,
+  "confirmed_position_moves": 186,
+  "book_moves_compared": 100,
+  "book_moves_gap_ge_150_at_confirmation": 0,
+  "ordinary_moves_gap_ge_200_at_confirmation": 76,
+  "book_gap_cp_max": 81,
+  "loss_classification_50000_holdout": {
+    "normal_move": 37,
+    "unresolved": 4
+  },
+  "loss_classification_startpos": [
+    {
+      "game_id": "50000-startpos-b",
+      "group": "startpos",
+      "book_move_gap_ge_150": false,
+      "normal_move_gap_ge_200": true,
+      "normal_move_gap_in_first_8_plies": false,
+      "normal_move_gap_with_nonlosing_alternative": true,
+      "exit_scan_cp": 132,
+      "exit_unrestricted_compare_cp": 152,
+      "classification": "normal_move"
+    },
+    {
+      "game_id": "50000-startpos-w",
+      "group": "startpos",
+      "book_move_gap_ge_150": false,
+      "normal_move_gap_ge_200": true,
+      "normal_move_gap_in_first_8_plies": false,
+      "normal_move_gap_with_nonlosing_alternative": true,
+      "exit_scan_cp": -12,
+      "exit_unrestricted_compare_cp": 2,
+      "classification": "normal_move"
+    }
+  ],
+  "loss_exits_50000": {
+    "games": 43,
+    "includes_startpos": true,
+    "nodes": 2000000,
+    "cp_count": 43,
+    "min_cp": -31,
+    "mean_cp": 50.116279069767444,
+    "at_or_below_minus200": 0
+  },
+  "pair_decomposition": {
+    "10000": {
+      "no_book_use_in_pair": {
+        "pairs": 43,
+        "wins": 43,
+        "losses": 43,
+        "draws": 0,
+        "identical_move_sequences": 43
+      },
+      "book_used_in_pair": {
+        "pairs": 57,
+        "wins": 69,
+        "losses": 45,
+        "draws": 0,
+        "identical_move_sequences": 1
+      }
+    },
+    "50000": {
+      "no_book_use_in_pair": {
+        "pairs": 46,
+        "wins": 44,
+        "losses": 44,
+        "draws": 4,
+        "identical_move_sequences": 46
+      },
+      "book_used_in_pair": {
+        "pairs": 54,
+        "wins": 45,
+        "losses": 61,
+        "draws": 2,
+        "identical_move_sequences": 0
+      }
+    }
+  },
+  "limitations": [
+    "Retrospective diagnosis of the tested games, not a new independent strength test",
+    "All analyses use the same Hayanagi evaluator, with book disabled",
+    "Shared completed depth removes the root depth mismatch but not selective-search or evaluation errors",
+    "Normal-move candidates are selected by a shallow scan, not an exhaustive comparison of every move",
+    "A search gap identifies a candidate error, not proof that changing that move reverses the game result",
+    "Mate values are kept separate from centipawn differences",
+    "Post-treatment subsets and trajectory screening must not be interpreted as independent causal effects"
+  ],
+  "terminal_followup_cases": 2,
+  "terminal_followup_confirmed_choices": 1
+}

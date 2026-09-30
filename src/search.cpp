@@ -19,6 +19,7 @@ constexpr int kDecisiveThreshold = kTerminalWinScore - 256;
 constexpr int kTempoBonus = 12;
 constexpr int kNullMoveBaseReduction = 2;
 constexpr int kMateSearchMaxPly = 5;
+constexpr int kMaxQuiescencePly = 6;
 constexpr std::size_t kTtClusterSize = 4;
 constexpr std::size_t kDefaultHashSizeMb = 16;
 
@@ -489,6 +490,24 @@ int mobility_bonus(const Position& position, int square, PieceType type, Color c
     }
 }
 
+int rook_confinement_penalty(const Position& position, int square, Color color) {
+    int safe = 0;
+    for (const auto& direction : kRookDirections) {
+        int row = square_row(square) + direction[0];
+        int col = square_col(square) + direction[1];
+        while (is_on_board(row, col)) {
+            const int target = make_square(row, col);
+            const int piece = position.piece_at(target);
+            if (piece != 0 && piece_color(piece) == color) break;
+            if (!position.is_square_attacked(target, opposite(color)) && ++safe >= 2) return 0;
+            if (piece != 0) break;
+            row += direction[0];
+            col += direction[1];
+        }
+    }
+    return safe == 0 ? 160 : 80;
+}
+
 int king_safety_score(const Position& position, Color color, int phase) {
     const int king_square = position.find_king(color);
     if (king_square == -1) {
@@ -600,6 +619,8 @@ void Search::reset_state(const SearchOptions& options,
     current_path_.fill(Move{});
     progress_.reset();
     mate_cutoff_ = nullptr;
+    mate_probe_node_limit_ = 0;
+    mate_probe_time_limit_ms_ = 0;
     tt_generation_ = tt_generation;
     tt_key_salt_ = 0;
     aborted_ = false;
@@ -768,6 +789,43 @@ SearchResult Search::find_best_move(const Position& root,
         }
     }
 
+    // Even if no full iteration fits, retain an evaluated legal move rather
+    // than the first move in board-generation order. Respect the same budget.
+    Move fallback = legal_moves.front();
+    int fallback_score = -kInfinity;
+    for (const Move& move : legal_moves) {
+        if (should_stop()) break;
+        count_node();
+        Position child = root;
+        child.do_move(move);
+        const auto terminal = child.terminal_status();
+        int score = terminal.is_terminal() ? -terminal_score(terminal, 1) : -evaluate(child);
+        if (!terminal.is_terminal() && !options.limit_strength) {
+            if (child.is_in_check(child.side_to_move()) && !child.has_legal_move()) {
+                score = kMateScore - 1;
+            } else if (mate_in_one(child)) {
+                score = -kMateScore + 2;
+            }
+            if (aborted_) break;
+        }
+        if (score > fallback_score) {
+            fallback_score = score;
+            fallback = move;
+        }
+    }
+    shared_nodes.store(nodes_, std::memory_order_relaxed);
+
+    // A failed preliminary mate probe must leave resources for ordinary search.
+    // Limits are absolute and shared by the parallel probing workers.
+    const std::uint64_t probe_nodes = options.node_limit > 0
+        ? std::max<std::uint64_t>(1, options.node_limit / 8) : 8192;
+    mate_probe_node_limit_ = current_nodes() + std::min<std::uint64_t>(8192, probe_nodes);
+    mate_probe_time_limit_ms_ = (!options.infinite && options.time_limit_ms > 0)
+        ? elapsed_ms() + std::max(1, options.time_limit_ms / 8) : 0;
+    for (Search& worker : workers) {
+        worker.mate_probe_node_limit_ = mate_probe_node_limit_;
+        worker.mate_probe_time_limit_ms_ = mate_probe_time_limit_ms_;
+    }
     std::vector<Move> mating_line;
     iteration_depth_ = kMateSearchMaxPly;
     for (Search& worker : workers) worker.iteration_depth_ = kMateSearchMaxPly;
@@ -799,6 +857,15 @@ SearchResult Search::find_best_move(const Position& root,
         return result;
     }
 
+    // Hitting the probe's local limit is not a stop request for the full search.
+    mate_probe_node_limit_ = 0;
+    mate_probe_time_limit_ms_ = 0;
+    aborted_ = false;
+    for (Search& worker : workers) {
+        worker.mate_probe_node_limit_ = 0;
+        worker.mate_probe_time_limit_ms_ = 0;
+        worker.aborted_ = false;
+    }
     shared_nodes.store(nodes_, std::memory_order_relaxed);
 
     const auto reported_nodes = [&]() {
@@ -824,7 +891,6 @@ SearchResult Search::find_best_move(const Position& root,
         return false;
     };
 
-    Move fallback = legal_moves.front();
     Move previous_best = fallback;
     int last_hashfull = hashfull_permille();
 
@@ -1211,7 +1277,25 @@ int Search::negamax(const Position& position, int depth, int ply, int alpha, int
     return best_score;
 }
 
-int Search::quiescence(const Position& position, int ply, int alpha, int beta) {
+bool Search::mate_in_one(const Position& position, Move* mating_move) {
+    for (const Move& move : position.generate_checking_moves()) {
+        if (should_stop()) {
+            aborted_ = true;
+            return false;
+        }
+        count_node();
+        Position child = position;
+        child.do_move(move);
+        // A rules win/draw/loss is not a checkmate, even with no evasions.
+        if (!child.terminal_status().is_terminal() && !child.has_legal_move()) {
+            if (mating_move) *mating_move = move;
+            return true;
+        }
+    }
+    return false;
+}
+
+int Search::quiescence(const Position& position, int ply, int alpha, int beta, int qply) {
     current_ply_ = ply;
     seldepth_ = std::max(seldepth_, ply);
     if (should_stop()) {
@@ -1227,6 +1311,34 @@ int Search::quiescence(const Position& position, int ply, int alpha, int beta) {
 
     if (ply >= kMaxDepth) return evaluate(position);
     const bool in_check = position.is_in_check(position.side_to_move());
+    // At the root's depth-1 frontier, quiet checking drops must not hide a
+    // mate in one behind stand-pat or capture-only quiescence.
+    if (ply == 1) {
+        Move mating_move;
+        if (mate_in_one(position, &mating_move)) {
+            store_tt(position.position_key(), 0, ply, kMateScore - ply - 1,
+                     -kInfinity, kInfinity, mating_move);
+            return kMateScore - ply - 1;
+        }
+        if (aborted_) return 0;
+    }
+    // Bound the extra tactical horizon separately from normal search depth.
+    // Shallow iterations stay cheap enough to examine every root move.
+    if (qply >= kMaxQuiescencePly) {
+        if (!in_check) return evaluate(position);
+        const auto evasions = position.generate_search_legal_moves();
+        if (evasions.empty()) return -kMateScore + ply;
+        int best = -kInfinity;
+        for (const Move& move : evasions) {
+            if (should_stop()) { aborted_ = true; return 0; }
+            count_node();
+            Position child = position;
+            child.do_move(move);
+            const auto status = child.terminal_status();
+            best = std::max(best, status.is_terminal() ? -terminal_score(status, ply + 1) : -evaluate(child));
+        }
+        return best;
+    }
     if (!in_check) {
         const int stand_pat = evaluate(position);
         if (stand_pat >= beta) {
@@ -1248,13 +1360,14 @@ int Search::quiescence(const Position& position, int ply, int alpha, int beta) {
     for (const OrderedMove& ordered_move : ordered_moves) {
         const Move& move = ordered_move.move;
         const int captured = position.piece_at(move.to);
-        if (!in_check && captured != 0 && ordered_move.see < -120) {
+        if (!in_check && captured != 0 && ordered_move.see < -120 &&
+            !position.gives_check(move)) {
             continue;
         }
         Position child = position;
         current_path_[ply] = move;
         child.do_move(move);
-        const int score = -quiescence(child, ply + 1, -beta, -alpha);
+        const int score = -quiescence(child, ply + 1, -beta, -alpha, qply + 1);
         if (aborted_) {
             return 0;
         }
@@ -1289,6 +1402,17 @@ int Search::evaluate(const Position& position) const {
             contribution += mobility_bonus(position, square, type, color);
             if (is_in_promotion_zone(color, row)) {
                 contribution += camp_bonus(type);
+            }
+            // Capture-only quiescence cannot defend a loose piece against a
+            // quiet threat. Discount exposure for both sides without treating
+            // a threatened piece as already captured.
+            if (type != PieceType::Pawn &&
+                position.is_square_attacked(square, opposite(color)) &&
+                !position.is_square_attacked(square, color)) {
+                contribution -= piece_value(type) / 2;
+            }
+            if (type == PieceType::Rook) {
+                contribution -= rook_confinement_penalty(position, square, color);
             }
             phase += piece_value(unpromote(type)) / 100;
         }
@@ -1344,8 +1468,10 @@ bool Search::should_stop() {
     if (options_.node_limit > 0 && current_nodes() >= options_.node_limit) {
         return true;
     }
+    if (mate_probe_node_limit_ > 0 && current_nodes() >= mate_probe_node_limit_) return true;
     if (nodes_ >= next_time_check_) {
         const int millis = elapsed_ms();
+        if (mate_probe_time_limit_ms_ > 0 && millis >= mate_probe_time_limit_ms_) return true;
         if (!options_.infinite && options_.time_limit_ms > 0 && millis >= options_.time_limit_ms) {
             return true;
         }
@@ -1502,8 +1628,7 @@ bool Search::find_forced_mate_parallel(const Position& position, int max_ply,
         worker.mate_index_ = index;
         worker.aborted_ = false;
         Position child = position;
-        MoveUndo undo;
-        child.make_move(moves[index].move, undo);
+        child.do_move(moves[index].move);
         if (worker.mate_search_defense(child, std::max(1, max_ply | 1) - 1, &lines[index]) &&
             !worker.aborted_) {
             lines[index].insert(lines[index].begin(), moves[index].move);
@@ -1538,6 +1663,10 @@ bool Search::mate_search_attack(Position& position,
     }
     count_node();
 
+    // These routines prove checkmate only. Repetition, perpetual check,
+    // declaration, impasse and move-limit outcomes end the line instead.
+    if (position.terminal_status().is_terminal()) return false;
+
     if (remaining_ply <= 0) {
         return false;
     }
@@ -1553,12 +1682,11 @@ bool Search::mate_search_attack(Position& position,
         const Move& move = ordered_moves[index].move;
         current_path_[kMateSearchMaxPly - remaining_ply] = move;
         if (remaining_ply == kMateSearchMaxPly) begin_root_move(position, move, index);
-        MoveUndo undo;
-        position.make_move(move, undo);
+        Position child = position;
+        child.do_move(move);
         std::vector<Move> defense_line;
         std::vector<Move>* next_pv = pv != nullptr ? &defense_line : nullptr;
-        const bool mate = mate_search_defense(position, remaining_ply - 1, next_pv);
-        position.unmake_move(move, undo);
+        const bool mate = mate_search_defense(child, remaining_ply - 1, next_pv);
         if (mate) {
             if (pv != nullptr) {
                 pv->clear();
@@ -1586,6 +1714,8 @@ bool Search::mate_search_defense(Position& position,
     }
     count_node();
 
+    if (position.terminal_status().is_terminal()) return false;
+
     auto legal_moves = position.generate_search_legal_moves();
     if (legal_moves.empty()) {
         return position.is_in_check(position.side_to_move());
@@ -1605,12 +1735,11 @@ bool Search::mate_search_defense(Position& position,
     for (const OrderedMove& ordered_move : ordered_moves) {
         const Move& move = ordered_move.move;
         current_path_[kMateSearchMaxPly - remaining_ply] = move;
-        MoveUndo undo;
-        position.make_move(move, undo);
+        Position child = position;
+        child.do_move(move);
         std::vector<Move> attack_line;
         std::vector<Move>* next_pv = pv != nullptr ? &attack_line : nullptr;
-        const bool mate = mate_search_attack(position, remaining_ply - 1, next_pv);
-        position.unmake_move(move, undo);
+        const bool mate = mate_search_attack(child, remaining_ply - 1, next_pv);
         if (!mate) {
             return false;
         }

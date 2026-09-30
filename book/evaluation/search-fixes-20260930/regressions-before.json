@@ -1,0 +1,162 @@
+{
+  "engine_sha256": "a9533f551f19bf00f5af1827b997157dab5e5c065fec450103bdf553c3223fdf",
+  "referee_sha256": "11756620c5085b473c46c8cc33487b5a10ed6f8f83f15c12d4d354acfa9055c5",
+  "success": false,
+  "searches": [
+    {
+      "case": "bishop_drop",
+      "threads": 1,
+      "nodes": 50000,
+      "extra": "",
+      "bestmove": "8i7g",
+      "output": [
+        "info depth 1 seldepth 5 score cp 69 nodes 123 time 0 nps 123000 hashfull 0 cpuload 0 pv B*7e",
+        "info depth 2 seldepth 6 score cp -2 nodes 452 time 1 nps 452000 hashfull 0 cpuload 1000 pv B*7e B*6d",
+        "info depth 3 seldepth 10 score cp 1 nodes 7865 time 23 nps 341956 hashfull 1 cpuload 911 pv 8i7g B*8h B*1e",
+        "info depth 4 seldepth 11 score cp 1 nodes 20782 time 61 nps 340688 hashfull 2 cpuload 959 pv 8i7g B*8h B*1e 2a3c",
+        "bestmove 8i7g"
+      ]
+    },
+    {
+      "case": "rook_retreat",
+      "threads": 1,
+      "nodes": 10000,
+      "extra": "",
+      "bestmove": "P*2e",
+      "output": [
+        "info depth 1 seldepth 5 score cp 81 nodes 119 time 0 nps 119000 hashfull 0 cpuload 0 pv 2d2e",
+        "info depth 2 seldepth 5 score cp 51 nodes 388 time 1 nps 388000 hashfull 0 cpuload 982 pv P*2e P*2g",
+        "info depth 3 seldepth 12 score cp 95 nodes 2516 time 5 nps 503200 hashfull 0 cpuload 1000 pv P*2e P*2g 7g7f",
+        "bestmove P*2e"
+      ]
+    },
+    {
+      "case": "mate_in_one",
+      "threads": 1,
+      "nodes": 50000,
+      "extra": "depth 1",
+      "bestmove": "6d9a+",
+      "output": [
+        "info depth 1 seldepth 8 score cp 1059 nodes 347 time 0 nps 347000 hashfull 0 cpuload 0 pv 6d9a+",
+        "bestmove 6d9a+"
+      ]
+    },
+    {
+      "case": "mate_in_one",
+      "threads": 4,
+      "nodes": 50000,
+      "extra": "depth 1",
+      "bestmove": "6d9a+",
+      "output": [
+        "info depth 1 seldepth 28 score cp 1059 nodes 13738 time 15 nps 915866 hashfull 0 cpuload 532 pv 6d9a+",
+        "bestmove 6d9a+"
+      ]
+    },
+    {
+      "case": "perpetual_check",
+      "threads": 1,
+      "nodes": 50000,
+      "extra": "",
+      "bestmove": "6a7a",
+      "output": [
+        "info depth 5 seldepth 5 score mate 3 nodes 22 time 0 nps 22000 hashfull 0 cpuload 0 pv 6a7a",
+        "bestmove 6a7a"
+      ]
+    },
+    {
+      "case": "perpetual_check",
+      "threads": 4,
+      "nodes": 50000,
+      "extra": "",
+      "bestmove": "6a7a",
+      "output": [
+        "info depth 5 seldepth 5 score mate 3 nodes 30 time 0 nps 30000 hashfull 0 cpuload 0 pv 6a7a",
+        "bestmove 6a7a"
+      ]
+    },
+    {
+      "case": "quiescence_budget",
+      "threads": 1,
+      "nodes": 50000,
+      "extra": "",
+      "bestmove": "5i4i",
+      "output": [
+        "bestmove 5i4i"
+      ]
+    },
+    {
+      "case": "quiescence_budget",
+      "threads": 4,
+      "nodes": 50000,
+      "extra": "",
+      "bestmove": "5i4i",
+      "output": [
+        "bestmove 5i4i"
+      ]
+    },
+    {
+      "case": "mate_in_one",
+      "threads": 1,
+      "nodes": 1,
+      "extra": "searchmoves G*8h",
+      "bestmove": "G*8h",
+      "output": [
+        "bestmove G*8h"
+      ]
+    },
+    {
+      "case": "mate_in_one",
+      "threads": 1,
+      "nodes": 32,
+      "extra": "searchmoves G*8h",
+      "bestmove": "G*8h",
+      "output": [
+        "info depth 1 seldepth 3 score cp 324 nodes 3 time 0 nps 3000 hashfull 0 cpuload 0 pv G*8h",
+        "bestmove G*8h"
+      ]
+    },
+    {
+      "case": "mate_in_one",
+      "threads": 1,
+      "nodes": 256,
+      "extra": "searchmoves G*8h",
+      "bestmove": "G*8h",
+      "output": [
+        "info depth 1 seldepth 3 score cp 324 nodes 3 time 0 nps 3000 hashfull 0 cpuload 0 pv G*8h",
+        "bestmove G*8h"
+      ]
+    },
+    {
+      "case": "mate_in_one",
+      "threads": 4,
+      "nodes": 1,
+      "extra": "searchmoves G*8h",
+      "bestmove": "G*8h",
+      "output": [
+        "bestmove G*8h"
+      ]
+    },
+    {
+      "case": "mate_in_one",
+      "threads": 4,
+      "nodes": 32,
+      "extra": "searchmoves G*8h",
+      "bestmove": "G*8h",
+      "output": [
+        "info depth 1 seldepth 3 score cp 324 nodes 3 time 0 nps 3000 hashfull 0 cpuload 0 pv G*8h",
+        "bestmove G*8h"
+      ]
+    },
+    {
+      "case": "mate_in_one",
+      "threads": 4,
+      "nodes": 256,
+      "extra": "searchmoves G*8h",
+      "bestmove": "G*8h",
+      "output": [
+        "info depth 1 seldepth 3 score cp 324 nodes 3 time 0 nps 3000 hashfull 0 cpuload 0 pv G*8h",
+        "bestmove G*8h"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "scope": "Retrospective diagnosis, not a new independent playing-strength test",
+  "scan_positions": 2500,
+  "book_moves_checked": 100,
+  "book_gap_at_10M_max_cp": 81,
+  "book_gaps_ge150_at_10M": 0,
+  "holdout_book_hit_losses_50000": 41,
+  "holdout_losses_with_confirmed_normal_move_gap": 37,
+  "additional_holdout_loss_with_mate_rule_error": "50000-holdout_049-b",
+  "unresolved_holdout_losses": [
+    "50000-holdout_042-b",
+    "50000-holdout_045-b",
+    "50000-holdout_083-b"
+  ],
+  "startpos_losses_with_confirmed_normal_move_gap": 2,
+  "loss_exit_at_2M": {
+    "games": 43,
+    "includes_startpos": true,
+    "nodes": 2000000,
+    "cp_count": 43,
+    "min_cp": -31,
+    "mean_cp": 50.116279069767444,
+    "at_or_below_minus200": 0
+  },
+  "findings": [
+    {
+      "type": "mate_search_terminal_rule_error",
+      "game_id": "50000-holdout_049-b",
+      "ply": 67,
+      "played": "6a7a",
+      "reported": "mate 3",
+      "actual": "Immediate perpetual-check loss",
+      "alternative_under_all_legal_searchmoves": "3a4a",
+      "evidence": "perpetual_check_probe.json",
+      "source": "src/search.cpp:1530"
+    },
+    {
+      "type": "one_ply_mate_overlooked_at_depth_one",
+      "game_id": "50000-holdout_070-b",
+      "ply": 59,
+      "played": "6d9a+",
+      "reply": "R*7h",
+      "alternative": "G*8h",
+      "defense_against_same_reply": "8h7h",
+      "evidence": "mate_validation.json"
+    },
+    {
+      "type": "ordinary_move_gap",
+      "game_id": "50000-holdout_099-b",
+      "ply": 17,
+      "played": "8i7g",
+      "alternative": "6h7g",
+      "played_cp": -529,
+      "alternative_cp": -9,
+      "gap_cp": 520,
+      "depth": 10,
+      "nodes_per_search": 10000000,
+      "evidence": "comparisons.json"
+    },
+    {
+      "type": "no_completed_root_score",
+      "game_id": "50000-holdout_042-b",
+      "ply": 123,
+      "observation": "Depth 1 can exhaust the node budget in quiescence; no exact root score",
+      "matched_game_missing_score_counts_50000": {
+        "book_player": 53,
+        "no_book_player": 53
+      },
+      "explains_book_score_difference": false,
+      "evidence": "search_budget_probe.json"
+    }
+  ],
+  "limitations": [
+    "Same Hayanagi evaluator; deeper-search gaps are candidate errors, not external proof of move quality",
+    "Fixed opening suite score 46%, paired 95% interval 41.25%-50.75%; overall book harm is not established",
+    "Ordinary move selection is retrospective and not exhaustive; three exposed losses remain unresolved",
+    "The confirmed rule error and mate-in-one evasion were checked by legal replay",
+    "No new strength improvement claim follows from this diagnosis"
+  ]
+}

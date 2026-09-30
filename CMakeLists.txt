@@ -46,6 +46,28 @@ endif()
 option(HAYANAGI_BUILD_TESTS "Hayanagi の単体テストをビルドする" ${HAYANAGI_BUILD_TESTS_DEFAULT})
 
 set(HAYANAGI_TARGETS hayanagi hayanagi_tsume)
+option(HAYANAGI_BUILD_BOOK_TOOLS "Build opening-book validation and match tools" ${HAYANAGI_BUILD_TESTS_DEFAULT})
+if(HAYANAGI_BUILD_BOOK_TOOLS)
+    add_executable(hayanagi_book_positions tools/book_positions.cpp)
+    target_link_libraries(hayanagi_book_positions PRIVATE hayanagi_tsume)
+    set_target_properties(hayanagi_book_positions PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+    list(APPEND HAYANAGI_TARGETS hayanagi_book_positions)
+    add_executable(hayanagi_match_referee tools/match_referee.cpp)
+    target_link_libraries(hayanagi_match_referee PRIVATE hayanagi_tsume)
+    set_target_properties(hayanagi_match_referee PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+    list(APPEND HAYANAGI_TARGETS hayanagi_match_referee)
+endif()
+
+# The generated book is optional. Local generation does not require publishing it.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/book/standard_book.db")
+    add_custom_target(hayanagi_book ALL
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:hayanagi>/book"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${CMAKE_CURRENT_SOURCE_DIR}/book/standard_book.db"
+            "$<TARGET_FILE_DIR:hayanagi>/book/standard_book.db"
+        DEPENDS hayanagi "${CMAKE_CURRENT_SOURCE_DIR}/book/standard_book.db"
+        VERBATIM)
+endif()
 if(HAYANAGI_BUILD_TESTS)
     enable_testing()
     add_executable(hayanagi_tests
@@ -59,6 +81,25 @@ if(HAYANAGI_BUILD_TESTS)
     target_link_libraries(hayanagi_tests PRIVATE hayanagi_tsume)
     set_target_properties(hayanagi_tests PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
     add_test(NAME hayanagi_tests COMMAND hayanagi_tests)
+    if(HAYANAGI_BUILD_BOOK_TOOLS)
+        find_package(Python3 COMPONENTS Interpreter QUIET)
+        if(Python3_Interpreter_FOUND)
+            add_test(NAME hayanagi_book_tests COMMAND ${Python3_EXECUTABLE} -B
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_book.py
+                --engine $<TARGET_FILE:hayanagi>
+                --validator $<TARGET_FILE:hayanagi_book_positions>)
+            add_test(NAME hayanagi_match_book_tests COMMAND ${Python3_EXECUTABLE} -B
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_match_book.py
+                --engine $<TARGET_FILE:hayanagi>
+                --referee $<TARGET_FILE:hayanagi_match_referee>)
+            add_test(NAME hayanagi_diagnose_book_tests COMMAND ${Python3_EXECUTABLE} -B
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_diagnose_book.py)
+            add_test(NAME hayanagi_search_regressions COMMAND ${Python3_EXECUTABLE} -B
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_search_regressions.py
+                --engine $<TARGET_FILE:hayanagi>
+                --referee $<TARGET_FILE:hayanagi_match_referee>)
+        endif()
+    endif()
     list(APPEND HAYANAGI_TARGETS hayanagi_tests)
 endif()
 
