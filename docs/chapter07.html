@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第7章 終局判定と特殊ルール — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
+    <nav><a href="index.html">目次</a></nav>
+  </div>
+</header>
+<div class="wrapper">
+
+<h1>第7章 終局判定と特殊ルール</h1>
+
+<p>
+将棋には詰みだけでなく、千日手、連続王手の千日手、入玉宣言勝ち、持将棋など、
+複数の終局条件が存在します。本章では、Hayanagi がこれらの特殊ルールをどのように実装しているかを解説します。
+</p>
+
+<!-- ============================================================ -->
+<h2>7.1 terminal_status() の処理フロー</h2>
+
+<p>
+<code>terminal_status()</code> は、現在の局面が終局状態かどうかを判定する中心的な関数です。
+探索中に呼び出され、終局であれば勝ち・負け・引き分けの情報とその理由を返します。
+</p>
+
+<pre><code>// position.cpp 582行目
+TerminalStatus Position::terminal_status() const {
+    if (is_perpetual_check_loss_for_opponent()) {
+        return TerminalStatus{TerminalOutcome::Win, TerminalReason::PerpetualCheck};
+    }
+    if (rules_.entering_king_rule == EnteringKingRule::TryRule) {
+        if (is_try_rule_win(Color::Black)) {
+            return TerminalStatus{
+                side_to_move_ == Color::Black ? TerminalOutcome::Win : TerminalOutcome::Loss,
+                TerminalReason::TryRule,
+            };
+        }
+        if (is_try_rule_win(Color::White)) {
+            return TerminalStatus{
+                side_to_move_ == Color::White ? TerminalOutcome::Win : TerminalOutcome::Loss,
+                TerminalReason::TryRule,
+            };
+        }
+    }
+    if (is_repetition_draw()) {
+        return TerminalStatus{TerminalOutcome::Draw, TerminalReason::Repetition};
+    }
+    if (rules_.max_moves_to_draw &gt; 0 &amp;&amp; ply_count_ &gt;= rules_.max_moves_to_draw &amp;&amp;
+        !is_in_check(side_to_move_)) {
+        return TerminalStatus{TerminalOutcome::Draw, TerminalReason::MoveLimit};
+    }
+    if (rules_.entering_king_rule != EnteringKingRule::NoEnteringKing &amp;&amp;
+        rules_.entering_king_rule != EnteringKingRule::TryRule) {
+        if (can_declare_win()) {
+            return TerminalStatus{TerminalOutcome::Win, TerminalReason::DeclarationWin};
+        }
+        if (is_impasse_position()) {
+            const int own_points =
+                impasse_points(side_to_move_) + handicap_entering_king_bonus(side_to_move_);
+            const int opponent_points = impasse_points(opposite(side_to_move_)) +
+                                        handicap_entering_king_bonus(opposite(side_to_move_));
+            const int own_threshold = impasse_threshold(side_to_move_);
+            const int opponent_threshold = impasse_threshold(opposite(side_to_move_));
+            if (own_points &gt;= own_threshold &amp;&amp; opponent_points &gt;= opponent_threshold) {
+                return TerminalStatus{TerminalOutcome::Draw, TerminalReason::Impasse};
+            }
+            if (own_points &lt; own_threshold &amp;&amp; opponent_points &gt;= opponent_threshold) {
+                return TerminalStatus{TerminalOutcome::Loss, TerminalReason::Impasse};
+            }
+            if (own_points &gt;= own_threshold &amp;&amp; opponent_points &lt; opponent_threshold) {
+                return TerminalStatus{TerminalOutcome::Win, TerminalReason::Impasse};
+            }
+        }
+    }
+    return TerminalStatus{};
+}</code></pre>
+
+<p>
+判定の優先順位は以下の通りです。
+</p>
+
+<ol>
+  <li><strong>連続王手の千日手</strong> (<code>is_perpetual_check_loss_for_opponent</code>) — 相手の反則負け</li>
+  <li><strong>トライルール</strong> — 玉が相手の玉の初期位置に到達（TryRule設定時のみ）</li>
+  <li><strong>千日手</strong> (<code>is_repetition_draw</code>) — 同一局面4回で引き分け</li>
+  <li><strong>手数上限</strong> — 王手中でなければ引き分け</li>
+  <li><strong>入玉宣言勝ち</strong> (<code>can_declare_win</code>) — CSAルールに基づく宣言</li>
+  <li><strong>持将棋</strong> (<code>is_impasse_position</code>) — 双方入玉時の点数判定</li>
+</ol>
+
+<p>
+注目すべき点として、合法手が0（詰み/ステイルメイト）の判定はここでは行われていません。
+合法手数のチェックは探索側で <code>generate_legal_moves()</code> の結果が空かどうかで判定します。
+<code>terminal_status()</code> は合法手生成を呼ばずに判定できる終局条件のみを扱います。
+</p>
+
+<p>
+返り値の <code>TerminalStatus</code> 構造体は <code>TerminalOutcome</code>（None/Win/Draw/Loss）と
+<code>TerminalReason</code>（None/DeclarationWin/Repetition/PerpetualCheck/Impasse/MoveLimit/TryRule）を持ち、
+<code>is_terminal()</code> で終局かどうかを判定できます。
+</p>
+
+<!-- ============================================================ -->
+<h2>7.2 千日手判定 is_repetition_draw()</h2>
+
+<p>
+千日手とは、同一局面が4回出現した場合に引き分けとなるルールです。
+Hayanagi では <code>HistoryNode</code> 連結リストを使用してこの判定を行います。
+</p>
+
+<h3>HistoryNode 連結リスト</h3>
+
+<pre><code>// position.h 63行目
+struct HistoryNode {
+    std::uint64_t key = 0;
+    Color side_to_move = Color::Black;
+    bool side_in_check = false;
+    std::shared_ptr&lt;const HistoryNode&gt; previous;
+};</code></pre>
+
+<p>
+各ノードは局面のZobristハッシュ値 (<code>key</code>)、手番 (<code>side_to_move</code>)、王手中か (<code>side_in_check</code>)、
+前の局面へのポインタ (<code>previous</code>) を持ちます。
+手を指すたびに <code>append_history()</code> で新しいノードが先頭に追加されます。
+</p>
+
+<pre><code>// position.cpp 1474行目
+void Position::append_history() {
+    history_ = std::make_shared&lt;HistoryNode&gt;(
+        HistoryNode{repetition_key(), side_to_move_, is_in_check(side_to_move_), history_});
+}</code></pre>
+
+<h3>判定ロジック</h3>
+
+<pre><code>// position.cpp 1483行目
+bool Position::is_repetition_draw() const {
+    if (history_ == nullptr) {
+        return false;
+    }
+
+    int occurrences = 0;
+    for (auto node = history_; node != nullptr; node = node-&gt;previous) {
+        if (node-&gt;key == history_-&gt;key &amp;&amp; ++occurrences &gt;= 4) {
+            return true;
+        }
+    }
+    return false;
+}</code></pre>
+
+<p>
+現在の局面のハッシュキー (<code>history_-&gt;key</code>) と一致するノードを履歴全体から数え、
+4回以上出現していれば千日手と判定します。
+<code>repetition_key()</code> は <code>position_key_</code> をそのまま返しますが、
+この値には手番の情報も含まれている（Zobristの <code>side_to_move</code> が XOR されている）ため、
+手番が異なる同一配置は別局面として扱われます。
+</p>
+
+<!-- ============================================================ -->
+<h2>7.3 連続王手の千日手 is_perpetual_check_loss_for_opponent()</h2>
+
+<p>
+千日手のうち、一方が連続して王手をかけ続けている場合は、
+王手をかけている側の反則負けとなります。Hayanagi ではこれを
+「相手（直前に指した側）にとって不利な連続王手」として判定します。
+</p>
+
+<pre><code>// position.cpp 1505行目
+bool Position::is_perpetual_check_loss_for_opponent() const {
+    if (history_ == nullptr || !history_-&gt;side_in_check) {
+        return false;
+    }
+
+    int occurrences = 0;
+    std::shared_ptr&lt;const HistoryNode&gt; earliest;
+    for (auto node = history_; node != nullptr; node = node-&gt;previous) {
+        if (node-&gt;key == history_-&gt;key) {
+            ++occurrences;
+            earliest = node;
+            if (occurrences &gt;= 4) {
+                break;
+            }
+        }
+    }
+    if (occurrences &lt; 4 || earliest == nullptr) {
+        return false;
+    }
+
+    for (auto node = history_; node != nullptr; node = node-&gt;previous) {
+        if (node-&gt;side_to_move == side_to_move_ &amp;&amp; !node-&gt;side_in_check) {
+            return false;
+        }
+        if (node == earliest) {
+            break;
+        }
+    }
+    return true;
+}</code></pre>
+
+<h3>判定アルゴリズム</h3>
+
+<p>
+判定は3段階で行われます。
+</p>
+
+<ol>
+  <li><strong>前提条件</strong>: 現在の局面で手番側が王手されている (<code>history_-&gt;side_in_check</code>)。
+      これが <code>false</code> なら、相手の連続王手ではないので即座に <code>false</code> を返す</li>
+  <li><strong>千日手の確認</strong>: 同一局面が4回出現しているかを調べ、最も古い出現ノード (<code>earliest</code>) を記録する</li>
+  <li><strong>連続王手の確認</strong>: <code>earliest</code> から現在の局面までの全履歴を走査し、
+      手番側（王手を受けている側）のすべての局面で <code>side_in_check</code> が <code>true</code> であることを確認する。
+      もし1度でも王手がかかっていない局面があれば、連続王手ではないので <code>false</code></li>
+</ol>
+
+<p>
+この関数が <code>true</code> を返す場合、<code>terminal_status()</code> は <code>TerminalOutcome::Win</code> を返します。
+つまり、現在の手番側（王手を受けている側）の勝ちです。
+</p>
+
+<!-- ============================================================ -->
+<h2>7.4 入玉宣言勝ち can_declare_win()</h2>
+
+<p>
+CSA（コンピュータ将棋協会）のルールでは、一定条件を満たした場合に
+「宣言」によって勝ちとなることができます。
+</p>
+
+<pre><code>// position.cpp 633行目
+bool Position::can_declare_win() const {
+    if (rules_.entering_king_rule == EnteringKingRule::NoEnteringKing ||
+        rules_.entering_king_rule == EnteringKingRule::TryRule) {
+        return false;
+    }
+    const Color color = side_to_move_;
+    const int king_square = find_king(color);
+    if (king_square == -1 || !is_in_promotion_zone(color, square_row(king_square))) {
+        return false;
+    }
+    if (is_in_check(color)) {
+        return false;
+    }
+    if (pieces_in_opponent_camp(color) &lt; 10) {
+        return false;
+    }
+    if (declaration_points(color) + handicap_entering_king_bonus(color) &lt;
+        declaration_threshold(color)) {
+        return false;
+    }
+    return !opponent_has_mate_in_one(color);
+}</code></pre>
+
+<h3>宣言勝ちの条件</h3>
+
+<p>
+以下の全てを満たす必要があります。
+</p>
+
+<ol>
+  <li>入玉ルールが有効である（<code>NoEnteringKing</code> でも <code>TryRule</code> でもない）</li>
+  <li>自玉が敵陣（成りゾーン）に入っている</li>
+  <li>自玉が王手されていない</li>
+  <li>敵陣に自分の駒（玉を除く）が10枚以上ある</li>
+  <li>宣言ポイントが閾値以上である</li>
+  <li>相手に1手詰めがない（<code>opponent_has_mate_in_one</code>）</li>
+</ol>
+
+<h3>点数計算</h3>
+
+<p>
+<code>declaration_points()</code> は敵陣にある自分の駒と持ち駒の点数を合計します。
+</p>
+
+<pre><code>// position.cpp 1633行目
+int Position::declaration_points(Color color) const {
+    int points = 0;
+    for (int square = 0; square &lt; kSquareCount; ++square) {
+        const int piece = board_[square];
+        if (is_empty(piece) || piece_color(piece) != color ||
+            piece_type(piece) == PieceType::King) {
+            continue;
+        }
+        if (is_in_promotion_zone(color, square_row(square))) {
+            points += impasse_point_value(piece_type(piece));
+        }
+    }
+    for (int index = 1; index &lt; kHandPieceKinds; ++index) {
+        const PieceType piece = static_cast&lt;PieceType&gt;(index);
+        points += hands_[static_cast&lt;int&gt;(color)][index] * impasse_point_value(piece);
+    }
+    return points;
+}</code></pre>
+
+<p>
+点数は <code>impasse_point_value()</code> で定義され、大駒（飛車・角）が5点、小駒が1点です。
+宣言ポイントの計算対象は、敵陣にある駒（盤上）と持ち駒（手駒）です。
+自陣や中段にある駒は数えません。
+</p>
+
+<!-- ============================================================ -->
+<h2>7.5 持将棋判定 is_impasse_position()</h2>
+
+<p>
+持将棋とは、双方の玉が互いの敵陣に入り込み、
+どちらも詰ませることが困難な状態を指します。
+</p>
+
+<pre><code>// position.cpp 1601行目
+bool Position::is_impasse_position() const {
+    const int black_king = find_king(Color::Black);
+    const int white_king = find_king(Color::White);
+    if (black_king == -1 || white_king == -1) {
+        return false;
+    }
+    if (!is_in_promotion_zone(Color::Black, square_row(black_king)) ||
+        !is_in_promotion_zone(Color::White, square_row(white_king))) {
+        return false;
+    }
+    if (is_in_check(Color::Black) || is_in_check(Color::White)) {
+        return false;
+    }
+    return true;
+}</code></pre>
+
+<p>
+持将棋の前提条件は以下の3つです。
+</p>
+
+<ul>
+  <li>先手の玉が後手の陣地（段 0-2）にいる</li>
+  <li>後手の玉が先手の陣地（段 6-8）にいる</li>
+  <li>どちらの玉も王手されていない</li>
+</ul>
+
+<p>
+この条件を満たす場合、<code>terminal_status()</code> 内で点数計算が行われ、
+双方の点数を閾値と比較して勝敗を決定します。
+</p>
+
+<!-- ============================================================ -->
+<h2>7.6 入玉ルールバリアント（EnteringKingRule）</h2>
+
+<p>
+Hayanagi は6種類の入玉ルールをサポートしています。
+</p>
+
+<pre><code>// position.h 14行目
+enum class EnteringKingRule : int {
+    NoEnteringKing = 0,
+    CSARule24,
+    CSARule24H,
+    CSARule27,
+    CSARule27H,
+    TryRule,
+};</code></pre>
+
+<table>
+  <thead>
+    <tr><th>ルール</th><th>説明</th><th>宣言閾値</th><th>持将棋閾値</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>NoEnteringKing</code></td><td>入玉ルールなし</td><td>-</td><td>-</td></tr>
+    <tr><td><code>CSARule24</code></td><td>CSA 24点法</td><td>先後とも31点</td><td>先後とも24点</td></tr>
+    <tr><td><code>CSARule24H</code></td><td>CSA 24点法（駒落ち補正あり）</td><td>先後とも31点</td><td>先後とも24点</td></tr>
+    <tr><td><code>CSARule27</code></td><td>CSA 27点法</td><td>先手28点/後手27点</td><td>先手28点/後手27点</td></tr>
+    <tr><td><code>CSARule27H</code></td><td>CSA 27点法（駒落ち補正あり）</td><td>先手28点/後手27点</td><td>先手28点/後手27点</td></tr>
+    <tr><td><code>TryRule</code></td><td>トライルール</td><td>-</td><td>-</td></tr>
+  </tbody>
+</table>
+
+<h3>CSA Rule 24 と Rule 27 の違い</h3>
+
+<p>
+閾値の設定は <code>declaration_threshold()</code> と <code>impasse_threshold()</code> で定義されています。
+</p>
+
+<pre><code>// position.cpp 1571行目
+int Position::declaration_threshold(Color color) const {
+    switch (rules_.entering_king_rule) {
+        case EnteringKingRule::CSARule24:
+        case EnteringKingRule::CSARule24H:
+            return 31;
+        case EnteringKingRule::CSARule27:
+        case EnteringKingRule::CSARule27H:
+            return color == Color::Black ? 28 : 27;
+        case EnteringKingRule::NoEnteringKing:
+        case EnteringKingRule::TryRule:
+        default:
+            return kInfinity;
+    }
+}
+
+int Position::impasse_threshold(Color color) const {
+    switch (rules_.entering_king_rule) {
+        case EnteringKingRule::CSARule24:
+        case EnteringKingRule::CSARule24H:
+            return 24;
+        case EnteringKingRule::CSARule27:
+        case EnteringKingRule::CSARule27H:
+            return color == Color::Black ? 28 : 27;
+        case EnteringKingRule::NoEnteringKing:
+        case EnteringKingRule::TryRule:
+        default:
+            return kInfinity;
+    }
+}</code></pre>
+
+<ul>
+  <li><strong>CSARule24</strong>: 宣言に31点、持将棋判定に24点が必要。先後同じ閾値</li>
+  <li><strong>CSARule27</strong>: 宣言・持将棋とも先手28点/後手27点が必要。先手が1点多く必要</li>
+  <li><strong>NoEnteringKing / TryRule</strong>: 閾値を <code>kInfinity</code> (32000) に設定し、事実上無効化</li>
+</ul>
+
+<h3>駒落ち補正（CSARule24H / CSARule27H）</h3>
+
+<p>
+駒落ち対局では盤上の駒の総数が通常より少なくなります。
+<code>handicap_entering_king_bonus()</code> は、欠けている駒の点数を後手側にボーナスとして加算します。
+</p>
+
+<p>
+<code>handicap_entering_king_bonus()</code> は、盤上と持ち駒の全駒数を数え、
+通常の駒数（<code>kFullPieceCounts</code>: 歩9枚、香2枚、桂2枚、銀2枚、金2枚、角1枚、飛1枚）との差分に
+ポイント値を掛けてボーナスを計算します。
+このボーナスは後手（上手）にのみ適用され、駒落ち対局での公平性を保ちます。
+</p>
+
+<h3>TryRule</h3>
+
+<p>
+トライルールは、自玉が相手の玉の初期位置に到達することで勝ちとなるルールです。
+先手の場合は5一（<code>kBlackTrySquare = 4</code>）、
+後手の場合は5九（<code>kWhiteTrySquare = 76</code>）が目標マスです。
+</p>
+
+<pre><code>// position.cpp 1497行目
+bool Position::is_try_rule_win(Color color) const {
+    const int king_square = find_king(color);
+    if (king_square == -1) {
+        return false;
+    }
+    return king_square == (color == Color::Black ? kBlackTrySquare : kWhiteTrySquare);
+}</code></pre>
+
+<p>
+トライルールが有効な場合、CSAルールの宣言勝ちや持将棋判定は行われません。
+</p>
+
+<!-- ============================================================ -->
+<h2>7.7 手数上限（max_moves_to_draw）</h2>
+
+<p>
+<code>PositionRules</code> の <code>max_moves_to_draw</code> フィールドで手数上限を設定できます。
+</p>
+
+<pre><code>// position.h 23行目
+struct PositionRules {
+    int max_moves_to_draw = 500;
+    EnteringKingRule entering_king_rule = EnteringKingRule::CSARule24;
+    bool generate_all_legal_moves = true;
+};</code></pre>
+
+<p>
+デフォルトは500手です。<code>terminal_status()</code> 内で以下のように判定されます。
+</p>
+
+<pre><code>    if (rules_.max_moves_to_draw &gt; 0 &amp;&amp; ply_count_ &gt;= rules_.max_moves_to_draw &amp;&amp;
+        !is_in_check(side_to_move_)) {
+        return TerminalStatus{TerminalOutcome::Draw, TerminalReason::MoveLimit};
+    }</code></pre>
+
+<p>
+重要な点として、<strong>王手がかかっている場合は手数上限を適用しない</strong>という条件があります。
+これは、王手中に引き分けとしてしまうと不公平になるためです。
+また、<code>max_moves_to_draw</code> が0以下の場合は手数上限なしとして扱われます。
+</p>
+
+<!-- ============================================================ -->
+<h2>7.8 terminal_status() と探索の連携</h2>
+
+<p>
+<code>terminal_status()</code> は合法手の有無を判定しません。
+詰み（合法手がゼロで王手中）やステイルメイト（合法手がゼロで王手なし）の判定は、
+探索側で <code>generate_legal_moves()</code> の結果を使って行います。
+この設計により、<code>terminal_status()</code> は合法手生成を呼ばずに高速に判定でき、
+合法手生成はそれが本当に必要な場合にのみ実行されます。
+</p>
+
+  <div class="chapter-nav">
+    <span><a href="chapter06.html">&larr; 前章</a></span>
+    <span><a href="chapter08.html">次章 &rarr;</a></span>
+  </div>
+</div>
+</body>
+</html>

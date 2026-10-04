@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
+  </div>
+</header>
+<div class="wrapper">
+
+<h1>Hayanagi で学ぶ将棋エンジンの仕組み</h1>
+
+<p>
+本書は、C++17 で実装された USI プロトコル対応将棋エンジン <strong>Hayanagi</strong>（約 4,900 行）のソースコードを題材に、
+将棋エンジンの設計と実装を基礎から解説する教科書です。
+</p>
+<p>
+データ表現、合法手生成、探索アルゴリズム、評価関数、USI プロトコルなど、
+将棋エンジンを構成する要素をひとつずつ、実際のコードを読みながら理解していきます。
+</p>
+
+<h2>対象読者</h2>
+<ul>
+  <li>C++ の基本文法を理解している方</li>
+  <li>将棋のルールを知っている方</li>
+  <li>ゲームAI・探索アルゴリズムに興味がある方</li>
+</ul>
+
+<h2>目次</h2>
+
+<h3>第I部 基礎とデータ構造</h3>
+<ol class="toc">
+  <li>
+    <a href="chapter01.html">第1章 はじめに</a>
+    <span class="desc">将棋エンジンとは何か／USIプロトコルの概要／Hayanagiの全体構成／ビルドと動作確認</span>
+  </li>
+  <li>
+    <a href="chapter02.html">第2章 型とデータ表現</a>
+    <span class="desc">盤面の座標系／駒の表現／Move構造体／駒の価値と入玉ポイント／終局状態の分類</span>
+  </li>
+  <li>
+    <a href="chapter03.html">第3章 ビットボード</a>
+    <span class="desc">81マスを2つのuint64_tで表現／基本操作／集合演算とイテレーション／コンパイラ組み込み関数</span>
+  </li>
+</ol>
+
+<h3>第II部 局面管理と合法手生成</h3>
+<ol class="toc" start="4">
+  <li>
+    <a href="chapter04.html">第4章 局面管理 — 基礎編</a>
+    <span class="desc">盤面配列・持ち駒・手番の管理／色別・駒種別ビットボード／SFEN文字列の読み書き／Zobristハッシュ</span>
+  </li>
+  <li>
+    <a href="chapter05.html">第5章 攻撃テーブルと利き計算</a>
+    <span class="desc">事前計算テーブルの構築／ステップ型の利き／スライダー型の利き／between テーブル</span>
+  </li>
+  <li>
+    <a href="chapter06.html">第6章 合法手生成</a>
+    <span class="desc">直接生成方式の設計／ピン判定と王手検出／駒種別の手生成／駒打ちと打ち歩詰め判定</span>
+  </li>
+  <li>
+    <a href="chapter07.html">第7章 終局判定と特殊ルール</a>
+    <span class="desc">千日手／連続王手の千日手／持将棋と入玉宣言勝ち／入玉ルールバリアント／手数上限</span>
+  </li>
+</ol>
+
+<h3>第III部 探索と評価</h3>
+<ol class="toc" start="8">
+  <li>
+    <a href="chapter08.html">第8章 探索アルゴリズム — 基礎編</a>
+    <span class="desc">反復深化とNegamax法／Alpha-Beta枝刈り／PVS／静止探索／時間管理</span>
+  </li>
+  <li>
+    <a href="chapter09.html">第9章 探索の高速化テクニック</a>
+    <span class="desc">置換表／ヌルムーブ枝刈り／LMR／着手順序の最適化／SEE</span>
+  </li>
+  <li>
+    <a href="chapter10.html">第10章 詰み探索</a>
+    <span class="desc">王手限定の専用探索／攻撃側・防御側探索／通常探索との統合</span>
+  </li>
+  <li>
+    <a href="chapter11.html">第11章 評価関数</a>
+    <span class="desc">駒得／駒の位置評価／利きの広さ／玉の安全度／テンポボーナス</span>
+  </li>
+</ol>
+
+<h3>第IV部 並列化とプロトコル</h3>
+<ol class="toc" start="12">
+  <li>
+    <a href="chapter12.html">第12章 並列探索</a>
+    <span class="desc">ルート手分割／ワーカースレッド管理／共有置換表のアトミック操作／ノードカウンタ</span>
+  </li>
+  <li>
+    <a href="chapter13.html">第13章 定跡</a>
+    <span class="desc">やねうら王DB2016フォーマット／SFENキーによる定跡検索／エンジンとの統合</span>
+  </li>
+  <li>
+    <a href="chapter14.html">第14章 USIプロトコルの実装</a>
+    <span class="desc">コマンドループとディスパッチ／オプション管理／探索スレッド管理／Ponder・MultiPV対応</span>
+  </li>
+</ol>
+
+<h3>第V部 発展</h3>
+<ol class="toc" start="15">
+  <li>
+    <a href="chapter15.html">第15章 まとめと発展</a>
+    <span class="desc">設計判断の振り返り／強化の方向性（NNUE、Magic Bitboard、MCTS等）／参考文献</span>
+  </li>
+</ol>
+
+<h2>ソースコード構成</h2>
+<table>
+  <thead>
+    <tr><th>ファイル</th><th>行数</th><th>役割</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>types.h</code></td><td>304</td><td>型定義・定数・駒操作ユーティリティ</td></tr>
+    <tr><td><code>bitboard.h</code></td><td>114</td><td>81マスビットボード</td></tr>
+    <tr><td><code>position.h</code></td><td>162</td><td>局面管理ヘッダ</td></tr>
+    <tr><td><code>position.cpp</code></td><td>1,686</td><td>局面管理・合法手生成・終局判定</td></tr>
+    <tr><td><code>search.h</code></td><td>126</td><td>探索アルゴリズムヘッダ</td></tr>
+    <tr><td><code>search.cpp</code></td><td>1,482</td><td>探索・評価関数・置換表</td></tr>
+    <tr><td><code>usi_engine.h</code></td><td>61</td><td>USIエンジンヘッダ</td></tr>
+    <tr><td><code>usi_engine.cpp</code></td><td>863</td><td>USIプロトコル処理</td></tr>
+    <tr><td><code>book.h</code></td><td>28</td><td>定跡ヘッダ</td></tr>
+    <tr><td><code>book.cpp</code></td><td>59</td><td>定跡読み込み・検索</td></tr>
+    <tr><td><code>main.cpp</code></td><td>12</td><td>エントリポイント</td></tr>
+  </tbody>
+</table>
+
+</div>
+</body>
+</html>

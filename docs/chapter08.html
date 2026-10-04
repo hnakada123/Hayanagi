@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第8章 探索アルゴリズム — 基礎編 — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
+    <nav><a href="index.html">目次</a></nav>
+  </div>
+</header>
+<div class="wrapper">
+
+<h1>第8章 探索アルゴリズム — 基礎編</h1>
+
+<p>
+将棋エンジンの心臓部は<strong>探索</strong>です。
+合法手生成（第6章）で得た手の候補を先読みし、評価関数（第11章）で局面の良し悪しを数値化し、
+最も有利になる手を選び出す — この一連の処理が探索アルゴリズムです。
+</p>
+<p>
+本章では Hayanagi の探索コア部分を構成する以下のトピックを解説します。
+</p>
+<ul>
+  <li>探索のエントリポイント <code>find_best_move()</code></li>
+  <li>反復深化（Iterative Deepening）</li>
+  <li>Negamax 法</li>
+  <li>Alpha-Beta 枝刈り</li>
+  <li>Principal Variation Search (PVS)</li>
+  <li>静止探索（Quiescence Search）</li>
+  <li>時間管理とノード制限</li>
+</ul>
+
+<!-- ================================================================ -->
+<h2>8.1 探索の全体像 — <code>find_best_move()</code></h2>
+
+<p>
+探索の起点は <code>Search::find_best_move()</code> です。
+この関数は局面 <code>root</code>、探索オプション、停止フラグ、情報コールバックを受け取り、
+最善手を含む <code>SearchResult</code> を返します。
+</p>
+
+<pre><code>SearchResult Search::find_best_move(const Position&amp; root,
+                                    const SearchOptions&amp; options,
+                                    std::atomic_bool&amp; stop,
+                                    const std::function&lt;void(const SearchInfo&amp;)&gt;&amp; on_info) {
+    const std::uint8_t tt_generation = shared_tt().next_generation();
+    reset_state(options, stop, std::chrono::steady_clock::now(), nullptr, tt_generation);
+
+    SearchResult result;
+    result.terminal = root.terminal_status();
+    if (result.terminal.is_terminal()) {
+        result.score_cp = terminal_score(result.terminal, 0);
+        result.elapsed_ms = elapsed_ms();
+        result.hashfull_permille = hashfull_permille();
+        return result;
+    }
+
+    auto legal_moves = root.generate_search_legal_moves();
+    if (legal_moves.empty()) {
+        result.elapsed_ms = elapsed_ms();
+        return result;
+    }
+    // ... 反復深化ループへ続く
+}</code></pre>
+
+<p>処理の流れは次のとおりです。</p>
+<ol>
+  <li><strong>置換表の世代更新</strong> — <code>shared_tt().next_generation()</code> で新しい世代番号を取得し、古いエントリの置き換え優先度を制御します。</li>
+  <li><strong>内部状態のリセット</strong> — <code>reset_state()</code> でキラー手テーブル、ヒストリーテーブル、ノードカウンタなどを初期化します。</li>
+  <li><strong>終局判定</strong> — ルート局面がすでに終局（詰み・千日手・入玉宣言など）であれば即座に返します。</li>
+  <li><strong>詰み探索</strong> — 短手数の強制詰みがないか専用探索で確認します（第10章で詳述）。</li>
+  <li><strong>反復深化ループ</strong> — 深さ 1 から <code>max_depth</code> まで段階的に探索を深めます。</li>
+</ol>
+
+<!-- ================================================================ -->
+<h2>8.2 反復深化（Iterative Deepening）</h2>
+
+<p>
+反復深化とは、深さ 1 の探索から始めて、深さ 2、3、4 … と探索深度を 1 ずつ増やしながら繰り返す手法です。
+一見すると同じ局面を何度も探索するので無駄に思えますが、実際には大きな利点があります。
+</p>
+
+<h3>反復深化の利点</h3>
+<ul>
+  <li><strong>時間管理との相性</strong> — 任意のタイミングで打ち切っても、前の深さの結果が使えます。</li>
+  <li><strong>着手順序の改善</strong> — 浅い探索で得た最善手を次の深さの探索で最初に調べることで、枝刈りの効率が飛躍的に向上します。</li>
+  <li><strong>置換表の活用</strong> — 浅い探索結果が置換表に蓄積され、深い探索で参照されます。</li>
+</ul>
+
+<p>Hayanagi の反復深化ループの骨格は以下のようになっています。</p>
+
+<pre><code>Move previous_best = fallback;
+
+for (int depth = 1; depth &lt;= options.max_depth; ++depth) {
+    if (coordinator_should_stop()) {
+        break;
+    }
+
+    // 置換表から前回の最善手を取得
+    Move tt_move;
+    TTEntry tt_entry;
+    if (shared_tt().probe(root.position_key(), tt_entry)) {
+        tt_move = tt_entry.best_move;
+    }
+
+    // ルート手を順序付け（前回の最善手に +2M ボーナス）
+    std::vector&lt;RootMove&gt; root_moves;
+    for (const Move&amp; move : legal_moves) {
+        int score = move_order_score(root, move, 0, tt_move);
+        if (same_move(move, previous_best)) {
+            score += 2000000;
+        }
+        // ...
+    }
+    std::sort(root_moves.begin(), root_moves.end(), /* スコア降順 */);
+
+    // 各手について negamax を呼び出す（PVS方式）
+    // ...
+
+    previous_best = best_move;
+}</code></pre>
+
+<p>
+各反復の開始時に、前回の最善手 <code>previous_best</code> に 200万点のボーナスを加えて最優先で探索します。
+これにより Alpha-Beta 枝刈りの効率が大幅に改善されます。
+</p>
+
+<!-- ================================================================ -->
+<h2>8.3 Negamax 法の原理</h2>
+
+<p>
+二人零和完全情報ゲームの探索には<strong>ミニマックス法</strong>が基本となります。
+自分の手番では評価値を最大化し、相手の手番では最小化する — これがミニマックスの考え方です。
+</p>
+<p>
+<strong>Negamax 法</strong>はミニマックスの実装を簡潔にするテクニックです。
+「相手にとっての評価値は、自分にとっての評価値の符号を反転したもの」という性質を利用し、
+常に「最大化」のコードだけで済ませます。
+</p>
+
+<pre><code>// Negamax の原理（擬似コード）
+int negamax(Position position, int depth) {
+    if (depth == 0) return evaluate(position);
+
+    int best = -INFINITY;
+    for (Move move : legal_moves(position)) {
+        Position child = position.do_move(move);
+        int score = -negamax(child, depth - 1);  // 符号反転がポイント
+        best = max(best, score);
+    }
+    return best;
+}</code></pre>
+
+<p>
+再帰呼び出しの戻り値に <code>-</code> を付けるだけで、手番の切り替えと最小化が同時に表現されます。
+Hayanagi の <code>negamax()</code> 関数もこの原理に基づいています。
+</p>
+
+<!-- ================================================================ -->
+<h2>8.4 Alpha-Beta 枝刈り</h2>
+
+<p>
+単純な Negamax は全ての手を最深まで調べるため、分岐数が大きい将棋では現実的ではありません。
+<strong>Alpha-Beta 枝刈り</strong>は、「この手をこれ以上調べても結果が変わらない」と判明した時点で
+探索を打ち切る最適化です。
+</p>
+
+<h3>Alpha と Beta の意味</h3>
+<ul>
+  <li><strong>alpha</strong> — 現在のプレイヤーが保証できる最低スコア（下界）</li>
+  <li><strong>beta</strong> — 相手が許容する最大スコア（上界）</li>
+</ul>
+<p>
+もし評価値が <code>beta</code> 以上になれば、相手はこの局面を選ばない（もっと良い手が他にある）ため、
+残りの手を調べる必要はありません。これを<strong>Beta カット</strong>（fail-high）と呼びます。
+</p>
+
+<pre><code>// Alpha-Beta 枝刈り（擬似コード）
+int alphabeta(Position position, int depth, int alpha, int beta) {
+    if (depth == 0) return evaluate(position);
+
+    for (Move move : legal_moves(position)) {
+        Position child = position.do_move(move);
+        int score = -alphabeta(child, depth - 1, -beta, -alpha);
+        alpha = max(alpha, score);
+        if (alpha &gt;= beta) {
+            break;  // Beta カット
+        }
+    }
+    return alpha;
+}</code></pre>
+
+<p>
+Hayanagi の実際のコードでは、置換表参照・ヌルムーブ枝刈り・LMR などの高速化テクニックが加わりますが（第9章で詳述）、
+核心部分は上記の Alpha-Beta ロジックです。
+</p>
+
+<pre><code>int Search::negamax(const Position&amp; position, int depth, int ply,
+                    int alpha, int beta) {
+    // 停止判定・終局判定・深さ0で静止探索へ
+    if (should_stop()) { aborted_ = true; return evaluate(position); }
+    const TerminalStatus terminal = position.terminal_status();
+    if (terminal.is_terminal()) { return terminal_score(terminal, ply); }
+    if (depth &lt;= 0) { return quiescence(position, ply, alpha, beta); }
+
+    count_node();
+    const int alpha_original = alpha;
+    // ... 置換表参照、ヌルムーブ枝刈り（第9章） ...
+
+    auto legal_moves = position.generate_search_legal_moves();
+    const auto ordered_moves = score_moves(position, legal_moves, ply, tt_move);
+
+    Move best_move;
+    int best_score = -kInfinity;
+
+    for (std::size_t move_index = 0; move_index &lt; ordered_moves.size(); ++move_index) {
+        const Move&amp; move = ordered_moves[move_index].move;
+        Position child = position;
+        child.do_move(move);
+
+        int score = 0;
+        if (move_index == 0) {
+            score = -negamax(child, depth - 1, ply + 1, -beta, -alpha);
+        } else {
+            // PVS（次節で解説）
+            score = -negamax(child, depth - 1, ply + 1, -alpha - 1, -alpha);
+            if (!aborted_ &amp;&amp; score &gt; alpha &amp;&amp; score &lt; beta) {
+                score = -negamax(child, depth - 1, ply + 1, -beta, -alpha);
+            }
+        }
+
+        if (aborted_) { return 0; }
+        if (score &gt; best_score) { best_score = score; best_move = move; }
+        if (score &gt; alpha) { alpha = score; }
+        if (alpha &gt;= beta) {
+            // Beta カット — キラー手・ヒストリー記録
+            store_tt(key, depth, ply, best_score, alpha_original, beta, best_move);
+            return best_score;
+        }
+    }
+
+    store_tt(key, depth, ply, best_score, alpha_original, beta, best_move);
+    return best_score;
+}</code></pre>
+
+<p>
+関数の冒頭で <code>alpha_original</code> を保存している点に注目してください。
+これは探索終了後に置換表へ記録する際、スコアが Exact（正確値）なのか Upper/Lower bound なのかを判定するために使います。
+</p>
+
+<!-- ================================================================ -->
+<h2>8.5 Principal Variation Search (PVS)</h2>
+
+<p>
+Alpha-Beta 枝刈りの効率は、<strong>最善手を最初に調べるほど</strong>高くなります。
+着手順序が完璧であれば、最初の手（principal variation）だけが alpha を更新し、
+残りの手は全て Beta カットされるはずです。
+</p>
+<p>
+<strong>PVS（Principal Variation Search）</strong>はこの性質を積極的に利用します。
+</p>
+
+<h3>PVS のアルゴリズム</h3>
+<ol>
+  <li><strong>最初の手</strong>はフルウィンドウ <code>[-beta, -alpha]</code> で探索する。</li>
+  <li><strong>2番目以降の手</strong>は、まず<strong>ヌルウィンドウ</strong> <code>[-alpha-1, -alpha]</code> で探索する。
+    <ul>
+      <li>結果が alpha 以下なら、この手は最善手ではないと確定 — 次の手へ進む。</li>
+      <li>結果が alpha を超えたら、この手が予想より良い — フルウィンドウ <code>[-beta, -alpha]</code> で<strong>再探索</strong>する。</li>
+    </ul>
+  </li>
+</ol>
+
+<p>Hayanagi のルートノードでの PVS 実装を見てみましょう。</p>
+
+<pre><code>for (std::size_t move_index = 0; move_index &lt; root_moves.size(); ++move_index) {
+    Position child = root;
+    child.do_move(root_moves[move_index].move);
+
+    int score = 0;
+    if (move_index == 0) {
+        // 最初の手: フルウィンドウ
+        score = -negamax(child, depth - 1, 1, -beta, -alpha);
+    } else {
+        // 2番目以降: ヌルウィンドウで試す
+        score = -negamax(child, depth - 1, 1, -alpha - 1, -alpha);
+        if (!aborted_ &amp;&amp; score &gt; alpha &amp;&amp; score &lt; beta) {
+            // 改善された — フルウィンドウで再探索
+            score = -negamax(child, depth - 1, 1, -beta, -alpha);
+        }
+    }
+    // ...
+}</code></pre>
+
+<p>
+ヌルウィンドウ探索は幅が 1 しかないため、非常に高速に Beta カットまたは fail-low が判明します。
+着手順序が良ければ、再探索が必要になるケースは稀であり、全体として大幅な高速化が実現します。
+</p>
+
+<p>
+内部ノード（<code>negamax()</code> 内）では、さらに LMR（Late Move Reduction）と組み合わせた
+3段階の探索が行われます。
+</p>
+
+<pre><code>if (move_index == 0) {
+    score = -negamax(child, depth - 1, ply + 1, -beta, -alpha);
+} else {
+    // LMR: 順序が後ろの静かな手は浅い深さで試す
+    const int reduced_depth = std::max(0, depth - 1 - reduction);
+    score = -negamax(child, reduced_depth, ply + 1, -alpha - 1, -alpha);
+    if (!aborted_ &amp;&amp; score &gt; alpha) {
+        // 縮小なしのヌルウィンドウで再探索
+        score = -negamax(child, depth - 1, ply + 1, -alpha - 1, -alpha);
+        if (!aborted_ &amp;&amp; score &gt; alpha &amp;&amp; score &lt; beta) {
+            // フルウィンドウで最終確認
+            score = -negamax(child, depth - 1, ply + 1, -beta, -alpha);
+        }
+    }
+}</code></pre>
+
+<!-- ================================================================ -->
+<h2>8.6 静止探索（Quiescence Search）</h2>
+
+<p>
+Alpha-Beta 探索は指定された深さに達すると評価関数を呼び出しますが、
+局面が「戦闘中」の場合、その評価値は信頼できません。
+たとえば銀で飛車を取った直後に深さ制限に達すると、飛車を取り返される手を考慮せずに
+「飛車得」と誤評価してしまいます。
+</p>
+<p>
+<strong>静止探索（Quiescence Search）</strong>は、この「水平線効果」を軽減するために、
+通常探索の深さ 0 以降で<strong>戦術手（捕獲・成りなど）のみ</strong>を追加で探索する手法です。
+</p>
+
+<h3>Stand-Pat（静的評価によるカット）</h3>
+
+<pre><code>int Search::quiescence(const Position&amp; position, int ply,
+                       int alpha, int beta) {
+    if (should_stop()) { aborted_ = true; return evaluate(position); }
+
+    count_node();
+    const TerminalStatus terminal = position.terminal_status();
+    if (terminal.is_terminal()) {
+        return terminal_score(terminal, ply);
+    }
+
+    const bool in_check = position.is_in_check(position.side_to_move());
+    if (!in_check) {
+        const int stand_pat = evaluate(position);
+        if (stand_pat &gt;= beta) {
+            return stand_pat;  // 何もしなくてもbeta以上 → カット
+        }
+        alpha = std::max(alpha, stand_pat);
+    }
+    // ...</code></pre>
+
+<p>
+王手がかかっていない場合、まず現在の局面の静的評価値（<strong>stand-pat</strong>）を計算します。
+</p>
+<ul>
+  <li><code>stand_pat &gt;= beta</code> なら、何も取らなくても十分良いのでカットします。</li>
+  <li>そうでなければ、<code>alpha</code> を stand-pat で更新します（「何もしない」という選択肢が保証する下界）。</li>
+</ul>
+
+<h3>戦術手の生成と SEE プルーニング</h3>
+
+<pre><code>    auto tactical_moves = position.generate_quiescence_moves();
+    if (tactical_moves.empty()) {
+        if (in_check) {
+            return -kMateScore + ply;  // 王手回避手がない → 詰み
+        }
+        return alpha;
+    }
+
+    const Move no_tt_move;
+    const auto ordered_moves = score_moves(position, tactical_moves, ply, no_tt_move);
+    for (const OrderedMove&amp; ordered_move : ordered_moves) {
+        const Move&amp; move = ordered_move.move;
+        const int captured = position.piece_at(move.to);
+        if (!in_check &amp;&amp; captured != 0
+            &amp;&amp; position.static_exchange_eval(move) &lt; -120) {
+            continue;  // SEE が -120 未満の捕獲はスキップ
+        }
+        Position child = position;
+        child.do_move(move);
+        const int score = -quiescence(child, ply + 1, -beta, -alpha);
+        if (aborted_) { return 0; }
+        if (score &gt;= beta) { return score; }
+        alpha = std::max(alpha, score);
+    }
+
+    return alpha;
+}</code></pre>
+
+<p>静止探索のポイントをまとめます。</p>
+
+<ol>
+  <li><strong>戦術手のみ生成</strong> — <code>generate_quiescence_moves()</code> は捕獲手・成り手・王手回避手を返します。静かな手（移動のみ）は生成しません。</li>
+  <li><strong>SEE プルーニング</strong> — 捕獲手であっても、SEE（Static Exchange Evaluation、第9章で詳述）の値が <code>-120</code> 未満の場合はスキップします。
+    これは「明らかに駒損になる取り合い」を排除するための枝刈りです。閾値 120 は香車の価値（約 430）よりも十分小さく、
+    わずかな損であれば調べる方針です。</li>
+  <li><strong>王手時の特別処理</strong> — 王手がかかっている場合は stand-pat を使わず、全ての王手回避手を調べます。
+    回避手がなければ詰みスコア <code>-kMateScore + ply</code> を返します。</li>
+</ol>
+
+<!-- ================================================================ -->
+<h2>8.7 時間管理 — <code>should_stop()</code></h2>
+
+<p>
+実際の対局では、エンジンは制限時間内に指し手を返さなければなりません。
+Hayanagi は <code>should_stop()</code> 関数で停止判定を行います。
+</p>
+
+<pre><code>bool Search::should_stop() {
+    if (stop_ != nullptr &amp;&amp; stop_-&gt;load()) {
+        return true;
+    }
+    if (options_.node_limit &gt; 0
+        &amp;&amp; current_nodes() &gt;= options_.node_limit) {
+        return true;
+    }
+    if (!options_.infinite &amp;&amp; options_.time_limit_ms &gt; 0
+        &amp;&amp; elapsed_ms() &gt;= options_.time_limit_ms) {
+        return true;
+    }
+    return false;
+}</code></pre>
+
+<p>停止条件は3つあります。</p>
+<ol>
+  <li><strong>外部停止フラグ</strong> — USI の <code>stop</code> コマンドや ponder hit で <code>stop_</code> が <code>true</code> に設定されます。<code>std::atomic_bool</code> を使用しているため、探索スレッドから安全に参照できます。</li>
+  <li><strong>ノード制限</strong> — <code>go nodes N</code> で指定された場合、探索ノード数が上限に達したら停止します。<code>current_nodes()</code> はマルチスレッド時に共有アトミックカウンタを参照します。</li>
+  <li><strong>時間制限</strong> — <code>go btime/wtime</code> などから計算された制限時間を超えたら停止します。<code>infinite</code> モードの場合はこの条件は無効です。</li>
+</ol>
+
+<p>
+<code>should_stop()</code> は <code>negamax()</code> と <code>quiescence()</code> の冒頭で毎回呼ばれます。
+停止が検出されると <code>aborted_ = true</code> がセットされ、再帰呼び出しの巻き戻し中に
+各レベルで即座に <code>return 0</code> が実行されます。
+</p>
+
+<h3>経過時間の計測</h3>
+
+<pre><code>int Search::elapsed_ms() const {
+    const auto now = std::chrono::steady_clock::now();
+    return static_cast&lt;int&gt;(
+        std::chrono::duration_cast&lt;std::chrono::milliseconds&gt;(
+            now - start_time_).count());
+}</code></pre>
+
+<p>
+<code>std::chrono::steady_clock</code> を使用しているため、システム時刻の変更に影響されません。
+探索開始時に <code>start_time_</code> を記録し、そこからの経過ミリ秒を返します。
+</p>
+
+<!-- ================================================================ -->
+<h2>8.8 ノード制限</h2>
+
+<p>
+ノード制限は主にベンチマーク（<code>bench nodes N</code>）やテスト時に使用されます。
+ノードカウントは <code>count_node()</code> で管理されます。
+</p>
+
+<pre><code>void Search::count_node() {
+    ++nodes_;
+    if (shared_nodes_ != nullptr) {
+        shared_nodes_-&gt;fetch_add(1, std::memory_order_relaxed);
+    }
+}</code></pre>
+
+<p>
+シングルスレッド時はローカル変数 <code>nodes_</code> をインクリメントするだけです。
+マルチスレッド時は、各ワーカーのローカルカウンタに加えて、共有アトミックカウンタ <code>shared_nodes_</code> も更新します。
+<code>memory_order_relaxed</code> を使用しているのは、ノードカウントは厳密な正確さを必要としないためです。
+</p>
+
+<!-- ================================================================ -->
+<h2>8.9 終局スコアの計算</h2>
+
+<p>
+探索中に終局状態（詰み・千日手・入玉宣言など）に到達した場合のスコア計算も重要です。
+</p>
+
+<pre><code>int terminal_score(const TerminalStatus&amp; status, int ply) {
+    switch (status.outcome) {
+        case TerminalOutcome::Win:
+            return kMateScore - ply;
+        case TerminalOutcome::Loss:
+            return -kMateScore + ply;
+        case TerminalOutcome::Draw:
+            return 0;
+        case TerminalOutcome::None:
+        default:
+            return 0;
+    }
+}</code></pre>
+
+<p>
+詰みスコアから <code>ply</code>（ルートからの手数）を引く・足すことで、
+<strong>最短で詰ます手</strong>と<strong>最長で粘る手</strong>を自然に選ぶようになります。
+勝ちの場合は <code>kMateScore - ply</code>（短い方が高スコア）、
+負けの場合は <code>-kMateScore + ply</code>（長い方が高スコア＝被害が少ない）です。
+</p>
+
+<!-- ================================================================ -->
+<h2>8.10 まとめ</h2>
+
+<p>本章で解説した探索の基礎を整理します。</p>
+
+<table>
+  <thead>
+    <tr><th>手法</th><th>役割</th><th>Hayanagi での実装箇所</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>反復深化</td><td>段階的に深度を増やし、時間管理と着手順序改善を両立</td><td><code>find_best_move()</code> の for ループ</td></tr>
+    <tr><td>Negamax</td><td>符号反転でミニマックスを簡潔に実装</td><td><code>negamax()</code> の再帰呼び出し</td></tr>
+    <tr><td>Alpha-Beta</td><td>不要な枝を刈り取り探索ノード数を削減</td><td><code>alpha &gt;= beta</code> での break/return</td></tr>
+    <tr><td>PVS</td><td>ヌルウィンドウで不要な再探索を回避</td><td><code>move_index == 0</code> の分岐</td></tr>
+    <tr><td>静止探索</td><td>水平線効果を軽減し戦術的手順を正しく評価</td><td><code>quiescence()</code></td></tr>
+    <tr><td>時間管理</td><td>制限時間・ノード上限・外部停止に対応</td><td><code>should_stop()</code></td></tr>
+  </tbody>
+</table>
+
+<p>
+次章では、これらの基礎アルゴリズムを実用的な速度にするための高速化テクニック
+— 置換表、ヌルムーブ枝刈り、LMR、着手順序の最適化、SEE — を解説します。
+</p>
+
+  <div class="chapter-nav">
+    <span><a href="chapter07.html">&larr; 前章</a></span>
+    <span><a href="chapter09.html">次章 &rarr;</a></span>
+  </div>
+</div>
+</body>
+</html>

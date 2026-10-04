@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第14章 USIプロトコルの実装 — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
+    <nav><a href="index.html">目次</a></nav>
+  </div>
+</header>
+<div class="wrapper">
+
+<h1>第14章 USIプロトコルの実装</h1>
+
+<p>
+USI（Universal Shogi Interface）は、将棋 GUI とエンジンが標準入出力を通じて通信するためのプロトコルです。
+本章では、Hayanagi の <code>UsiEngine</code> クラスがどのように USI プロトコルを実装しているかを、
+コマンドの受信からスレッド管理、Ponder モードまで詳細に解説します。
+</p>
+
+<!-- ============================================================ -->
+<h2>14.1 USI プロトコルの通信フロー</h2>
+
+<p>
+USI プロトコルにおける典型的な通信フローは以下の通りです。
+</p>
+
+<pre><code>GUI → Engine: usi
+Engine → GUI: id name Hayanagi
+Engine → GUI: id author OpenAI
+Engine → GUI: option name USI_Ponder type check default false
+Engine → GUI: option name MultiPV type spin default 1 min 1 max 32
+             ... (その他のオプション)
+Engine → GUI: usiok
+
+GUI → Engine: setoption name Hash value 256
+GUI → Engine: isready
+Engine → GUI: info string book loaded book/standard_book.db
+Engine → GUI: readyok
+
+GUI → Engine: usinewgame
+GUI → Engine: position startpos moves 7g7f 3c3d
+GUI → Engine: go btime 60000 wtime 60000 byoyomi 10000
+Engine → GUI: info depth 1 score cp 30 nodes 120 time 5 nps 24000 pv 2g2f
+Engine → GUI: info depth 2 score cp 45 nodes 3400 time 20 nps 170000 pv 2g2f 8c8d
+             ...
+Engine → GUI: bestmove 2g2f ponder 8c8d
+
+GUI → Engine: quit</code></pre>
+
+<p>
+エンジンは標準入力からコマンドを 1 行ずつ読み取り、処理結果を標準出力に書き出します。
+すべての通信はテキストベースで行われます。
+</p>
+
+<!-- ============================================================ -->
+<h2>14.2 UsiEngine クラスの設計</h2>
+
+<p>
+<code>UsiEngine</code> クラスの宣言を見てみましょう（<code>usi_engine.h</code>）。
+</p>
+
+<pre><code>class UsiEngine {
+public:
+    UsiEngine() = default;
+    ~UsiEngine();
+    void loop();
+
+private:
+    Position position_;
+    Search search_;
+    Book book_;
+    mutable std::mutex mutex_;
+    mutable std::mutex search_state_mutex_;
+    std::condition_variable search_state_cv_;
+    std::thread search_thread_;
+    std::atomic_bool stop_requested_{false};
+    std::atomic_bool searching_{false};
+    std::atomic_bool usi_ponder_{false};
+    std::atomic_int multi_pv_{1};
+    std::atomic_int threads_{1};
+    bool pondering_ = false;
+    bool ponderhit_ = false;
+    bool suppress_bestmove_ = false;
+    // ... 時間管理・定跡関連のメンバ省略 ...
+
+    void handle_line(const std::string&amp; line);
+    void set_option(const std::string&amp; line);
+    void stop_search(bool report_bestmove = false);
+    void start_search(const std::string&amp; line);
+    bool set_position(const std::string&amp; line);
+    SearchOptions parse_go_options(const std::string&amp; line) const;
+    void report_bestmove(const SearchResult&amp; result, ...) const;
+    void print_info(const SearchInfo&amp; info) const;
+};</code></pre>
+
+<p>
+主要な設計ポイントは以下の通りです。
+</p>
+
+<ul>
+  <li><code>position_</code> が現在の局面を保持し、<code>mutex_</code> で保護される。</li>
+  <li><code>search_thread_</code> で探索をバックグラウンド実行し、<code>stop_requested_</code> で停止を通知する。</li>
+  <li>Ponder 関連の状態は <code>search_state_mutex_</code> と <code>search_state_cv_</code> で同期する。</li>
+  <li>スレッド安全が必要な設定値は <code>std::atomic</code> で宣言されている。</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>14.3 loop() — メインコマンドループ</h2>
+
+<p>
+エンジンのエントリポイントとなるのが <code>loop()</code> です。
+</p>
+
+<pre><code>void UsiEngine::loop() {
+    std::string line;
+    while (std::getline(std::cin, line)) {
+        handle_line(line);
+        if (line == "quit") {
+            break;
+        }
+    }
+}</code></pre>
+
+<p>
+標準入力から 1 行ずつ読み取り、<code>handle_line()</code> に委譲します。
+<code>quit</code> を受信するか、入力が EOF に達するとループを抜けます。
+デストラクタで探索スレッドの停止が保証されています。
+</p>
+
+<!-- ============================================================ -->
+<h2>14.4 handle_line() — コマンドディスパッチ</h2>
+
+<p>
+受信した行を解析し、対応する処理に振り分けます。
+</p>
+
+<pre><code>void UsiEngine::handle_line(const std::string&amp; line) {
+    if (line == "usi") {
+        // エンジン情報とオプション一覧を出力
+        std::cout &lt;&lt; "id name Hayanagi" &lt;&lt; std::endl;
+        std::cout &lt;&lt; "id author OpenAI" &lt;&lt; std::endl;
+        // ... 各オプションの出力 ...
+        std::cout &lt;&lt; "usiok" &lt;&lt; std::endl;
+        return;
+    }
+    if (line == "isready") {
+        // 定跡読み込み → readyok
+        // ...
+        std::cout &lt;&lt; "readyok" &lt;&lt; std::endl;
+        return;
+    }
+    if (line == "usinewgame") {
+        stop_search();
+        std::lock_guard&lt;std::mutex&gt; lock(mutex_);
+        position_.set_startpos();
+        return;
+    }
+    if (line.rfind("position ", 0) == 0) {
+        stop_search();
+        set_position(line);
+        return;
+    }
+    if (line.rfind("go", 0) == 0) {
+        start_search(line);
+        return;
+    }
+    if (line == "stop") {
+        stop_search(true);
+        return;
+    }
+    if (line == "ponderhit") {
+        std::lock_guard&lt;std::mutex&gt; lock(search_state_mutex_);
+        if (pondering_) {
+            ponderhit_ = true;
+            search_state_cv_.notify_all();
+        }
+        return;
+    }
+    if (line.rfind("setoption ", 0) == 0) {
+        set_option(line);
+        return;
+    }
+    if (line == "quit") {
+        stop_search();
+    }
+}</code></pre>
+
+<p>
+文字列の先頭一致（<code>rfind(..., 0) == 0</code>）でコマンドを判別しています。
+<code>bench</code> と <code>perft</code> は USI 標準にはない独自拡張コマンドです。
+</p>
+
+<!-- ============================================================ -->
+<h2>14.5 set_option() — オプション管理</h2>
+
+<p>
+<code>setoption name &lt;名前&gt; value &lt;値&gt;</code> コマンドを処理します。
+</p>
+
+<pre><code>void UsiEngine::set_option(const std::string&amp; line) {
+    const auto tokens = split_tokens(line);
+    if (tokens.size() &lt; 3 || tokens[0] != "setoption" || tokens[1] != "name") {
+        return;
+    }
+
+    std::string value_token;
+    for (std::size_t i = 3; i + 1 &lt; tokens.size(); ++i) {
+        if (tokens[i] == "value") {
+            value_token = tokens[i + 1];
+            break;
+        }
+    }
+
+    bool rules_changed = false;
+    if (tokens[2] == "USI_Ponder") {
+        usi_ponder_.store(parse_bool_option(value_token, kDefaultUsiPonder));
+    } else if (tokens[2] == "MultiPV") {
+        multi_pv_.store(std::clamp(parse_int(value_token, kDefaultMultiPv),
+                                   1, kMaxMultiPv));
+    } else if (tokens[2] == "Threads") {
+        threads_.store(std::clamp(parse_int(value_token, kDefaultThreads),
+                                  1, kMaxThreads));
+    } else if (tokens[2] == "Hash") {
+        const std::size_t hash_size_mb = std::clamp&lt;std::size_t&gt;(
+            parse_uint64(value_token, Search::hash_size_mb()),
+            kMinHashSizeMb, kMaxHashSizeMb);
+        stop_search();
+        if (!Search::set_hash_size_mb(hash_size_mb)) {
+            std::cout &lt;&lt; "info string hash resize_failed "
+                      &lt;&lt; hash_size_mb &lt;&lt; std::endl;
+        }
+    } else if (tokens[2] == "EnteringKingRule") {
+        // ... 入玉ルールの設定 ...
+    } else if (tokens[2] == "USI_OwnBook") {
+        usi_own_book_ = parse_bool_option(value_token, usi_own_book_);
+    } else if (tokens[2] == "BookDir" || tokens[2] == "BookFile") {
+        // ... 定跡設定の更新、book_loaded_ をリセット ...
+    }
+
+    if (rules_changed) {
+        std::lock_guard&lt;std::mutex&gt; lock(mutex_);
+        apply_position_rules(position_);
+    }
+}</code></pre>
+
+<p>主なオプションの一覧です。</p>
+
+<table>
+  <thead>
+    <tr><th>オプション名</th><th>型</th><th>説明</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>USI_Ponder</td><td>check</td><td>Ponder（先読み）を有効にする</td></tr>
+    <tr><td>MultiPV</td><td>spin</td><td>候補手を複数表示する数</td></tr>
+    <tr><td>Threads</td><td>spin</td><td>探索スレッド数（最大128）</td></tr>
+    <tr><td>Hash</td><td>spin</td><td>置換表サイズ（MB単位、最大65536）</td></tr>
+    <tr><td>MinimumThinkingTime</td><td>spin</td><td>最小思考時間（ミリ秒）</td></tr>
+    <tr><td>NetworkDelay</td><td>spin</td><td>ネットワーク遅延の補正値</td></tr>
+    <tr><td>SlowMover</td><td>spin</td><td>時間配分の緩急（100が標準）</td></tr>
+    <tr><td>ResignValue</td><td>spin</td><td>投了する評価値の閾値</td></tr>
+    <tr><td>EnteringKingRule</td><td>combo</td><td>入玉ルール（CSARule24等）</td></tr>
+    <tr><td>USI_OwnBook</td><td>check</td><td>エンジン内蔵定跡の使用</td></tr>
+    <tr><td>BookDir / BookFile</td><td>string/combo</td><td>定跡ファイルの指定</td></tr>
+  </tbody>
+</table>
+
+<p>
+<code>Hash</code> の変更時は探索を停止してからリサイズを行うなど、安全性に配慮しています。
+<code>BookDir</code> や <code>BookFile</code> が変更されると <code>book_loaded_</code> がリセットされ、
+次の <code>isready</code> で再読み込みが行われます。
+</p>
+
+<!-- ============================================================ -->
+<h2>14.6 set_position() — position コマンドの処理</h2>
+
+<pre><code>bool UsiEngine::set_position(const std::string&amp; line) {
+    const auto tokens = split_tokens(line);
+    if (tokens.size() &lt; 2) {
+        return false;
+    }
+
+    Position next;
+    apply_position_rules(next);
+    if (!load_position_from_tokens(tokens, 1, next)) {
+        return false;
+    }
+
+    std::lock_guard&lt;std::mutex&gt; lock(mutex_);
+    position_ = next;
+    return true;
+}</code></pre>
+
+<p>
+<code>position startpos moves ...</code> または <code>position sfen ... moves ...</code> の形式を受け付けます。
+ヘルパー関数 <code>load_position_from_tokens()</code> が実際のパースを担当し、
+<code>startpos</code> なら初期局面、<code>sfen</code> なら指定された SFEN から局面を構築します。
+<code>moves</code> 以降のトークンは <code>apply_usi_move()</code> で 1 手ずつ適用されます。
+パースに成功した場合のみ、mutex で保護された <code>position_</code> を更新します。
+</p>
+
+<!-- ============================================================ -->
+<h2>14.7 parse_go_options() — go コマンドのパース</h2>
+
+<pre><code>SearchOptions UsiEngine::parse_go_options(const std::string&amp; line) const {
+    SearchOptions options;
+    options.multi_pv = std::clamp(multi_pv_.load(), 1, kMaxMultiPv);
+    options.threads = std::clamp(threads_.load(), 1, kMaxThreads);
+    const auto tokens = split_tokens(line);
+
+    int movetime = 0;
+    int black_time = 0, white_time = 0;
+    int black_inc = 0, white_inc = 0;
+    int byoyomi = 0;
+
+    for (std::size_t i = 1; i &lt; tokens.size(); ++i) {
+        const std::string&amp; token = tokens[i];
+        if (token == "depth" &amp;&amp; i + 1 &lt; tokens.size())
+            options.max_depth = std::max(1, parse_int(tokens[++i]));
+        else if (token == "movetime" &amp;&amp; i + 1 &lt; tokens.size())
+            movetime = std::max(1, parse_int(tokens[++i]));
+        else if (token == "ponder")
+            options.ponder = true;
+        else if (token == "nodes" &amp;&amp; i + 1 &lt; tokens.size())
+            options.node_limit = std::max&lt;std::uint64_t&gt;(1, parse_uint64(tokens[++i], 0));
+        else if (token == "btime" &amp;&amp; ...) // btime, wtime, binc, winc, byoyomi も同様
+            ...
+        else if (token == "infinite") {
+            options.infinite = true;
+            options.max_depth = kMaxDepth;
+        }
+    }
+    // ... 時間配分の計算 ...
+    return options;
+}</code></pre>
+
+<p>
+<code>go</code> コマンドは多くのサブオプションを持ちます。
+<code>depth</code>、<code>nodes</code>、<code>movetime</code> は固定条件の探索、
+<code>btime</code>/<code>wtime</code>/<code>binc</code>/<code>winc</code>/<code>byoyomi</code> は持ち時間に基づく探索、
+<code>infinite</code> は <code>stop</code> まで探索を続けるモードです。
+</p>
+
+<p>
+時間配分の計算では、残り時間の 1/30 を基本とし、
+<code>SlowMover</code> で緩急を調整、<code>NetworkDelay</code> で通信遅延を差し引くなど、
+実戦的な時間管理を行います。
+</p>
+
+<!-- ============================================================ -->
+<h2>14.8 探索のスレッド管理</h2>
+
+<h3>14.8.1 start_search() — ワーカースレッドの起動</h3>
+
+<pre><code>void UsiEngine::start_search(const std::string&amp; line) {
+    stop_search();
+    stop_requested_.store(false);
+
+    Position snapshot;
+    {
+        std::lock_guard&lt;std::mutex&gt; lock(mutex_);
+        snapshot = position_;
+    }
+    const SearchOptions options = parse_go_options(line);
+
+    // 定跡参照（前章で解説済み）
+    // ...
+
+    {
+        std::lock_guard&lt;std::mutex&gt; lock(search_state_mutex_);
+        pondering_ = options.ponder;
+        ponderhit_ = false;
+        suppress_bestmove_ = false;
+    }
+    const int resign_value = resign_value_;
+    searching_.store(true);
+
+    search_thread_ = std::thread(
+        [this, snapshot, options, resign_value]() mutable {
+            const SearchResult result = search_.find_best_move(
+                snapshot, options, stop_requested_,
+                [&amp;](const SearchInfo&amp; info) { print_info(info); });
+
+            // Ponder 待機処理
+            bool emit_bestmove = true;
+            {
+                std::unique_lock&lt;std::mutex&gt; lock(search_state_mutex_);
+                if (options.ponder &amp;&amp; !stop_requested_.load()
+                    &amp;&amp; !ponderhit_ &amp;&amp; !suppress_bestmove_) {
+                    search_state_cv_.wait(lock, [this]() {
+                        return stop_requested_.load()
+                            || ponderhit_ || suppress_bestmove_;
+                    });
+                }
+                emit_bestmove = !suppress_bestmove_;
+                pondering_ = false;
+                ponderhit_ = false;
+            }
+
+            if (emit_bestmove) {
+                report_bestmove(result, snapshot, resign_value);
+            }
+
+            searching_.store(false);
+            search_state_cv_.notify_all();
+        });
+}</code></pre>
+
+<p>
+探索は専用のスレッド（<code>search_thread_</code>）で実行されます。
+メインスレッドは <code>start_search()</code> を呼んだ後すぐに制御を返し、
+次のコマンド（<code>stop</code> や <code>ponderhit</code>）を受け付けられる状態になります。
+局面のスナップショットをコピーしてスレッドに渡すことで、
+探索中にメインスレッドが <code>position_</code> を変更しても問題が起きません。
+</p>
+
+<h3>14.8.2 stop_search() — 停止と結果取得</h3>
+
+<pre><code>void UsiEngine::stop_search(bool report_bestmove) {
+    {
+        std::lock_guard&lt;std::mutex&gt; lock(search_state_mutex_);
+        suppress_bestmove_ = !report_bestmove;
+    }
+    stop_requested_.store(true);
+    search_state_cv_.notify_all();
+    if (search_thread_.joinable()) {
+        search_thread_.join();
+    }
+    searching_.store(false);
+    std::lock_guard&lt;std::mutex&gt; lock(search_state_mutex_);
+    pondering_ = false;
+    ponderhit_ = false;
+    suppress_bestmove_ = false;
+}</code></pre>
+
+<p>
+<code>stop_requested_</code> を <code>true</code> にして探索の中断を要求し、
+<code>search_state_cv_</code> を通知して Ponder 待機中のスレッドを起こします。
+<code>join()</code> でスレッドの完了を待ちます。
+引数 <code>report_bestmove</code> が <code>true</code>（<code>stop</code> コマンド由来）の場合は
+<code>bestmove</code> を出力し、<code>false</code>（内部呼び出し）の場合は抑制します。
+</p>
+
+<!-- ============================================================ -->
+<h2>14.9 Ponder モード</h2>
+
+<p>
+Ponder（先読み）は、相手の思考中にエンジンが予測手に対する探索を進める機能です。
+</p>
+
+<h3>14.9.1 go ponder — bestmove を保留</h3>
+
+<p>
+<code>go ponder</code> を受信すると <code>options.ponder = true</code> となり、
+探索完了後に <code>bestmove</code> の出力を保留します。
+スレッドは <code>condition_variable</code> の <code>wait()</code> でブロックされます。
+</p>
+
+<h3>14.9.2 ponderhit — 通常探索に復帰</h3>
+
+<p>
+相手が予測通りの手を指した場合、GUI は <code>ponderhit</code> を送信します。
+</p>
+
+<pre><code>if (line == "ponderhit") {
+    std::lock_guard&lt;std::mutex&gt; lock(search_state_mutex_);
+    if (pondering_) {
+        ponderhit_ = true;
+        search_state_cv_.notify_all();
+    }
+    return;
+}</code></pre>
+
+<p>
+<code>ponderhit_</code> フラグを立てて条件変数を通知することで、
+待機中のスレッドが起きて <code>bestmove</code> を出力します。
+</p>
+
+<h3>14.9.3 stop — 即座に bestmove 返却</h3>
+
+<p>
+予測が外れた場合は <code>stop</code> が送られます。
+<code>stop_search(true)</code> により探索を中断し、その時点での最善手を <code>bestmove</code> として返します。
+</p>
+
+<!-- ============================================================ -->
+<h2>14.10 report_bestmove() と print_info()</h2>
+
+<h3>report_bestmove()</h3>
+
+<pre><code>void UsiEngine::report_bestmove(const SearchResult&amp; result,
+                                const Position&amp; snapshot,
+                                int resign_value) const {
+    if (result.terminal.outcome == TerminalOutcome::Win &amp;&amp;
+        result.terminal.reason == TerminalReason::DeclarationWin) {
+        std::cout &lt;&lt; "bestmove win" &lt;&lt; std::endl;
+        return;
+    }
+    if (result.terminal.is_terminal()) {
+        std::cout &lt;&lt; "info string terminal "
+                  &lt;&lt; terminal_reason_text(result.terminal) &lt;&lt; " "
+                  &lt;&lt; terminal_outcome_text(result.terminal) &lt;&lt; std::endl;
+        std::cout &lt;&lt; "bestmove resign" &lt;&lt; std::endl;
+        return;
+    }
+    if (!result.has_best_move || result.score_cp &lt;= -resign_value) {
+        std::cout &lt;&lt; "bestmove resign" &lt;&lt; std::endl;
+        return;
+    }
+
+    std::cout &lt;&lt; "bestmove " &lt;&lt; snapshot.move_to_usi(result.best_move);
+    if (usi_ponder_.load()) {
+        const std::string ponder = extract_ponder_move(result.pv);
+        if (!ponder.empty()) {
+            std::cout &lt;&lt; " ponder " &lt;&lt; ponder;
+        }
+    }
+    std::cout &lt;&lt; std::endl;
+}</code></pre>
+
+<p>
+結果の出力は以下の優先順位で処理されます。
+</p>
+
+<ol>
+  <li>入玉宣言勝ちなら <code>bestmove win</code>。</li>
+  <li>その他の終局（千日手、持将棋など）なら理由を <code>info string</code> で出力後、<code>bestmove resign</code>。</li>
+  <li>最善手がないか評価値が投了閾値以下なら <code>bestmove resign</code>。</li>
+  <li>通常時は <code>bestmove &lt;手&gt;</code> を出力。USI_Ponder が有効なら PV の 2 手目を <code>ponder</code> として付加。</li>
+</ol>
+
+<h3>print_info()</h3>
+
+<pre><code>void UsiEngine::print_info(const SearchInfo&amp; info) const {
+    std::cout &lt;&lt; "info depth " &lt;&lt; info.depth;
+    if (info.show_multipv) {
+        std::cout &lt;&lt; " multipv " &lt;&lt; info.multipv;
+    }
+    std::cout &lt;&lt; " score cp " &lt;&lt; info.score_cp
+              &lt;&lt; " nodes " &lt;&lt; info.nodes
+              &lt;&lt; " time " &lt;&lt; info.elapsed_ms
+              &lt;&lt; " nps " &lt;&lt; compute_nps(info.nodes, info.elapsed_ms)
+              &lt;&lt; " pv " &lt;&lt; info.pv &lt;&lt; std::endl;
+}</code></pre>
+
+<p>
+探索の各反復で呼ばれるコールバックです。
+深さ、評価値、ノード数、経過時間、NPS、PV（最善応手列）を出力します。
+MultiPV モードでは <code>multipv</code> フィールドも付加されます。
+</p>
+
+<!-- ============================================================ -->
+<h2>14.11 MultiPV 対応</h2>
+
+<p>
+MultiPV は、1 つの局面に対して複数の候補手とその評価を表示する機能です。
+<code>MultiPV</code> オプションで数を指定すると、
+探索エンジンが上位 N 手それぞれの PV と評価値を <code>info</code> 行で出力します。
+各行に <code>multipv 1</code>, <code>multipv 2</code>, ... のように順位が付きます。
+これは GUI の検討モードで特に有用です。
+</p>
+
+<!-- ============================================================ -->
+<h2>14.12 bench と perft の実装概要</h2>
+
+<h3>bench — ベンチマーク</h3>
+
+<p>
+<code>bench</code> コマンドは組み込みの 6 局面（初期局面、角交換型など）に対して探索を実行し、
+合計ノード数・NPS・置換表使用率を集計します。
+</p>
+
+<pre><code>bench depth 5      // 深さ5で探索
+bench nodes 10000  // 10000ノードで探索
+bench current      // 現在の局面のみ</code></pre>
+
+<h3>perft — 合法手生成の検証</h3>
+
+<p>
+<code>perft</code> コマンドは指定深さまでの全合法手を列挙し、
+ノード数・取る手・成り・王手・詰みの件数を集計します。
+<code>divide</code> オプションでルート手ごとの内訳を表示でき、
+既知の正解値との比較で合法手生成のバグを検出できます。
+</p>
+
+  <div class="chapter-nav">
+    <span><a href="chapter13.html">&larr; 前章</a></span>
+    <span><a href="chapter15.html">次章 &rarr;</a></span>
+  </div>
+</div>
+</body>
+</html>

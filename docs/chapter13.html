@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第13章 定跡 — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
+    <nav><a href="index.html">目次</a></nav>
+  </div>
+</header>
+<div class="wrapper">
+
+<h1>第13章 定跡</h1>
+
+<p>
+将棋エンジンが序盤の数手を毎回ゼロから探索するのは非効率です。
+人間の棋士が定跡を暗記するように、エンジンもあらかじめ用意された「定跡データベース」を参照して、
+序盤の指し手を高速かつ高精度に決定できます。
+本章では、Hayanagi が採用する定跡機能の仕組みを詳しく見ていきます。
+</p>
+
+<!-- ============================================================ -->
+<h2>13.1 定跡（Opening Book）とは何か</h2>
+
+<p>
+定跡とは、序盤のある局面に対して「この手を指すべき」という情報をまとめたデータベースです。
+プロ棋士の棋譜や強力なエンジンの自己対局結果から構築されます。
+定跡を利用することで、探索を省略して即座に最善手を返すことができ、
+序盤の時間消費を大幅に削減できます。
+</p>
+
+<p>
+Hayanagi では、やねうら王が採用する <strong>YANEURAOU-DB2016 フォーマット</strong>の定跡ファイルを読み込みます。
+これは広く普及しているフォーマットで、多くの定跡ファイルがこの形式で配布されています。
+</p>
+
+<!-- ============================================================ -->
+<h2>13.2 やねうら王 DB2016 フォーマットの構造</h2>
+
+<p>
+定跡ファイルはテキスト形式で、以下のような構造を持ちます。
+</p>
+
+<pre><code>#YANEURAOU-DB2016 1.00
+sfen lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1
+7g7f 3c3d 50 16 12345
+2g2f 8c8d 30 14 9876
+sfen lnsgkgsnl/1r5b1/ppppppppp/9/9/2P6/PP1PPPPPP/1B5R1/LNSGKGSNL w - 2
+3c3d 8h2b+ 40 12 5432</code></pre>
+
+<p>構成要素は次の通りです。</p>
+
+<ul>
+  <li><strong>ヘッダ行</strong> — <code>#YANEURAOU-DB2016 1.00</code> のようにバージョン情報を示します。<code>#</code> で始まる行はコメントとして読み飛ばされます。</li>
+  <li><strong>SFEN 行</strong> — <code>sfen ...</code> で始まり、局面を SFEN 文字列で記述します。以降の手エントリがこの局面に紐付きます。</li>
+  <li><strong>手のエントリ</strong> — スペース区切りで 5 つのフィールドを持ちます。
+    <ul>
+      <li><code>best_move</code> — その局面での最善手（USI 形式）</li>
+      <li><code>ponder_move</code> — 相手の予測応手（<code>none</code> の場合もある）</li>
+      <li><code>score</code> — 評価値（cp 単位）</li>
+      <li><code>depth</code> — 探索深さ</li>
+      <li><code>count</code> — 出現回数や学習回数</li>
+    </ul>
+  </li>
+</ul>
+
+<p>
+1 つの SFEN に対して複数の手エントリが存在できます。
+Hayanagi は現在、先頭のエントリ（最も優先度の高い手）を採用します。
+</p>
+
+<!-- ============================================================ -->
+<h2>13.3 BookEntry 構造体</h2>
+
+<p>
+定跡の 1 エントリは <code>BookEntry</code> 構造体で表現されます（<code>book.h</code>）。
+</p>
+
+<pre><code>struct BookEntry {
+    std::string best_move;
+    std::string ponder_move;
+    int score = 0;
+    int depth = 0;
+    int count = 0;
+};</code></pre>
+
+<p>
+フォーマットの 5 フィールドがそのままメンバに対応しています。
+手は USI 文字列のまま保持し、エンジンに渡す際にそのまま出力できるようにしています。
+</p>
+
+<!-- ============================================================ -->
+<h2>13.4 Book クラス</h2>
+
+<p>
+定跡全体を管理するのが <code>Book</code> クラスです（<code>book.h</code>）。
+</p>
+
+<pre><code>class Book {
+public:
+    bool load(const std::string&amp; path);
+    bool is_loaded() const { return loaded_; }
+    const std::vector&lt;BookEntry&gt;* lookup(const std::string&amp; sfen) const;
+
+private:
+    std::unordered_map&lt;std::string, std::vector&lt;BookEntry&gt;&gt; entries_;
+    bool loaded_ = false;
+};</code></pre>
+
+<p>
+内部データ構造は <code>std::unordered_map</code> で、SFEN 文字列をキーとして
+<code>BookEntry</code> のベクタを値として保持します。
+ハッシュマップなので、局面の検索は平均 O(1) で完了します。
+</p>
+
+<h3>13.4.1 load() — ファイル読み込みとパース処理</h3>
+
+<p>
+<code>load()</code> メソッドがファイルの読み込みとパースを行います（<code>book.cpp</code>）。
+</p>
+
+<pre><code>bool Book::load(const std::string&amp; path) {
+    entries_.clear();
+    loaded_ = false;
+
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        return false;
+    }
+
+    std::string line;
+    std::string current_sfen;
+
+    while (std::getline(file, line)) {
+        if (!line.empty() &amp;&amp; line.back() == '\r') {
+            line.pop_back();
+        }
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+
+        if (line.rfind("sfen ", 0) == 0) {
+            current_sfen = line.substr(5);
+            continue;
+        }
+
+        if (current_sfen.empty()) {
+            continue;
+        }
+
+        std::istringstream iss(line);
+        BookEntry entry;
+        if (!(iss &gt;&gt; entry.best_move &gt;&gt; entry.ponder_move
+                  &gt;&gt; entry.score &gt;&gt; entry.depth
+                  &gt;&gt; entry.count)) {
+            continue;
+        }
+
+        entries_[current_sfen].push_back(entry);
+    }
+
+    loaded_ = true;
+    return true;
+}</code></pre>
+
+<p>処理の流れは以下の通りです。</p>
+
+<ol>
+  <li>既存データをクリアしてファイルを開く。</li>
+  <li>1 行ずつ読み込みながら、<strong>CRLF 対応</strong>として末尾の <code>\r</code> を除去する。Windows 環境で作成されたファイルでも正しくパースできるようにするためです。</li>
+  <li>空行やコメント行（<code>#</code> 始まり）はスキップする。</li>
+  <li><code>sfen </code> で始まる行は局面キーとして <code>current_sfen</code> に保存する。</li>
+  <li>それ以外の行は手エントリとしてパースし、<code>current_sfen</code> に紐付けて格納する。</li>
+</ol>
+
+<h3>13.4.2 lookup() — SFEN キーによる検索</h3>
+
+<pre><code>const std::vector&lt;BookEntry&gt;* Book::lookup(const std::string&amp; sfen) const {
+    const auto it = entries_.find(sfen);
+    if (it == entries_.end()) {
+        return nullptr;
+    }
+    return &amp;it-&gt;second;
+}</code></pre>
+
+<p>
+SFEN 文字列を受け取り、対応するエントリのベクタへのポインタを返します。
+該当する局面がなければ <code>nullptr</code> を返します。
+ポインタを返すことで、不要なコピーを避けつつ「見つからなかった」ことも表現できます。
+</p>
+
+<!-- ============================================================ -->
+<h2>13.5 エンジンとの統合</h2>
+
+<p>
+定跡機能は <code>UsiEngine</code> クラスを通じてエンジンに統合されています。
+</p>
+
+<h3>13.5.1 関連オプション</h3>
+
+<p><code>usi_engine.h</code> には以下のメンバが定義されています。</p>
+
+<pre><code>Book book_;
+bool usi_own_book_ = true;
+std::string book_dir_ = "book";
+std::string book_file_ = "standard_book.db";
+bool book_loaded_ = false;</code></pre>
+
+<p>
+USI の <code>setoption</code> コマンドで以下のオプションを設定できます。
+</p>
+
+<ul>
+  <li><strong>USI_OwnBook</strong> — 定跡を使用するかどうか（デフォルト: <code>true</code>）</li>
+  <li><strong>BookDir</strong> — 定跡ファイルのディレクトリ（デフォルト: <code>book</code>）</li>
+  <li><strong>BookFile</strong> — 定跡ファイル名（デフォルト: <code>standard_book.db</code>、<code>no_book</code> で無効化）</li>
+</ul>
+
+<h3>13.5.2 isready 時の読み込み</h3>
+
+<p>
+定跡ファイルの読み込みは <code>isready</code> コマンド受信時に行われます。
+</p>
+
+<pre><code>if (line == "isready") {
+    if (!book_loaded_ &amp;&amp; usi_own_book_ &amp;&amp; book_file_ != "no_book") {
+        namespace fs = std::filesystem;
+        fs::path book_path;
+        fs::path dir(book_dir_);
+        if (dir.is_absolute()) {
+            book_path = dir / book_file_;
+        } else {
+            auto exe_dir = fs::path("/proc/self/exe");
+            std::error_code ec;
+            auto resolved = fs::read_symlink(exe_dir, ec);
+            if (!ec) {
+                book_path = resolved.parent_path() / dir / book_file_;
+            } else {
+                book_path = dir / book_file_;
+            }
+        }
+        if (book_.load(book_path.string())) {
+            std::cout &lt;&lt; "info string book loaded " &lt;&lt; book_path.string() &lt;&lt; std::endl;
+        } else {
+            std::cout &lt;&lt; "info string book not found " &lt;&lt; book_path.string() &lt;&lt; std::endl;
+        }
+        book_loaded_ = true;
+    }
+    std::cout &lt;&lt; "readyok" &lt;&lt; std::endl;
+}</code></pre>
+
+<p>
+パスの解決では、<code>BookDir</code> が相対パスの場合は実行ファイルの場所を基準にします。
+Linux 環境では <code>/proc/self/exe</code> のシンボリックリンクを辿って実行ファイルのディレクトリを取得しています。
+読み込み結果は <code>info string</code> で GUI に通知されます。
+</p>
+
+<h3>13.5.3 go 時の定跡参照フロー</h3>
+
+<p>
+<code>start_search()</code> の冒頭で定跡を参照します。
+</p>
+
+<pre><code>if (usi_own_book_ &amp;&amp; book_.is_loaded() &amp;&amp; !options.ponder) {
+    const std::string sfen = snapshot.to_sfen();
+    const auto* entries = book_.lookup(sfen);
+    if (entries &amp;&amp; !entries-&gt;empty()) {
+        const BookEntry&amp; entry = (*entries)[0];
+        std::cout &lt;&lt; "info string book hit " &lt;&lt; entry.best_move
+                  &lt;&lt; " score " &lt;&lt; entry.score
+                  &lt;&lt; " depth " &lt;&lt; entry.depth
+                  &lt;&lt; " count " &lt;&lt; entry.count &lt;&lt; std::endl;
+        std::cout &lt;&lt; "bestmove " &lt;&lt; entry.best_move;
+        if (usi_ponder_.load() &amp;&amp; entry.ponder_move != "none") {
+            std::cout &lt;&lt; " ponder " &lt;&lt; entry.ponder_move;
+        }
+        std::cout &lt;&lt; std::endl;
+        return;
+    }
+}</code></pre>
+
+<p>フローを整理すると以下のようになります。</p>
+
+<ol>
+  <li><code>usi_own_book_</code> が有効かつ定跡がロード済みで、ponder 探索でないことを確認する。</li>
+  <li>現在の局面を <code>to_sfen()</code> で SFEN 文字列に変換し、定跡を検索する。</li>
+  <li>ヒットした場合、先頭エントリの <code>best_move</code> を即座に <code>bestmove</code> として返す。</li>
+  <li>USI_Ponder が有効で <code>ponder_move</code> が <code>none</code> でなければ、<code>ponder</code> 指定も付与する。</li>
+  <li>定跡にヒットしなかった場合は、通常の探索に進む。</li>
+</ol>
+
+<p>
+このように、定跡参照は探索の前段階で行われ、ヒットすれば探索を完全にスキップします。
+序盤の時間節約と安定した指し手の選択を両立する仕組みです。
+</p>
+
+  <div class="chapter-nav">
+    <span><a href="chapter12.html">&larr; 前章</a></span>
+    <span><a href="chapter14.html">次章 &rarr;</a></span>
+  </div>
+</div>
+</body>
+</html>

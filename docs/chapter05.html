@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第5章 攻撃テーブルと利き計算 — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
+    <nav><a href="index.html">目次</a></nav>
+  </div>
+</header>
+<div class="wrapper">
+
+<h1>第5章 攻撃テーブルと利き計算</h1>
+
+<p>
+前章で局面データの管理方法を学びました。本章では、そのデータを使って
+「ある駒はどのマスに利いているか」「あるマスにはどの駒が利いているか」を
+高速に求める仕組みを解説します。
+利き計算は合法手生成、王手判定、ピン計算など、エンジンのあらゆる場面で使われる基盤技術です。
+</p>
+
+<!-- ======================================== -->
+<h2>5.1 Tables 構造体の全体像</h2>
+
+<p>
+Hayanagi は起動時に事前計算テーブルを構築し、以降はそれを参照するだけで利き計算を行います。
+テーブルは匿名名前空間内の <code>Tables</code> 構造体にまとめられています。
+</p>
+
+<pre><code>struct Tables {
+    Bitboard all_squares;
+
+    // 単一マスビットボード
+    std::array&lt;Bitboard, kSquareCount&gt; square_bb{};
+
+    // 筋ビットボード
+    std::array&lt;Bitboard, kBoardSize&gt; file_bb{};
+
+    // ステップ型駒の利き（色別×駒種別×マス）
+    std::array&lt;std::array&lt;std::array&lt;Bitboard, kSquareCount&gt;, 15&gt;, 2&gt; step_from{};
+    std::array&lt;std::array&lt;std::array&lt;Bitboard, kSquareCount&gt;, 15&gt;, 2&gt; step_to{};
+
+    // レイ（8方向の直線）
+    std::array&lt;std::array&lt;Bitboard, 8&gt;, kSquareCount&gt; rays{};
+    std::array&lt;std::array&lt;std::array&lt;int, 8&gt;, 8&gt;, kSquareCount&gt; ray_squares{};
+    std::array&lt;std::array&lt;int, 8&gt;, kSquareCount&gt; ray_lengths{};
+
+    // 2マス間のマス集合
+    std::array&lt;std::array&lt;Bitboard, kSquareCount&gt;, kSquareCount&gt; between{};
+};</code></pre>
+
+<p>
+テーブルのインスタンスは <code>static</code> ローカル変数で保持され、初回アクセス時に一度だけ構築されます。
+</p>
+
+<pre><code>const Tables&amp; tables() {
+    static const Tables instance = build_tables();
+    return instance;
+}</code></pre>
+
+<!-- ======================================== -->
+<h2>5.2 build_tables() による事前計算</h2>
+
+<p>
+<code>build_tables()</code> は以下の順序でテーブルを構築します:
+</p>
+<ol>
+  <li><code>square_bb</code> と <code>file_bb</code> の初期化</li>
+  <li>8方向のレイ（<code>rays</code> / <code>ray_squares</code> / <code>ray_lengths</code>）の構築</li>
+  <li><code>between</code> テーブルの構築</li>
+  <li>ステップ型駒の利きテーブル（<code>step_from</code> / <code>step_to</code>）の構築</li>
+</ol>
+
+<!-- ======================================== -->
+<h2>5.3 square_bb[81] — 単一マスビットボード</h2>
+
+<p>
+<code>square_bb[sq]</code> はマス <code>sq</code> のビットだけが立ったビットボードです。
+集合演算でマスを追加・テストする際に使います。
+</p>
+
+<pre><code>for (int square = 0; square &lt; kSquareCount; ++square) {
+    tables.square_bb[square].set(square);
+    tables.all_squares.set(square);
+    tables.file_bb[square_col(square)].set(square);
+}</code></pre>
+
+<p>
+同じループで <code>all_squares</code>（全81マスのビットボード）と <code>file_bb</code> も初期化しています。
+</p>
+
+<!-- ======================================== -->
+<h2>5.4 file_bb[9] — 筋ビットボード</h2>
+
+<p>
+<code>file_bb[col]</code> は指定した筋（col = 0..8）に属する全9マスのビットボードです。
+主に<strong>二歩判定</strong>で使われます。歩の駒打ち時に、
+打とうとしている筋に既に自分の歩があるかをビットボードの AND で瞬時に判定できます。
+</p>
+
+<pre><code>// 二歩判定の例（add_drop_moves 内）
+if (piece == PieceType::Pawn &amp;&amp;
+    (piece_bb_[color][static_cast&lt;int&gt;(PieceType::Pawn)] &amp; t.file_bb[file]).any()) {
+    targets &amp;= ~t.file_bb[file];  // その筋を候補から除外
+}</code></pre>
+
+<!-- ======================================== -->
+<h2>5.5 step_from / step_to — ステップ型駒の利きテーブル</h2>
+
+<p>
+将棋の駒は大きく2種類に分かれます:
+</p>
+<ul>
+  <li><strong>ステップ型</strong> — 1マス（または桂馬のように決まったオフセット）だけ動く駒。歩、桂、銀、金、玉、全成駒。</li>
+  <li><strong>スライダー型</strong> — 盤面の端か他の駒にぶつかるまで直線的に進む駒。香、角、飛。馬・龍はスライダー+ステップの複合。</li>
+</ul>
+
+<p>
+ステップ型の利きは盤上の駒配置に依存しないため、完全に事前計算できます。
+</p>
+
+<h3>step_from と step_to の違い</h3>
+<ul>
+  <li><code>step_from[color][type][sq]</code> — マス <code>sq</code> にいる駒が<strong>利いているマス</strong>の集合</li>
+  <li><code>step_to[color][type][sq]</code> — マス <code>sq</code> に<strong>利いている駒がいうるマス</strong>の集合（逆引き）</li>
+</ul>
+
+<p>
+<code>step_to</code> は「あるマスに利いている駒を探す」<code>attackers_to()</code> で使います。
+<code>step_from</code> は「ある駒が動ける先を求める」<code>attacks_from()</code> で使います。
+</p>
+
+<h3>テーブル構築の実装</h3>
+<pre><code>void add_step_attack(Tables&amp; tables, Color color, PieceType type,
+                     int square, int row_delta, int col_delta) {
+    const int sign = orientation(color);     // Black=+1, White=-1
+    const int row = square_row(square) + row_delta * sign;
+    const int col = square_col(square) + col_delta * sign;
+    if (!is_on_board(row, col)) return;
+    const int to = make_square(row, col);
+    tables.step_from[static_cast&lt;int&gt;(color)]
+                    [static_cast&lt;int&gt;(type)][square].set(to);
+    tables.step_to[static_cast&lt;int&gt;(color)]
+                  [static_cast&lt;int&gt;(type)][to].set(square);
+}</code></pre>
+
+<p>
+<code>orientation()</code> は先手なら <code>+1</code>、後手なら <code>-1</code> を返します。
+これにより、歩の「前方」が先手では北（row が減る方向）、後手では南（row が増える方向）になります。
+1つの関数呼び出しで <code>step_from</code> と <code>step_to</code> の両方が同時にセットされる点が効率的です。
+</p>
+
+<h3>各駒種の移動パターン</h3>
+<pre><code>static constexpr int kPawn[][2]   = {{-1, 0}};
+static constexpr int kKnight[][2] = {{-2, -1}, {-2, 1}};
+static constexpr int kSilver[][2] = {{-1, -1}, {-1, 0}, {-1, 1},
+                                     {1, -1}, {1, 1}};
+static constexpr int kGold[][2]   = {{-1, -1}, {-1, 0}, {-1, 1},
+                                     {0, -1}, {0, 1}, {1, 0}};</code></pre>
+
+<p>
+これらのデルタ値は先手基準で定義され、<code>orientation()</code> の符号で後手の方向に反転されます。
+成駒（と金・成香・成桂・成銀）はすべて金と同じ動きなので、同じデルタテーブルを共有します。
+</p>
+
+<pre><code>for (const auto&amp; delta : kGold) {
+    add_step_attack(tables, color, PieceType::Gold, square, delta[0], delta[1]);
+    add_step_attack(tables, color, PieceType::ProPawn, square, delta[0], delta[1]);
+    add_step_attack(tables, color, PieceType::ProLance, square, delta[0], delta[1]);
+    add_step_attack(tables, color, PieceType::ProKnight, square, delta[0], delta[1]);
+    add_step_attack(tables, color, PieceType::ProSilver, square, delta[0], delta[1]);
+}</code></pre>
+
+<p>
+玉は8方向すべてに1マス動けます。馬は角のスライダー利きに加えて十字方向のステップ利きを持ち、
+龍は飛のスライダー利きに加えて斜め方向のステップ利きを持ちます。
+</p>
+
+<pre><code>// 玉: 8方向すべて
+for (const auto&amp; delta : kStepDirections) {
+    add_step_attack(tables, color, PieceType::King, square, delta[0], delta[1]);
+}
+// 馬: 十字方向のステップ（斜めスライダーは別途計算）
+for (const auto&amp; delta : kRookStep) {
+    add_step_attack(tables, color, PieceType::Horse, square, delta[0], delta[1]);
+}
+// 龍: 斜め方向のステップ（十字スライダーは別途計算）
+for (const auto&amp; delta : kBishopStep) {
+    add_step_attack(tables, color, PieceType::Dragon, square, delta[0], delta[1]);
+}</code></pre>
+
+<!-- ======================================== -->
+<h2>5.6 rays / ray_squares / ray_lengths — レイ</h2>
+
+<p>
+スライダー型駒の利きを計算するためには、各マスから8方向に伸びる「レイ（光線）」の情報が必要です。
+</p>
+
+<pre><code>// 8方向の定義
+enum Direction : int {
+    North = 0, South = 1, West = 2, East = 3,
+    NorthWest = 4, NorthEast = 5, SouthWest = 6, SouthEast = 7,
+};
+constexpr std::array&lt;int, 8&gt; kDirRow = {-1, 1, 0, 0, -1, -1, 1, 1};
+constexpr std::array&lt;int, 8&gt; kDirCol = {0, 0, -1, 1, -1, 1, -1, 1};</code></pre>
+
+<p>3つの配列の役割:</p>
+<ul>
+  <li><code>rays[sq][dir]</code> — マス <code>sq</code> から方向 <code>dir</code> に伸びる全マスのビットボード</li>
+  <li><code>ray_squares[sq][dir][i]</code> — 同じレイの i 番目のマス番号（近い順）</li>
+  <li><code>ray_lengths[sq][dir]</code> — レイ上のマス数</li>
+</ul>
+
+<pre><code>for (int square = 0; square &lt; kSquareCount; ++square) {
+    const int row = square_row(square);
+    const int col = square_col(square);
+    for (int dir = 0; dir &lt; 8; ++dir) {
+        int next_row = row + kDirRow[dir];
+        int next_col = col + kDirCol[dir];
+        int length = 0;
+        while (is_on_board(next_row, next_col)) {
+            const int to = make_square(next_row, next_col);
+            tables.rays[square][dir].set(to);
+            tables.ray_squares[square][dir][length++] = to;
+            next_row += kDirRow[dir];
+            next_col += kDirCol[dir];
+        }
+        tables.ray_lengths[square][dir] = length;
+    }
+}</code></pre>
+
+<p>下図は 5五（square=40）からの各方向レイの概念図です:</p>
+<pre>
+    9   8   7   6   5   4   3   2   1
+  +---+---+---+---+---+---+---+---+---+
+a | . | . | . | . | N | . | . | . | NE|  ← North, NorthEast
+  +---+---+---+---+---+---+---+---+---+
+b | . | . | . | . | N | . | . | NE| . |
+  +---+---+---+---+---+---+---+---+---+
+c | . | . | . | . | N | . | NE| . | . |
+  +---+---+---+---+---+---+---+---+---+
+d | . | . | . | . | N | NE| . | . | . |
+  +---+---+---+---+---+---+---+---+---+
+e | W | W | W | W |[*]| E | E | E | E |  ← West, East
+  +---+---+---+---+---+---+---+---+---+
+f | . | . | . | . | S | SW| . | . | . |
+  +---+---+---+---+---+---+---+---+---+
+g | . | . | . | . | S | . | SW| . | . |
+  +---+---+---+---+---+---+---+---+---+
+h | . | . | . | . | S | . | . | SW| . |
+  +---+---+---+---+---+---+---+---+---+
+i | . | . | . | . | S | . | . | . | SW|  ← South, SouthWest
+  +---+---+---+---+---+---+---+---+---+
+  [*] = 起点マス（5五）  N=North  E=East  SW=SouthWest ...
+</pre>
+
+<p>
+<code>ray_squares</code> は<strong>起点に近い順</strong>にマスを格納します。
+これはスライダー利き計算で「最初にぶつかる駒」を見つけるために重要です。
+</p>
+
+<!-- ======================================== -->
+<h2>5.7 between テーブル — 2マス間のマス集合</h2>
+
+<p>
+<code>between[from][to]</code> は、マス <code>from</code> と <code>to</code> の間にある全マスのビットボードです
+（<code>from</code> と <code>to</code> 自身は含みません）。
+同一レイ上にないマスの組み合わせでは空のビットボードとなります。
+</p>
+
+<pre><code>for (int from = 0; from &lt; kSquareCount; ++from) {
+    for (int dir = 0; dir &lt; 8; ++dir) {
+        Bitboard between;
+        for (int index = 0; index &lt; tables.ray_lengths[from][dir]; ++index) {
+            const int to = tables.ray_squares[from][dir][index];
+            tables.between[from][to] = between;   // to より手前のマス集合
+            between |= tables.square_bb[to];       // to を追加して次へ
+        }
+    }
+}</code></pre>
+
+<p>
+構築アルゴリズムは巧みです。レイに沿ってマスを順番に訪問し、
+各マスに到達した時点での累積ビットボード（そのマス自身を含まない）を <code>between</code> テーブルに記録します。
+</p>
+
+<p>下図は between の例です:</p>
+<pre>
+  between[1a][1e]  (1筋のaマスとeマスの間)
+
+    9   8   7   6   5   4   3   2   1
+  +---+---+---+---+---+---+---+---+---+
+a | . | . | . | . | . | . | . | . |   |  ← from (含まない)
+  +---+---+---+---+---+---+---+---+---+
+b | . | . | . | . | . | . | . | . | * |  ← between に含まれる
+  +---+---+---+---+---+---+---+---+---+
+c | . | . | . | . | . | . | . | . | * |  ← between に含まれる
+  +---+---+---+---+---+---+---+---+---+
+d | . | . | . | . | . | . | . | . | * |  ← between に含まれる
+  +---+---+---+---+---+---+---+---+---+
+e | . | . | . | . | . | . | . | . |   |  ← to (含まない)
+  +---+---+---+---+---+---+---+---+---+
+</pre>
+
+<p>
+<code>between</code> テーブルの主な用途は2つあります:
+</p>
+<ul>
+  <li><strong>王手の合駒判定</strong> — 王手をかけているスライダーと玉の間に合駒を打てるかを判定</li>
+  <li><strong>ピンライン</strong> — ピンされた駒が動ける範囲を制約する</li>
+</ul>
+
+<!-- ======================================== -->
+<h2>5.8 attacks_from() — 任意の駒の利きビットボード取得</h2>
+
+<p>
+<code>attacks_from()</code> は、指定マスの指定駒種について、
+利いているマスのビットボードを返す統合関数です。
+</p>
+
+<pre><code>Bitboard Position::attacks_from(int from, PieceType type, Color color,
+                                const Bitboard&amp; occupied) const {
+    const auto&amp; t = tables();
+    Bitboard attacks = t.step_from[static_cast&lt;int&gt;(color)]
+                                  [static_cast&lt;int&gt;(type)][from];
+    switch (type) {
+        case PieceType::Lance:
+            return attacks | lance_attacks(from, color, occupied);
+        case PieceType::Bishop:
+            return attacks | bishop_attacks(from, occupied);
+        case PieceType::Rook:
+            return attacks | rook_attacks(from, occupied);
+        case PieceType::Horse:
+            return attacks | bishop_attacks(from, occupied);
+        case PieceType::Dragon:
+            return attacks | rook_attacks(from, occupied);
+        default:
+            return attacks;
+    }
+}</code></pre>
+
+<p>
+まずステップ型の利きを事前計算テーブルから取得し、スライダー型の駒であればスライダー利きを追加します。
+馬は角のスライダー利き + 十字ステップ利き、龍は飛のスライダー利き + 斜めステップ利きです。
+純粋なステップ型駒（歩、桂、銀、金、玉、成駒）はテーブル参照のみで完結します。
+</p>
+
+<!-- ======================================== -->
+<h2>5.9 rook_attacks(), bishop_attacks(), lance_attacks()</h2>
+
+<p>
+スライダー型駒の利きは、盤上の他の駒（occupied ビットボード）に依存するため、
+実行時に計算する必要があります。
+</p>
+
+<p>
+3つの関数はすべて <code>ray_attacks_from()</code> に処理を委譲しています。
+</p>
+
+<pre><code>Bitboard Position::rook_attacks(int from, const Bitboard&amp; occupied) const {
+    return ray_attacks_from(from, occupied, {North, South, West, East});
+}
+
+Bitboard Position::bishop_attacks(int from, const Bitboard&amp; occupied) const {
+    return ray_attacks_from(from, occupied,
+                            {NorthWest, NorthEast, SouthWest, SouthEast});
+}
+
+Bitboard Position::lance_attacks(int from, Color color,
+                                 const Bitboard&amp; occupied) const {
+    return ray_attacks_from(from, occupied,
+                            {color == Color::Black ? North : South});
+}</code></pre>
+
+<h3>ray_attacks_from() の実装</h3>
+
+<pre><code>Bitboard ray_attacks_from(int from, const Bitboard&amp; occupied,
+                          const std::initializer_list&lt;int&gt;&amp; directions) {
+    const auto&amp; t = tables();
+    Bitboard attacks;
+    for (const int dir : directions) {
+        for (int index = 0; index &lt; t.ray_lengths[from][dir]; ++index) {
+            const int to = t.ray_squares[from][dir][index];
+            attacks.set(to);
+            if (occupied.test(to)) {
+                break;  // 駒にぶつかったらこの方向は終了
+            }
+        }
+    }
+    return attacks;
+}</code></pre>
+
+<p>
+各方向について、起点から順に <code>ray_squares</code> を辿り、マスを利き集合に追加していきます。
+駒が存在するマス（<code>occupied</code> にビットが立っているマス）に到達したら、
+そのマスまで利きに含めて（駒を取れる）、それ以降は遮られるため打ち切ります。
+</p>
+
+<!-- ======================================== -->
+<h2>5.10 attackers_to() — あるマスへの全攻撃駒</h2>
+
+<p>
+<code>attackers_to(square, by)</code> は、色 <code>by</code> の駒のうち、マス <code>square</code> に利いている駒の集合を返します。
+王手判定やピン計算の基礎となる重要な関数です。
+</p>
+
+<pre><code>Bitboard Position::attackers_to(int square, Color by) const {
+    const auto&amp; t = tables();
+    const int color_index = static_cast&lt;int&gt;(by);
+    Bitboard attackers;
+
+    // ステップ型: 逆引きテーブルで候補を特定し、実際の駒種と AND
+    attackers |= piece_bb_[color_index][static_cast&lt;int&gt;(PieceType::Pawn)]
+              &amp;  t.step_to[color_index][static_cast&lt;int&gt;(PieceType::Pawn)][square];
+    attackers |= piece_bb_[color_index][static_cast&lt;int&gt;(PieceType::Knight)]
+              &amp;  t.step_to[color_index][static_cast&lt;int&gt;(PieceType::Knight)][square];
+    attackers |= piece_bb_[color_index][static_cast&lt;int&gt;(PieceType::Silver)]
+              &amp;  t.step_to[color_index][static_cast&lt;int&gt;(PieceType::Silver)][square];
+    // ... Gold, King, ProPawn, ProLance, ProKnight, ProSilver, Horse, Dragon
+
+    // スライダー型: 8方向にレイを飛ばし、最初の駒がスライダーか確認
+    for (int dir = 0; dir &lt; 8; ++dir) {
+        for (int index = 0; index &lt; t.ray_lengths[square][dir]; ++index) {
+            const int from = t.ray_squares[square][dir][index];
+            const int piece = board_[from];
+            if (is_empty(piece)) continue;
+            if (piece_color(piece) == by &amp;&amp;
+                is_slider_for_direction(piece_type(piece), by, dir)) {
+                attackers.set(from);
+            }
+            break;  // 最初の駒で判定終了
+        }
+    }
+
+    return attackers;
+}</code></pre>
+
+<p>
+ステップ型の攻撃者は <code>step_to</code>（逆引きテーブル）と <code>piece_bb_</code> の AND で求めます。
+たとえば「5五に利いている先手の歩」は、<code>step_to[Black][Pawn][5五]</code>（5五に歩の利きが届くマスの集合）と
+<code>piece_bb_[Black][Pawn]</code>（先手の歩の位置集合）の AND で一発です。
+</p>
+
+<p>
+スライダー型の攻撃者はレイを辿って判定します。対象マスから各方向に伸ばし、
+最初にぶつかった駒がその方向のスライダーであれば攻撃者に追加します。
+</p>
+
+<h3>is_slider_for_direction()</h3>
+<p>
+特定の方向にスライドできる駒かを判定する補助関数です。
+</p>
+
+<pre><code>bool is_slider_for_direction(PieceType type, Color color, int direction) {
+    switch (direction) {
+        case North: case South: case West: case East:
+            if (type == PieceType::Rook || type == PieceType::Dragon)
+                return true;
+            if (type == PieceType::Lance)
+                return direction == (color == Color::Black ? South : North);
+            return false;
+        case NorthWest: case NorthEast: case SouthWest: case SouthEast:
+            return type == PieceType::Bishop || type == PieceType::Horse;
+        default:
+            return false;
+    }
+}</code></pre>
+
+<p>
+注意点として、レイの方向は<strong>対象マスから外向き</strong>に定義されています。
+つまり、対象マスから South 方向に飛車がいれば、その飛車は North 方向に利いて対象マスを攻撃しています。
+しかし <code>is_slider_for_direction</code> では方向を<strong>レイの方向そのまま</strong>で判定しているため、
+飛車が North/South/West/East のいずれかの方向のレイ上にあれば攻撃者とみなす、
+という対称性を利用しています（飛車は縦横いずれにも動けるため）。
+香の場合だけは方向が非対称なので、先手は South 方向（対象マスの南側に先手香があれば北に利く）、
+後手は North 方向で判定します。
+</p>
+
+<!-- ======================================== -->
+<h2>5.11 is_square_attacked_after_move() — 移動後の被攻撃判定</h2>
+
+<p>
+「ある手を指した後に、特定のマスが攻撃されているか」を判定する関数です。
+<code>gives_check()</code>（王手判定）や <code>compute_pins_and_checks()</code> の内部で使われます。
+</p>
+
+<p>
+この関数は実際に手を適用するのではなく、<code>piece_after_move_at()</code> という
+仮想的な駒配置を返すヘルパーを使って、盤面変更なしに判定を行います。
+</p>
+
+<pre><code>int Position::piece_after_move_at(int square, const Move&amp; move,
+                                  Color mover, PieceType moved_type) const {
+    if (!move.drop &amp;&amp; square == move.from) return 0;       // 移動元は空に
+    if (square == move.to) return encode_piece(mover, moved_type); // 移動先は新しい駒
+    return board_[square];                                   // その他は変更なし
+}</code></pre>
+
+<p>
+<code>is_square_attacked_after_move()</code> は <code>attackers_to()</code> と同じ構造ですが、
+<code>board_[]</code> の代わりに <code>piece_after_move_at()</code> で仮想盤面を参照します。
+</p>
+
+<pre><code>bool Position::is_square_attacked_after_move(
+        int square, Color by, const Move&amp; move, PieceType moved_type) const {
+    const auto&amp; t = tables();
+    const int color_index = static_cast&lt;int&gt;(by);
+
+    // ステップ型: step_to の候補を仮想盤面で検証
+    const auto attacks_by_step_piece = [&amp;](PieceType type) {
+        Bitboard candidates =
+            t.step_to[color_index][static_cast&lt;int&gt;(type)][square];
+        while (candidates.any()) {
+            const int from = candidates.pop_lsb();
+            const int piece = piece_after_move_at(from, move, by, moved_type);
+            if (!is_empty(piece) &amp;&amp; piece_color(piece) == by
+                &amp;&amp; piece_type(piece) == type) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    if (attacks_by_step_piece(PieceType::Pawn) ||
+        attacks_by_step_piece(PieceType::Knight) ||
+        // ... 全ステップ型駒を列挙
+        attacks_by_step_piece(PieceType::Dragon)) {
+        return true;
+    }
+
+    // スライダー型: レイを辿って仮想盤面で判定
+    for (int dir = 0; dir &lt; 8; ++dir) {
+        for (int index = 0; index &lt; t.ray_lengths[square][dir]; ++index) {
+            const int from = t.ray_squares[square][dir][index];
+            const int piece = piece_after_move_at(from, move, by, moved_type);
+            if (is_empty(piece)) continue;
+            if (piece_color(piece) == by &amp;&amp;
+                is_slider_for_direction(piece_type(piece), by, dir)) {
+                return true;
+            }
+            break;
+        }
+    }
+
+    return false;
+}</code></pre>
+
+<p>
+この手法により、指し手適用と巻き戻しのコストをかけずに「この手を指したら王手になるか」
+「この手で玉が安全になるか」を高速に判定できます。
+特に合法手生成で大量の候補手を検証する際に有効です。
+</p>
+
+<!-- ======================================== -->
+<h2>5.12 まとめ</h2>
+
+<p>本章で解説した攻撃テーブルと利き計算の全体像を整理します。</p>
+
+<table>
+  <thead>
+    <tr><th>テーブル / 関数</th><th>内容</th><th>主な用途</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>square_bb[81]</code></td><td>単一マスのビットボード</td><td>集合演算の基本部品</td></tr>
+    <tr><td><code>file_bb[9]</code></td><td>筋のビットボード</td><td>二歩判定</td></tr>
+    <tr><td><code>step_from[2][15][81]</code></td><td>ステップ利き（順引き）</td><td>駒の移動先計算</td></tr>
+    <tr><td><code>step_to[2][15][81]</code></td><td>ステップ利き（逆引き）</td><td>あるマスへの攻撃者検索</td></tr>
+    <tr><td><code>rays / ray_squares / ray_lengths</code></td><td>8方向のレイ情報</td><td>スライダー利き計算</td></tr>
+    <tr><td><code>between[81][81]</code></td><td>2マス間のマス集合</td><td>合駒判定・ピンライン</td></tr>
+    <tr><td><code>attacks_from()</code></td><td>任意の駒の利きBB</td><td>移動先生成</td></tr>
+    <tr><td><code>attackers_to()</code></td><td>あるマスへの攻撃者</td><td>王手判定・ピン計算</td></tr>
+    <tr><td><code>is_square_attacked_after_move()</code></td><td>仮想的な移動後の利き判定</td><td>王手回避の合法性検証</td></tr>
+  </tbody>
+</table>
+
+<p>
+これらの事前計算テーブルと利き計算関数を組み合わせることで、
+次章で解説する合法手生成が効率的に実現されます。
+</p>
+
+  <div class="chapter-nav">
+    <span><a href="chapter04.html">&larr; 前章</a></span>
+    <span><a href="chapter06.html">次章 &rarr;</a></span>
+  </div>
+</div>
+</body>
+</html>

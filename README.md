@@ -11,6 +11,7 @@ Hayanagi は、C++17 で実装した USI プロトコル対応の最小構成将
 
 ## 目次
 
+- [コード解説](#コード解説)
 - [動作要件](#動作要件)
 - [ビルド](#ビルド)
 - [実行例](#実行例)
@@ -22,6 +23,18 @@ Hayanagi は、C++17 で実装した USI プロトコル対応の最小構成将
 - [テストとベンチマーク](#テストとベンチマーク)
 - [ディレクトリ構成](#ディレクトリ構成)
 - [バージョンと変更履歴](#バージョンと変更履歴)
+
+## コード解説
+
+[Hayanagi で学ぶ将棋エンジンの仕組み](docs/index.html) は、ソースコードを題材にした全15章のHTML教材です。
+C++の基本文法と将棋のルールを知っている方に向けて、データ表現、ビットボード、局面管理、合法手生成、
+終局判定、探索と評価、並列化、定跡、USIプロトコルを図とコード例で解説しています。
+
+リポジトリを取得し、`docs/index.html` をブラウザーで開いてください。
+HTML・CSS・図版を同梱しているため、ビルドやWebサーバーの起動は不要です。
+
+教材内のコード例や行数には執筆時点の構成が含まれます。最新の実装は [`src/`](src/) を参照してください。
+現在の静的評価処理は [`src/evaluation.cpp`](src/evaluation.cpp) にあり、探索処理から分離しています。
 
 ## 動作要件
 
@@ -43,6 +56,7 @@ cmake --build build
 |---|---|
 | `build/hayanagi` | USI エンジン実行ファイル |
 | `build/libhayanagi_tsume.a` | `Position` と `TsumeSearch` の静的ライブラリ（GUI 組み込み用） |
+| `build/libhayanagi_search.a` | 通常探索と静的評価の静的ライブラリ（本体・単体テストで共有） |
 | `build/hayanagi_tests` | C++ 単体テスト（Hayanagi を最上位でビルドしたときだけ生成） |
 | `build/hayanagi_book_positions` | 定跡生成用の棋譜検査・SFEN変換（`HAYANAGI_BUILD_BOOK_TOOLS` で制御） |
 | `build/hayanagi_match_referee` | 定跡比較対局用の合法手・終局判定（同オプションで制御） |
@@ -785,7 +799,7 @@ Hayanagi では利用者登録用の `register` / `registration` を除いて実
 - 停止要求は毎回確認し、時刻取得は原則 128 ノード間隔です。駒交換評価（SEE）の再計算と、枝刈りに不要な局面評価を省きます。
 - `Hash` オプションでサイズ変更できる lockless 共有置換表、PVS、quiescence search、SEE ベースの着手順序、killer/history heuristic、LMR、null-move pruning を使って探索効率を上げています。
 - 短手数の詰みは専用の王手限定探索で先に検出します。
-- 評価関数は駒得に加え、駒の前進度、利きの広さ、敵陣進出、手駒価値、玉の安全度を見ます。
+- 静的評価は `src/evaluation.cpp` の `evaluate_position()` が担当し、駒得に加え、駒の前進度、利きの広さ、敵陣進出、手駒価値、玉の安全度を見ます。終局判定と確定スコアの値域への制限は `Search` が担当します。
 
 ### `Book`
 
@@ -971,6 +985,8 @@ python3 tests/bench_tsume.py build/hayanagi [--baseline /path/to/previous/hayana
 | `tests/bench_tsume.py` | 詰み探索ベンチマーク |
 | `tests/bench_threads.py` | 通常探索・perft のスレッド数別ベンチマーク |
 | `BENCHMARK.md` | ベンチマークの計測結果 |
+| `docs/index.html`, `docs/chapter*.html` | 将棋エンジンの仕組みを解説するHTML教材（全15章） |
+| `docs/style.css`, `docs/*.png` | 教材のスタイルシートと図版 |
 
 ## バージョンと変更履歴
 

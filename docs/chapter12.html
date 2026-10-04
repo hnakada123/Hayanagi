@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第12章 並列探索 — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
+    <nav><a href="index.html">目次</a></nav>
+  </div>
+</header>
+<div class="wrapper">
+
+<h1>第12章 並列探索</h1>
+
+<p>
+現代のCPUはマルチコアが標準であり、将棋エンジンもこれを活用して探索速度を向上させることが求められます。
+しかし、アルファベータ探索は本質的に逐次的なアルゴリズムであり、単純に並列化できるものではありません。
+本章では、Hayanagiが採用する並列探索の手法と、スレッド間でデータを共有するための仕組みを解説します。
+</p>
+
+<!-- ============================================================ -->
+<h2>12.1 並列探索の動機と課題</h2>
+
+<p>
+探索を並列化する動機は明確です。4コアのCPUであれば理想的には4倍の速度で探索でき、
+同じ持ち時間でより深い読みが可能になります。
+しかし、アルファベータ探索には以下の課題があります。
+</p>
+
+<ul>
+  <li><strong>探索窓の依存性:</strong> アルファベータの枝刈り効率はアルファ・ベータの値に依存する。
+  最善手を最初に調べると枝刈りが最も効率的になるが、並列に手を調べると最善手の情報が他のスレッドに伝わらない。</li>
+  <li><strong>探索オーバーヘッド:</strong> 並列化により、逐次探索では枝刈りされるはずのノードまで探索してしまう
+  「探索オーバーヘッド」が発生する。</li>
+  <li><strong>共有データの整合性:</strong> 置換表やノードカウンタなど、スレッド間で共有するデータの同期が必要。</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>12.2 Hayanagiのアプローチ: Root Move Splitting</h2>
+
+<p>
+Hayanagiは「Root Move Splitting」と呼ばれる手法を採用しています。
+これはルート局面の合法手を複数のスレッドに分配し、各スレッドが独立に探索を行うものです。
+実装が比較的単純で、スレッド間の同期コストが小さいという利点があります。
+</p>
+
+<h3>RootMove 構造体</h3>
+
+<p>
+ルートの各候補手は <code>RootMove</code> 構造体で管理されます。
+</p>
+
+<pre><code>struct RootMove {
+    Move move;
+    int order_score = 0;
+    int score = -kInfinity;
+    std::string pv;
+    std::size_t worker_index = 0;
+};</code></pre>
+
+<ul>
+  <li><code>move</code> — 候補手そのもの</li>
+  <li><code>order_score</code> — 手の優先度（ソート用）</li>
+  <li><code>score</code> — 探索結果のスコア</li>
+  <li><code>pv</code> — この手から始まる主変化手順</li>
+  <li><code>worker_index</code> — この手を探索したワーカーのインデックス（PV構築に使用）</li>
+</ul>
+
+<h3>ルートの合法手を各スレッドに分配</h3>
+
+<p>
+<code>find_best_move()</code> の中で、マルチスレッド探索時には以下のようにワーカーを生成し、
+候補手をアトミックなインデックスで動的に分配します。
+</p>
+
+<pre><code>std::atomic_size_t next_index{0};
+std::vector&lt;std::thread&gt; threads;
+threads.reserve(workers.size() &gt; 0 ? workers.size() - 1 : 0);
+
+auto worker_body = [&amp;](std::size_t worker_index) {
+    Search&amp; worker = workers[worker_index];
+    while (true) {
+        const std::size_t move_index =
+            next_index.fetch_add(1, std::memory_order_relaxed);
+        if (move_index &gt;= root_moves.size()) {
+            break;
+        }
+        root_moves[move_index].score =
+            worker.search_root_move(root, root_moves[move_index].move, depth);
+        root_moves[move_index].worker_index = worker_index;
+        if (worker.aborted_) {
+            break;
+        }
+    }
+};
+
+for (std::size_t worker_index = 1; worker_index &lt; workers.size(); ++worker_index) {
+    threads.emplace_back(worker_body, worker_index);
+}
+worker_body(0);
+for (std::thread&amp; thread : threads) {
+    thread.join();
+}</code></pre>
+
+<p>
+この実装のポイントは以下の通りです。
+</p>
+
+<ul>
+  <li><strong>動的分配:</strong> <code>next_index.fetch_add(1)</code> により、各スレッドは次の未処理の候補手を
+  アトミックに取得します。静的分配と異なり、探索時間のばらつきによる負荷の偏りを軽減します。</li>
+  <li><strong>ワーカー0はメインスレッド:</strong> スレッド生成は <code>worker_index = 1</code> から行い、
+  ワーカー0はメインスレッドで直接実行します。これにより1スレッド分のオーバーヘッドを削減します。</li>
+  <li><strong>各スレッドが独立に negamax を実行:</strong> <code>search_root_move()</code> は
+  局面をコピーして手を適用し、独立した <code>negamax</code> 探索を行います。</li>
+</ul>
+
+<pre><code>int Search::search_root_move(const Position&amp; root, const Move&amp; root_move, int depth) {
+    if (should_stop()) {
+        aborted_ = true;
+        return 0;
+    }
+
+    Position child = root;
+    child.do_move(root_move);
+    return -negamax(child, depth - 1, 1, -kInfinity, kInfinity);
+}</code></pre>
+
+<p>
+各ワーカーは <code>alpha = -kInfinity</code>, <code>beta = kInfinity</code> の全窓で探索を行います。
+Root Move Splitting ではスレッド間でアルファ値を共有しないため、
+各手の探索は独立したフルウィンドウ探索になります。
+</p>
+
+<!-- ============================================================ -->
+<h2>12.3 Threads オプションとスレッド管理</h2>
+
+<p>
+スレッド数はUSIオプション <code>Threads</code> で設定され、<code>SearchOptions::threads</code> に格納されます。
+<code>find_best_move()</code> では合法手の数を上限として実際のスレッド数を決定します。
+</p>
+
+<pre><code>const int thread_count = std::max(1, std::min(options.threads, static_cast&lt;int&gt;(legal_moves.size())));</code></pre>
+
+<p>
+各ワーカーは独立した <code>Search</code> オブジェクトであり、
+キラー手テーブルやヒストリーテーブルなどの探索状態を個別に保持します。
+</p>
+
+<pre><code>std::vector&lt;Search&gt; workers;
+if (thread_count &gt; 1) {
+    workers.resize(static_cast&lt;std::size_t&gt;(thread_count));
+    for (Search&amp; worker : workers) {
+        worker.reset_state(options, stop, start_time_, &amp;shared_nodes, tt_generation);
+    }
+}</code></pre>
+
+<p>
+<code>reset_state()</code> は各ワーカーに共通の設定（探索オプション、停止フラグ、開始時刻、
+共有ノードカウンタ、置換表世代番号）を渡し、探索状態を初期化します。
+</p>
+
+<h3>結果の集約</h3>
+
+<p>
+全スレッドが終了した後、各候補手のスコアを比較して最良の手を選びます。
+</p>
+
+<pre><code>if (!aborted_) {
+    for (std::size_t move_index = 0; move_index &lt; root_moves.size(); ++move_index) {
+        const RootMove&amp; root_move = root_moves[move_index];
+        if (!found_move || root_move.score &gt; best_score) {
+            found_move = true;
+            best_score = root_move.score;
+            best_move = root_move.move;
+            best_index = move_index;
+        }
+    }
+}</code></pre>
+
+<p>
+いずれかのワーカーが中断された場合は、そのイテレーション全体の結果を破棄し、
+前回のイテレーションの結果を使用します。
+</p>
+
+<!-- ============================================================ -->
+<h2>12.4 共有置換表のスレッドセーフティ</h2>
+
+<p>
+Hayanagiの置換表（トランスポジションテーブル）は全スレッドで共有されます。
+あるスレッドが発見した局面情報を他のスレッドが再利用できるため、並列探索の効率が向上します。
+しかし、複数スレッドからの同時アクセスにはスレッドセーフティの保証が必要です。
+</p>
+
+<h3>AtomicTTEntry / AtomicTTCluster</h3>
+
+<pre><code>struct AtomicTTEntry {
+    std::atomic&lt;std::uint64_t&gt; key{0};
+    std::atomic&lt;std::uint64_t&gt; payload{0};
+};
+
+struct AtomicTTCluster {
+    std::array&lt;AtomicTTEntry, kTtClusterSize&gt; entries{};
+};</code></pre>
+
+<p>
+各エントリは <code>key</code>（局面のハッシュ値）と <code>payload</code>（スコア・深さ・最善手・世代などをパックした64ビット値）
+の2つのアトミック変数で構成されます。
+クラスタサイズは <code>kTtClusterSize = 4</code> で、同一ハッシュインデックスに4エントリを格納できます。
+</p>
+
+<h3>acquire-release memory ordering</h3>
+
+<p>
+置換表の読み書きには acquire-release メモリオーダリングが使われています。
+</p>
+
+<pre><code>// 読み取り（probe）
+const std::uint64_t stored_key = atomic_entry.key.load(std::memory_order_acquire);
+// ...
+const std::uint64_t payload = atomic_entry.payload.load(std::memory_order_relaxed);
+if (atomic_entry.key.load(std::memory_order_acquire) == stored_key) {
+    out = unpack_tt_entry(stored_key, payload);
+    return true;
+}
+
+// 書き込み（store）
+atomic_entry.payload.store(pack_tt_payload(entry), std::memory_order_relaxed);
+atomic_entry.key.store(entry.key, std::memory_order_release);</code></pre>
+
+<p>
+書き込み側では、まず <code>payload</code> を <code>relaxed</code> で書き込み、
+次に <code>key</code> を <code>release</code> で書き込みます。
+これにより、読み取り側が <code>acquire</code> で <code>key</code> を読んだとき、
+対応する <code>payload</code> が確実に見えることが保証されます。
+</p>
+
+<p>
+読み取り側ではさらに、<code>key</code> を2回読んで一致を確認するダブルチェックを行います。
+書き込みの途中で読み取りが割り込んだ場合、keyが変化するため不整合なデータの使用を防げます。
+</p>
+
+<h3>ロックフリー設計の利点とトレードオフ</h3>
+
+<p>
+この設計はミューテックスやスピンロックを一切使わないロックフリー実装です。
+</p>
+
+<ul>
+  <li><strong>利点:</strong> ロック競合がないため、スレッド数が増えてもスケーラビリティが維持される。
+  デッドロックの心配がなく、実装も比較的単純。</li>
+  <li><strong>トレードオフ:</strong> まれにkeyとpayloadの不整合（別のエントリのデータが混在）が発生する可能性がある。
+  ただし、将棋エンジンでは置換表のデータ破損は最悪でも探索効率の低下に留まり、
+  正しさ（合法手の生成・詰み判定）には影響しない。</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>12.5 ノードカウンタの共有</h2>
+
+<p>
+探索ノード数の正確なカウントは、ノード制限（<code>go nodes N</code>）の判定や
+info出力のNPS計算に必要です。Hayanagiでは <code>std::atomic&lt;std::uint64_t&gt;</code> を使って
+全スレッドのノード数を集約します。
+</p>
+
+<pre><code>std::atomic&lt;std::uint64_t&gt; shared_nodes{nodes_};</code></pre>
+
+<p>
+各ワーカーの <code>count_node()</code> でアトミックにインクリメントされます。
+</p>
+
+<pre><code>void Search::count_node() {
+    ++nodes_;
+    if (shared_nodes_ != nullptr) {
+        shared_nodes_-&gt;fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+std::uint64_t Search::current_nodes() const {
+    if (shared_nodes_ != nullptr) {
+        return shared_nodes_-&gt;load(std::memory_order_relaxed);
+    }
+    return nodes_;
+}</code></pre>
+
+<p>
+<code>memory_order_relaxed</code> を使用しているため、厳密なリアルタイムの正確性は保証されませんが、
+カウンタの更新自体はアトミックであり、最終的な合計値は正確です。
+ノード制限の判定は多少の誤差を許容するため、relaxed ordering で十分です。
+</p>
+
+<!-- ============================================================ -->
+<h2>12.6 並列探索の限界と考察</h2>
+
+<p>
+Root Move Splitting は実装の単純さが大きな利点ですが、いくつかの限界があります。
+</p>
+
+<h3>探索オーバーヘッド</h3>
+
+<p>
+逐次探索ではPVS（Principal Variation Search）により、最善手を見つけた後の候補手は
+狭い窓（ゼロウィンドウ）で高速に棄却できます。
+しかし Root Move Splitting では各スレッドが独立にフルウィンドウ探索を行うため、
+逐次探索なら枝刈りできたノードまで探索してしまいます。
+</p>
+
+<p>
+Hayanagiのシングルスレッド探索では PVS を使用しています。
+</p>
+
+<pre><code>if (move_index == 0) {
+    score = -negamax(child, depth - 1, 1, -beta, -alpha);
+} else {
+    score = -negamax(child, depth - 1, 1, -alpha - 1, -alpha);
+    if (!aborted_ &amp;&amp; score &gt; alpha &amp;&amp; score &lt; beta) {
+        score = -negamax(child, depth - 1, 1, -beta, -alpha);
+    }
+}</code></pre>
+
+<p>
+マルチスレッド時にはこの最適化が効かないため、
+スレッド数に比例した線形のスピードアップは期待できません。
+典型的には4スレッドで2〜3倍程度の速度向上が現実的です。
+</p>
+
+<h3>ロックフリーの衝突</h3>
+
+<p>
+置換表のロックフリー設計では、同一クラスタへの同時書き込みにより
+エントリが上書きされる可能性があります。
+特にスレッド数が多い場合、有用なエントリが失われる頻度が増加し、
+探索効率が低下する場合があります。
+置換表サイズ（<code>Hash</code> オプション）を十分に大きく設定することで、この影響を軽減できます。
+</p>
+
+<h3>より高度な並列化手法</h3>
+
+<p>
+Stockfish等の強豪エンジンでは、Lazy SMP（各スレッドがルートから独立に異なる深さで探索する手法）や
+ABDADA（探索木の内部ノードレベルで作業を分配する手法）が採用されています。
+これらはRoot Move Splittingよりも高いスケーラビリティを実現しますが、
+実装の複雑さも増します。Hayanagiの設計は教育目的として、
+並列探索の基本概念を理解するのに適した構成となっています。
+</p>
+
+<!-- ============================================================ -->
+<h2>12.7 まとめ</h2>
+
+<p>
+Hayanagiの並列探索は以下の設計で構成されています。
+</p>
+
+<ul>
+  <li>Root Move Splitting により、ルートの候補手を複数スレッドに動的に分配</li>
+  <li>各スレッドは独立した <code>Search</code> オブジェクトを持ち、フルウィンドウで negamax を実行</li>
+  <li>置換表は <code>AtomicTTEntry</code> によるロックフリー設計で全スレッドから共有</li>
+  <li>acquire-release メモリオーダリングとダブルチェックにより、ロックなしでデータの整合性を確保</li>
+  <li>ノードカウンタは <code>std::atomic</code> で共有し、ノード制限と統計情報に使用</li>
+</ul>
+
+<p>
+Root Move Splitting は最も単純な並列探索手法のひとつですが、
+共有置換表によるスレッド間の情報共有と組み合わせることで、
+少数のスレッドでは十分な速度向上を実現できます。
+</p>
+
+  <div class="chapter-nav">
+    <span><a href="chapter11.html">&larr; 前章</a></span>
+    <span><a href="chapter13.html">次章 &rarr;</a></span>
+  </div>
+</div>
+</body>
+</html>

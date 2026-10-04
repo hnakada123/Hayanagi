@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第9章 探索の高速化テクニック — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
+    <nav><a href="index.html">目次</a></nav>
+  </div>
+</header>
+<div class="wrapper">
+
+<h1>第9章 探索の高速化テクニック</h1>
+
+<p>
+第8章では Alpha-Beta 探索と PVS の原理を学びました。
+しかし、将棋の合法手は平均 80 手前後あり、素朴な Alpha-Beta だけでは深い読みは困難です。
+本章では、Hayanagi が実装している高速化テクニックを詳しく解説します。
+</p>
+
+<ul>
+  <li>置換表（Transposition Table）</li>
+  <li>ヌルムーブ枝刈り（Null-Move Pruning）</li>
+  <li>Late Move Reduction (LMR)</li>
+  <li>着手順序の最適化（Move Ordering）</li>
+  <li>SEE（Static Exchange Evaluation）</li>
+  <li>キラー手とヒストリーヒューリスティック</li>
+</ul>
+
+<!-- ================================================================ -->
+<h2>9.1 置換表（Transposition Table）</h2>
+
+<p>
+将棋の探索木では、手順前後（transposition）により同じ局面に異なる経路から到達することが頻繁に起こります。
+<strong>置換表</strong>は、既に探索済みの局面の結果をハッシュテーブルに記録し、再利用するための仕組みです。
+</p>
+
+<h3>9.1.1 TTEntry の構造</h3>
+
+<pre><code>enum class BoundType : std::uint8_t {
+    Exact = 0,
+    Lower,
+    Upper,
+};
+
+struct TTEntry {
+    std::uint64_t key = 0;       // Zobrist ハッシュキー
+    int depth = -1;              // 探索深度
+    int score = 0;               // 評価スコア
+    BoundType bound = BoundType::Exact;  // スコアの種類
+    Move best_move;              // 最善手
+    std::uint8_t generation = 0; // 世代番号
+};</code></pre>
+
+<p>各フィールドの意味は以下のとおりです。</p>
+<ul>
+  <li><strong>key</strong> — 局面の Zobrist ハッシュキー。衝突検出に使用します。</li>
+  <li><strong>depth</strong> — このエントリが何手先まで読んだ結果かを示します。現在の探索深度以上であれば結果を信頼できます。</li>
+  <li><strong>score</strong> — 探索結果の評価値です。</li>
+  <li><strong>bound</strong> — スコアの種類を示します。
+    <ul>
+      <li><code>Exact</code> — 正確な値（PV ノード）</li>
+      <li><code>Lower</code> — 下界（Beta カットが起きた）</li>
+      <li><code>Upper</code> — 上界（全ての手が alpha 以下だった）</li>
+    </ul>
+  </li>
+  <li><strong>best_move</strong> — この局面で見つかった最善手。着手順序の改善に使います。</li>
+  <li><strong>generation</strong> — エントリの鮮度を管理する世代番号。</li>
+</ul>
+
+<h3>9.1.2 ビットパッキング</h3>
+
+<p>
+メモリ効率のため、TTEntry は 2 つの <code>uint64_t</code>（key と payload）にパックされます。
+payload の内部構造は次のとおりです。
+</p>
+
+<pre><code>std::uint64_t pack_tt_payload(const TTEntry&amp; entry) {
+    const std::uint16_t score_bits =
+        static_cast&lt;std::uint16_t&gt;(static_cast&lt;std::int16_t&gt;(entry.score));
+    const std::uint8_t depth_bits =
+        static_cast&lt;std::uint8_t&gt;(std::max(entry.depth, -1) + 1);
+    const std::uint64_t move_bits = encode_move(entry.best_move);
+
+    return move_bits                                          // bit  0-19: 着手
+         | (static_cast&lt;std::uint64_t&gt;(score_bits) &lt;&lt; 20)    // bit 20-35: スコア
+         | (static_cast&lt;std::uint64_t&gt;(depth_bits) &lt;&lt; 36)    // bit 36-43: 深度
+         | (static_cast&lt;std::uint64_t&gt;(
+               static_cast&lt;std::uint8_t&gt;(entry.bound)) &lt;&lt; 44) // bit 44-45: bound
+         | (static_cast&lt;std::uint64_t&gt;(entry.generation) &lt;&lt; 46); // bit 46-53: 世代
+}</code></pre>
+
+<table>
+  <thead>
+    <tr><th>ビット範囲</th><th>幅</th><th>内容</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>0 - 19</td><td>20 bit</td><td>着手（from 7bit, to 7bit, piece 4bit, promote 1bit, drop 1bit）</td></tr>
+    <tr><td>20 - 35</td><td>16 bit</td><td>スコア（int16_t として符号付き）</td></tr>
+    <tr><td>36 - 43</td><td>8 bit</td><td>探索深度（+1 オフセット、-1 を 0 として格納）</td></tr>
+    <tr><td>44 - 45</td><td>2 bit</td><td>BoundType（Exact=0, Lower=1, Upper=2）</td></tr>
+    <tr><td>46 - 53</td><td>8 bit</td><td>世代番号</td></tr>
+  </tbody>
+</table>
+
+<p>
+1 エントリあたりわずか 16 バイト（key 8 バイト + payload 8 バイト）で済むため、
+限られたメモリに多くのエントリを格納できます。
+</p>
+
+<h3>9.1.3 SharedTranspositionTable と 4エントリクラスタ方式</h3>
+
+<p>
+置換表はグローバルに 1 つだけ存在し、全スレッドで共有されます（デフォルト 16MB）。
+ハッシュの衝突を緩和するため、1 つのインデックスに対して<strong>4 つのスロット</strong>（クラスタ）を持ちます。
+</p>
+
+<p>
+ハッシュの衝突を緩和するため、1 つのインデックスに対して<strong>4 つのスロット</strong>（クラスタ）を持ちます。
+</p>
+
+<pre><code>constexpr std::size_t kTtClusterSize = 4;
+
+struct AtomicTTEntry {
+    std::atomic&lt;std::uint64_t&gt; key{0};
+    std::atomic&lt;std::uint64_t&gt; payload{0};
+};
+
+struct AtomicTTCluster {
+    std::array&lt;AtomicTTEntry, kTtClusterSize&gt; entries{};
+};</code></pre>
+
+<p>
+各スロットの key と payload を <code>std::atomic&lt;uint64_t&gt;</code> で保持し、
+ロックなしでマルチスレッド安全な読み書きを実現しています。
+</p>
+
+<h3>9.1.5 probe() と store() — acquire-release セマンティクス</h3>
+
+<p><code>probe()</code> は局面キーでクラスタ内の 4 スロットを順に検索します。</p>
+
+<pre><code>for (const AtomicTTEntry&amp; atomic_entry : cluster.entries) {
+    const std::uint64_t stored_key =
+        atomic_entry.key.load(std::memory_order_acquire);
+    if (stored_key != key) { continue; }
+    const std::uint64_t payload =
+        atomic_entry.payload.load(std::memory_order_relaxed);
+    // key を再読みして一貫性を確認（ダブルチェック）
+    if (atomic_entry.key.load(std::memory_order_acquire) == stored_key) {
+        out = unpack_tt_entry(stored_key, payload);
+        return true;
+    }
+}</code></pre>
+
+<p>
+key の読み込みに <code>memory_order_acquire</code>、書き込みに <code>memory_order_release</code> を使い、
+key と payload の一貫性を保証します。payload 読み取り後に key を再読みし、別スレッドによる上書きを検出します。
+</p>
+
+<p><code>store()</code> では、(1) 同一局面が既にあれば上書き（ただし同世代で浅い場合は拒否）、
+(2) 空きスロットがあれば書き込み、(3) 全スロットが埋まっていれば最も古い/浅いエントリを置換します。
+書き込みは常に payload → key の順で、key に <code>memory_order_release</code> を使います。</p>
+
+<h3>9.1.6 世代管理（next_generation）による置き換え戦略</h3>
+
+<p>
+各探索開始時に <code>next_generation()</code> で世代番号をインクリメントします。
+置き換え候補の評価は <code>replacement_score()</code> で行います。
+</p>
+
+<pre><code>static std::size_t replacement_score(const TTEntry&amp; entry,
+                                     std::uint8_t generation) {
+    const std::size_t age_penalty =
+        entry.generation == generation ? 0 : 1024;
+    const int bounded_depth = std::max(entry.depth, -1);
+    return age_penalty
+         + static_cast&lt;std::size_t&gt;(255 - std::min(bounded_depth + 1, 255));
+}</code></pre>
+
+<p>
+スコアが高いほど「置き換えやすい」ことを意味します。
+古い世代のエントリには 1024 のペナルティが加算されるため、優先的に上書きされます。
+同世代であれば、深度が浅いエントリほど置き換えられやすくなります。
+</p>
+
+<h3>9.1.7 hashfull_permille() — 使用率計測</h3>
+
+<pre><code>int hashfull_permille(std::uint8_t generation) const {
+    constexpr std::size_t kSampleEntries = 1000;
+    int used = 0;
+    for (std::size_t sample = 0; sample &lt; kSampleEntries; ++sample) {
+        // テーブル全体から均等にサンプリング
+        const std::size_t entry_index =
+            sample * (cluster_count * kTtClusterSize) / kSampleEntries;
+        // ...
+        if (entry.generation == generation) { ++used; }
+    }
+    return used;  // パーミル（千分率）で返す
+}</code></pre>
+
+<p>
+USI プロトコルの <code>info hashfull</code> で報告する値を計算します。
+テーブル全体を走査するのは高コストなので、1000 個のエントリを均等にサンプリングして
+現在の世代のエントリ数を数えます。結果はパーミル（0〜1000）で返されます。
+</p>
+
+<h3>9.1.8 score_to_tt() / score_from_tt() — 詰みスコアの ply 補正</h3>
+
+<p>
+詰みスコアは「ルートからの手数」に依存するため、置換表に保存・取得する際に補正が必要です。
+</p>
+
+<pre><code>int score_to_tt(int score, int ply) {
+    if (score &gt;= kMateThreshold) { return score + ply; }
+    if (score &lt;= -kMateThreshold) { return score - ply; }
+    return score;
+}
+
+int score_from_tt(int score, int ply) {
+    if (score &gt;= kMateThreshold) { return score - ply; }
+    if (score &lt;= -kMateThreshold) { return score + ply; }
+    return score;
+}</code></pre>
+
+<p>
+例えば、ply=5 で「3手詰め」を発見した場合、スコアは <code>kMateScore - 8</code>（5+3=8手後に詰み）です。
+置換表に保存する際は ply を足して <code>kMateScore - 3</code>（ルートから3手の詰み）に変換します。
+別の ply で取り出す際は、新しい ply を引いて正しいスコアに戻します。
+</p>
+
+<h3>9.1.9 negamax() での置換表利用</h3>
+
+<pre><code>TTEntry tt_entry;
+if (shared_tt().probe(key, tt_entry)) {
+    tt_move = tt_entry.best_move;  // 着手順序に利用
+    if (tt_entry.depth &gt;= depth) {
+        const int tt_score = score_from_tt(tt_entry.score, ply);
+        switch (tt_entry.bound) {
+            case BoundType::Exact:
+                return tt_score;        // 正確値 → そのまま返す
+            case BoundType::Lower:
+                alpha = std::max(alpha, tt_score);  // 下界で alpha 更新
+                break;
+            case BoundType::Upper:
+                beta = std::min(beta, tt_score);    // 上界で beta 更新
+                break;
+        }
+        if (alpha &gt;= beta) { return tt_score; }  // カット
+    }
+}</code></pre>
+
+<!-- ================================================================ -->
+<h2>9.2 ヌルムーブ枝刈り（Null-Move Pruning）</h2>
+
+<p>
+<strong>ヌルムーブ枝刈り</strong>は「もし自分がパス（何もしない）しても相手が beta を超えられないなら、
+実際に手を指せばさらに良いはずなので、この局面は beta カットできる」という発想に基づく枝刈りです。
+</p>
+
+<h3>原理</h3>
+<p>
+将棋では一手パスは合法手ではありませんが、探索上の仮想操作として手番だけを相手に渡します。
+パスした後の局面を通常より<strong>浅い深度</strong>で探索し、結果が beta 以上であれば枝刈りします。
+</p>
+
+<pre><code>const int static_eval = evaluate(position);
+if (can_try_null_move(position, depth, beta, static_eval)) {
+    Position null_position = position.make_null_move();
+    const int reduction = kNullMoveBaseReduction + depth / 4;  // R = 2 + depth/4
+    const int score =
+        -negamax(null_position, depth - 1 - reduction, ply + 1, -beta, -beta + 1);
+    if (aborted_) { return 0; }
+    if (score &gt;= beta) {
+        return score;  // パスしても良い → 枝刈り
+    }
+}</code></pre>
+
+<p>
+縮小量 <code>R = 2 + depth/4</code> は深度に応じて増加します。
+深い探索ほど大胆に刈り取ることで、計算量を大幅に削減します。
+</p>
+
+<h3>can_try_null_move() の条件</h3>
+
+<pre><code>bool Search::can_try_null_move(const Position&amp; position,
+                               int depth, int beta,
+                               int static_eval) const {
+    if (depth &lt; 3) { return false; }
+    if (beta &gt;= kMateThreshold || beta &lt;= -kMateThreshold) {
+        return false;
+    }
+    if (position.is_in_check(position.side_to_move())) {
+        return false;
+    }
+    if (!has_non_pawn_material(position, position.side_to_move())) {
+        return false;
+    }
+    return static_eval &gt;= beta - 96 - depth * 16;
+}</code></pre>
+
+<p>ヌルムーブを試す条件は5つあります。</p>
+<ol>
+  <li><strong>depth &gt;= 3</strong> — 浅い探索では効果が薄いため無効化します。</li>
+  <li><strong>詰みスコア付近でない</strong> — 詰みの読みではヌルムーブは危険です。</li>
+  <li><strong>王手がかかっていない</strong> — 王手中にパスすると不正な局面になります。</li>
+  <li><strong>歩以外の駒がある</strong> — 歩と玉しかない終盤（いわゆる Zugzwang）ではパスが最善になりうるため、ヌルムーブは不適切です。</li>
+  <li><strong>静的評価が beta に近い</strong> — <code>static_eval &gt;= beta - 96 - depth * 16</code> の条件で、評価値が beta から大きく離れている場合はスキップします。</li>
+</ol>
+
+<!-- ================================================================ -->
+<h2>9.3 Late Move Reduction (LMR)</h2>
+
+<p>
+<strong>LMR</strong>は「着手順序の後ろの方にある静かな手は、おそらく最善手ではない」という仮定に基づき、
+そのような手を<strong>浅い深度で試す</strong>テクニックです。
+</p>
+
+<pre><code>const bool gives_check = child.is_in_check(child.side_to_move());
+const bool quiet = is_quiet(position, move) &amp;&amp; !gives_check;
+const bool late_move = quiet &amp;&amp; !in_check
+                     &amp;&amp; depth &gt;= 4 &amp;&amp; move_index &gt;= 4;
+const int reduction = late_move
+    ? (depth &gt;= 6 &amp;&amp; move_index &gt;= 8 ? 2 : 1)
+    : 0;</code></pre>
+
+<p>LMR の適用条件は以下のとおりです。</p>
+<ul>
+  <li><strong>静かな手</strong> — 捕獲でも成りでもなく、王手も与えない手（<code>is_quiet()</code> は <code>!move.promote &amp;&amp; piece_at(move.to) == 0</code>）。</li>
+  <li><strong>王手回避中でない</strong> — 王手がかかっている局面では全ての手を正確に読む必要があります。</li>
+  <li><strong>depth &gt;= 4</strong> — 浅い探索では効果が薄いため無効化。</li>
+  <li><strong>move_index &gt;= 4</strong> — 最初の 4 手は順序が高いため縮小しません。</li>
+</ul>
+
+<p>縮小量は次の2段階です。</p>
+<ul>
+  <li><strong>1手縮小</strong> — 基本の LMR。</li>
+  <li><strong>2手縮小</strong> — <code>depth &gt;= 6</code> かつ <code>move_index &gt;= 8</code> の場合。深い探索で順序がさらに後ろの手は、より大胆に刈ります。</li>
+</ul>
+
+<p>
+LMR で縮小された探索が alpha を超えた場合は、通常深度のヌルウィンドウ探索で再確認し、
+さらに alpha を超えればフルウィンドウで再探索します（PVS との組み合わせ、第8章 8.5 節参照）。
+</p>
+
+<!-- ================================================================ -->
+<h2>9.4 着手順序の最適化（Move Ordering）</h2>
+
+<p>
+Alpha-Beta 枝刈りの効率は着手順序に大きく依存します。
+最善手を早く調べるほど、beta カットが早期に起こり、探索ノード数が減ります。
+Hayanagi の <code>move_order_score()</code> は各手にスコアを付け、降順にソートします。
+</p>
+
+<pre><code>int Search::move_order_score(const Position&amp; position,
+                             const Move&amp; move, int ply,
+                             const Move&amp; tt_move) const {
+    int score = 0;
+
+    // (1) 置換表の最善手: +4,000,000
+    if (same_move(move, tt_move)) {
+        score += 4000000;
+    }
+
+    // (2) 捕獲手: 120,000 + captured_value*12 + SEE*24
+    const int captured = position.piece_at(move.to);
+    if (captured != 0) {
+        const int see = position.static_exchange_eval(move);
+        score += 120000 + piece_value(piece_type(captured)) * 12 + see * 24;
+        if (see &lt; 0) {
+            score += see * 48;  // 負のSEEにはさらにペナルティ
+        }
+    }
+
+    // (3) 成り: +1,200
+    if (move.promote) {
+        score += 1200;
+    }
+
+    // (4) 駒打ち: 200 + piece_value/8
+    if (move.drop) {
+        score += 200 + piece_value(move.piece) / 8;
+    }
+
+    // (5) キラー手: +90,000 (第1) / +80,000 (第2)
+    if (ply &lt; kMaxDepth) {
+        if (same_move(move, killer_moves_[ply][0])) {
+            score += 90000;
+        } else if (same_move(move, killer_moves_[ply][1])) {
+            score += 80000;
+        }
+    }
+
+    // (6) ヒストリーヒューリスティック
+    if (captured == 0 &amp;&amp; !move.promote) {
+        score += history_score(position.side_to_move(), move);
+    }
+
+    return score;
+}</code></pre>
+
+<p>優先度を整理すると、次の階層構造になっています。</p>
+
+<table>
+  <thead>
+    <tr><th>優先度</th><th>種類</th><th>スコア範囲</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1</td><td>置換表の最善手（TT move）</td><td>約 4,000,000</td></tr>
+    <tr><td>2</td><td>良い捕獲手（SEE &gt;= 0）</td><td>約 120,000 〜 200,000+</td></tr>
+    <tr><td>3</td><td>キラー手（第1 / 第2）</td><td>90,000 / 80,000</td></tr>
+    <tr><td>4</td><td>成り</td><td>1,200</td></tr>
+    <tr><td>5</td><td>ヒストリーが高い静かな手</td><td>可変</td></tr>
+    <tr><td>6</td><td>駒打ち</td><td>200 〜 400 程度</td></tr>
+    <tr><td>7</td><td>悪い捕獲手（SEE &lt; 0）</td><td>負の値になりうる</td></tr>
+  </tbody>
+</table>
+
+<p>
+置換表の最善手が圧倒的に高いスコア（400万）を持つ点に注目してください。
+前回の探索で最善だった手を真っ先に調べることが、枝刈り効率の鍵です。
+</p>
+
+<!-- ================================================================ -->
+<h2>9.5 SEE（Static Exchange Evaluation）</h2>
+
+<p>
+<strong>SEE</strong>は「ある駒を取ったとき、取り返しの連鎖が終わった後に駒得になるか損になるか」を
+実際に手を指すことなく静的に見積もる手法です。
+</p>
+
+<p>
+SEE は着手順序と静止探索の両方で使われます。
+</p>
+<ul>
+  <li><strong>着手順序</strong> — 捕獲手のスコアに SEE 値を加算し、良い取り合いを優先します。</li>
+  <li><strong>静止探索のプルーニング</strong> — <code>SEE &lt; -120</code> の捕獲手はスキップします（第8章 8.6 節）。</li>
+</ul>
+
+<h3>SEE の仕組み</h3>
+
+<p>
+SEE は、攻撃側と防御側が対象マスに最も安い駒で交互に取り合うシミュレーションを行います。
+各プレイヤーは「取り返しても損になるなら中断する」最善の判断を行い、最終的な駒の価値差を返します。
+Hayanagi では <code>Position::static_exchange_eval()</code> として <code>position.cpp</code> に実装されています。
+</p>
+
+<pre><code>// 着手順序での使用（search.cpp）
+const int see = position.static_exchange_eval(move);
+score += 120000 + piece_value(piece_type(captured)) * 12 + see * 24;
+
+// 静止探索でのプルーニング（search.cpp）
+if (!in_check &amp;&amp; captured != 0
+    &amp;&amp; position.static_exchange_eval(move) &lt; -120) {
+    continue;
+}</code></pre>
+
+<!-- ================================================================ -->
+<h2>9.6 キラー手とヒストリーの記録</h2>
+
+<h3>9.6.1 キラー手（Killer Moves）</h3>
+
+<p>
+<strong>キラー手</strong>は「同じ ply（探索の深さレベル）で Beta カットを引き起こした静かな手」を記録し、
+同じ ply の他の局面でも優先的に試す手法です。
+</p>
+
+<pre><code>void Search::record_killer(int ply, const Move&amp; move) {
+    if (ply &gt;= kMaxDepth || same_move(move, killer_moves_[ply][0])) {
+        return;
+    }
+    killer_moves_[ply][1] = killer_moves_[ply][0];  // 第1を第2にシフト
+    killer_moves_[ply][0] = move;                    // 新しい手を第1に
+}</code></pre>
+
+<p>
+各 ply に 2 つのスロットがあり、新しいキラー手が記録されると古い方が押し出されます。
+Beta カット発生時、その手が静かな手（捕獲でも成りでもない）であれば記録されます。
+</p>
+
+<pre><code>// negamax() 内、Beta カット時
+if (alpha &gt;= beta) {
+    if (quiet) {
+        record_killer(ply, move);
+        record_history(position.side_to_move(), move, depth);
+    }
+    store_tt(key, depth, ply, best_score, alpha_original, beta, best_move);
+    return best_score;
+}</code></pre>
+
+<h3>9.6.2 ヒストリーヒューリスティック</h3>
+
+<p>
+<strong>ヒストリーヒューリスティック</strong>は、過去の探索で Beta カットを引き起こした手に
+累積スコアを与え、着手順序に反映する手法です。キラー手が ply 固有なのに対し、
+ヒストリーは探索全体を通じて蓄積されます。
+</p>
+
+<pre><code>void Search::record_history(Color color, const Move&amp; move, int depth) {
+    const int bucket = from_bucket(move);
+    int&amp; score = history_[static_cast&lt;int&gt;(color)][bucket][move.to];
+    score += depth * depth * 8;  // 深い探索でのカットほど高スコア
+    score -= score / 16;         // 減衰（飽和を防ぐ）
+}</code></pre>
+
+<p>ヒストリーテーブルのインデックスは以下のように構成されます。</p>
+<ul>
+  <li><strong>第1次元</strong> — 手番の色（Black / White）</li>
+  <li><strong>第2次元</strong> — 移動元バケット。盤上の移動なら <code>from</code> マス（0〜80）、駒打ちなら <code>kSquareCount + hand_index(piece)</code></li>
+  <li><strong>第3次元</strong> — 移動先マス（0〜80）</li>
+</ul>
+
+<pre><code>int Search::history_score(Color color, const Move&amp; move) const {
+    return history_[static_cast&lt;int&gt;(color)][from_bucket(move)][move.to];
+}</code></pre>
+
+<p>
+<code>depth * depth * 8</code> により、深い探索で有効だった手ほど大きなスコアを得ます。
+同時に <code>score -= score / 16</code> で減衰させることで、値の飽和を防いでいます。
+</p>
+
+<!-- ================================================================ -->
+<h2>9.7 探索結果の置換表への記録</h2>
+
+<p>
+探索が完了すると、結果を置換表に記録します。<code>store_tt()</code> は bound の種類を自動判定します。
+</p>
+
+<pre><code>void Search::store_tt(std::uint64_t key, int depth, int ply,
+                      int score, int alpha, int beta,
+                      const Move&amp; best_move) {
+    TTEntry entry;
+    entry.key = key;
+    entry.depth = depth;
+    entry.score = score_to_tt(score, ply);
+    entry.best_move = best_move;
+    entry.generation = tt_generation_;
+
+    if (score &lt;= alpha) {
+        entry.bound = BoundType::Upper;  // 全ての手が alpha 以下
+    } else if (score &gt;= beta) {
+        entry.bound = BoundType::Lower;  // Beta カットが起きた
+    } else {
+        entry.bound = BoundType::Exact;  // alpha &lt; score &lt; beta
+    }
+    shared_tt().store(entry);
+}</code></pre>
+
+<p>
+ここで <code>alpha</code> は探索開始時に保存した <code>alpha_original</code> です。
+探索中に alpha が更新されても、元の alpha と比較することで正しい bound を判定できます。
+</p>
+
+<!-- ================================================================ -->
+<h2>9.8 まとめ</h2>
+
+<p>本章で解説した高速化テクニックを整理します。</p>
+
+<table>
+  <thead>
+    <tr><th>テクニック</th><th>効果</th><th>主要パラメータ</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>置換表</td><td>同一局面の再探索を回避</td><td>16MB デフォルト、4エントリクラスタ</td></tr>
+    <tr><td>ヌルムーブ枝刈り</td><td>優勢な局面の探索を省略</td><td>R = 2 + depth/4</td></tr>
+    <tr><td>LMR</td><td>順序が後ろの静かな手を浅く探索</td><td>depth &gt;= 4, move_index &gt;= 4</td></tr>
+    <tr><td>着手順序</td><td>Beta カットを早期に発生させる</td><td>TT手(4M), 捕獲(120K+), キラー(90K/80K)</td></tr>
+    <tr><td>SEE</td><td>取り合いの結果を静的に見積もり</td><td>静止探索で -120 閾値</td></tr>
+    <tr><td>キラー手</td><td>同 ply でカットを起こした手を優先</td><td>各 ply 2 スロット</td></tr>
+    <tr><td>ヒストリー</td><td>探索全体で有効な手を学習</td><td>depth^2 * 8, 1/16 減衰</td></tr>
+  </tbody>
+</table>
+
+<p>
+これらのテクニックは個別に効果を発揮するだけでなく、互いに補強し合います。
+置換表が着手順序を改善し、良い着手順序が LMR の精度を高め、
+LMR で節約した時間がさらに深い探索を可能にする — この好循環が現代の将棋エンジンの強さの源泉です。
+</p>
+
+<p>
+次章では、通常探索とは別系統の<strong>詰み探索</strong>（王手限定の専用探索）を解説します。
+</p>
+
+  <div class="chapter-nav">
+    <span><a href="chapter08.html">&larr; 前章</a></span>
+    <span><a href="chapter10.html">次章 &rarr;</a></span>
+  </div>
+</div>
+</body>
+</html>

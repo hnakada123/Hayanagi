@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第3章 ビットボード — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
+  </div>
+</header>
+<div class="wrapper">
+
+<h1>第3章 ビットボード</h1>
+
+<p>
+前章では、盤面を <code>int board[81]</code> で表現する方法を学びました。
+しかし、この配列だけでは「先手の駒があるマスの集合」や「角の<strong>利き</strong>が届くマスの集合」を求めるのに、
+81マスを1つずつ走査する必要があります。
+本章では、こうした集合演算を高速に行うための<strong>ビットボード</strong>（Bitboard）を解説します。
+</p>
+
+<div class="note">
+<strong>「利き」とは</strong><br>
+将棋における<strong>利き</strong>とは、ある駒が次の一手で移動できるマス（＝その駒が支配しているマス）のことです。
+例えば、角は斜め4方向にどこまでも進めるので、途中に他の駒がなければ斜めのライン上のすべてのマスに「利きがある」と言います。
+利きは攻撃と防御の両方に関わる概念で、「相手の駒に利きが届いている」なら捕獲できますし、「味方の駒に利きが届いている」なら守っていることになります。
+<figure>
+<img src="bishop_attack.png" alt="角の利きの例（5五に角がある場合、斜め4方向に利きが伸びる）" style="max-width: 420px; width: 100%;">
+<figcaption>角の利きの例（5五に角がある場合）</figcaption>
+</figure>
+将棋エンジンでは、この「利き」を高速に計算することが合法手生成の核心です。
+ビットボードを使えば、利きのあるマスの集合をビット演算で効率的に求められます。
+</div>
+
+<!-- ============================================================ -->
+<h2>3.1 なぜビットボードを使うのか</h2>
+
+<p>
+ビットボードとは、盤面の各マスを1ビットに対応させた整数値で、
+マスの集合を表現するデータ構造です。
+例えば「先手の歩があるマスの集合」「角の利きが届くマスの集合」などを
+それぞれ1つのビットボードで表します。
+</p>
+
+<p>ビットボードの最大の利点は、<strong>集合演算がビット演算1回で完了する</strong>ことです。</p>
+
+<table>
+  <thead>
+    <tr><th>集合演算</th><th>ビット演算</th><th>例</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>和集合（OR）</td><td><code>A | B</code></td><td>先手の駒 OR 後手の駒 = 全駒のあるマス</td></tr>
+    <tr><td>積集合（AND）</td><td><code>A &amp; B</code></td><td>角の利き AND 後手の駒 = 角で取れる駒</td></tr>
+    <tr><td>差集合</td><td><code>A &amp; ~B</code></td><td>角の利き AND NOT 味方の駒 = 角の移動可能マス</td></tr>
+    <tr><td>対称差（XOR）</td><td><code>A ^ B</code></td><td>駒の追加・削除</td></tr>
+    <tr><td>補集合（NOT）</td><td><code>~A</code></td><td>駒がないマスの集合</td></tr>
+    <tr><td>要素数</td><td><code>popcount</code></td><td>駒の数を数える</td></tr>
+    <tr><td>要素の取り出し</td><td><code>ctz + reset</code></td><td>集合から1マスずつ処理</td></tr>
+  </tbody>
+</table>
+
+<p>
+配列で81マスを走査するとO(81)かかる処理が、
+ビットボードではO(1)（定数個のビット演算）で完了します。
+合法手生成では利きの計算を大量に行うため、この差は非常に大きくなります。
+</p>
+
+<p>以下、各演算を盤面図で具体的に見ていきましょう。</p>
+
+<h3>和集合（OR）— <code>A | B</code></h3>
+
+<p>
+2つのビットボードの OR を取ると、<strong>どちらかに含まれるマスの集合</strong>（和集合）が得られます。
+例えば「先手の駒があるマス」と「後手の駒があるマス」の OR を取れば、
+「盤上に駒があるすべてのマス」が1回の演算で求まります。
+</p>
+
+<figure>
+<img src="bitboard_or.png" alt="OR演算の例：先手の駒 | 後手の駒 = 全駒のあるマス" style="max-width: 400px; width: 100%;">
+<figcaption>OR演算：先手の駒（青）と後手の駒（赤）の和集合</figcaption>
+</figure>
+
+<pre><code>// 先手の駒があるマス OR 後手の駒があるマス = 盤上の全駒
+Bitboard occupied = black_pieces | white_pieces;</code></pre>
+
+<h3>積集合（AND）— <code>A &amp; B</code></h3>
+
+<p>
+2つのビットボードの AND を取ると、<strong>両方に含まれるマスの集合</strong>（積集合）が得られます。
+例えば「玉の利きがあるマス」と「後手の駒があるマス」の AND を取れば、
+「玉で取れる後手の駒」が求まります。
+玉は周囲8マスにしか利きがない<strong>ステップ型</strong>の駒なので、
+途中の駒に遮られる心配がなく、利きの計算がシンプルです。
+</p>
+
+<figure>
+<img src="bitboard_and.png" alt="AND演算の例：玉の利き & 後手の駒 = 玉で取れる駒" style="max-width: 400px; width: 100%;">
+<figcaption>AND演算：玉の利き（青）と後手の駒（赤）の積集合 → 取れる駒（緑）</figcaption>
+</figure>
+
+<pre><code>// 玉の利き AND 後手の駒 = 玉で取れる駒のあるマス
+Bitboard captures = king_attacks &amp; opponent_pieces;</code></pre>
+
+<div class="note">
+<strong>スライダー型の駒（飛車・角・香車）の場合</strong><br>
+飛車や角のようにまっすぐ遠くまで進める駒は、途中に他の駒があるとそこで利きが遮られます。
+では角の場合、実際にどうやって「遮られた利き」を計算しているのでしょうか？
+Hayanagi では <code>ray_attacks_from()</code> という関数がこれを担当しています。
+
+<pre><code>// src/position.cpp — スライダー型の利き計算（角・飛車・香車共通）
+Bitboard ray_attacks_from(int from,
+                          const Bitboard&amp; occupied,
+                          const std::initializer_list&lt;int&gt;&amp; directions) {
+    const auto&amp; t = tables();
+    Bitboard attacks;
+    for (const int dir : directions) {
+        for (int index = 0; index &lt; t.ray_lengths[from][dir]; ++index) {
+            const int to = t.ray_squares[from][dir][index];
+            attacks.set(to);        // このマスに利きを追加
+            if (occupied.test(to)) {
+                break;              // 駒にぶつかったらこの方向は終了
+            }
+        }
+    }
+    return attacks;
+}
+
+// 角の利き = 斜め4方向のレイ
+Bitboard Position::bishop_attacks(int from, const Bitboard&amp; occupied) const {
+    return ray_attacks_from(from, occupied, {NorthWest, NorthEast, SouthWest, SouthEast});
+}</code></pre>
+
+<p>仕組みは単純です。</p>
+<ol>
+  <li>各方向（角なら斜め4方向）について、起点マスから1マスずつ遠ざかる順にループ</li>
+  <li>通過するマスを <code>attacks</code> ビットボードにセット（利きを追加）</li>
+  <li><strong>そのマスに駒がある</strong>（<code>occupied.test(to)</code> が true）なら <code>break</code> でその方向のループを終了</li>
+</ol>
+
+<p>
+こうして得られる <code>attacks</code> ビットボードは、すでに「遮り」が考慮された正確な利きです。
+相手の駒にぶつかったマスは利きに<strong>含まれます</strong>（その駒を取れるため）が、
+その先のマスは含まれません。
+味方の駒にぶつかった場合もそのマスは利きに含まれますが、
+後で <code>&amp; ~own_pieces</code>（差集合）を取ることで味方の駒のマスを除外します。
+</p>
+
+<p>
+つまり、角で取れる後手の駒を求める場合は次のようになります。
+</p>
+
+<pre><code>// 1. まず occupied（盤上の全駒）を考慮した角の利きを計算
+Bitboard attacks = bishop_attacks(from, occupied);
+// → 途中で駒にぶつかったらそこで止まるので、正確な利きが得られる
+
+// 2. AND で後手の駒と重なるマスを取得
+Bitboard captures = attacks &amp; opponent_pieces;
+// → これが角で実際に取れる後手の駒</code></pre>
+
+<p>
+このように、Hayanagi では「利きのビットボードを作る段階」で遮りを処理し、
+その後のビット演算では単純な AND だけで済むようにしています。
+第5章「攻撃テーブルと利き計算」でさらに詳しく解説します。
+</p>
+</div>
+
+<h3>差集合（AND NOT）— <code>A &amp; ~B</code></h3>
+
+<p>
+「Aに含まれるが、Bには含まれない」マスを求めるには、<code>A &amp; ~B</code> とします。
+例えば「角の利きがあるマス」から「味方の駒があるマス」を除けば、
+「角が実際に移動できるマス」が得られます（味方の駒がある場所には移動できないため）。
+</p>
+
+<p>
+下の図では、5五の角に対して味方の駒が7三と3七にあります。
+角の利き（A）は遮りを考慮済みなので、7三より先の左上方向（8二・9一）や
+3七より先の右下方向（2八・1九）には利きが届いていません。
+この利きから味方の駒のマスを AND NOT で除外すると、角が実際に移動できるマスだけが残ります。
+</p>
+
+<figure>
+<img src="bitboard_andnot.png" alt="AND NOT演算の例：角の利き & ~味方の駒 = 移動可能マス" style="max-width: 400px; width: 100%;">
+<figcaption>AND NOT演算：角の利き（青、遮り考慮済み）から味方の駒（赤）を除外 → 移動可能マス（緑）</figcaption>
+</figure>
+
+<pre><code>// occupied を考慮した角の利き AND NOT 味方の駒 = 角の移動可能なマス
+Bitboard attacks = bishop_attacks(from, occupied);  // 遮り考慮済み
+Bitboard targets = attacks &amp; ~own_pieces;</code></pre>
+
+<h3>対称差（XOR）— <code>A ^ B</code></h3>
+
+<p>
+XOR は「ビットが異なるとき1、同じとき0」になる演算です。
+この性質を利用すると、<strong>同じ操作で追加にも削除にもなる</strong>という便利な特徴が得られます。
+</p>
+
+<ul>
+  <li>ビットが <strong>0</strong> の位置に XOR で 1 を与えると → <strong>1</strong> になる（追加）</li>
+  <li>ビットが <strong>1</strong> の位置に XOR で 1 を与えると → <strong>0</strong> になる（削除）</li>
+</ul>
+
+<p>
+これを駒の移動に応用できます。
+「移動元」と「移動先」の2ビットだけが立ったマスクと XOR を取れば、
+移動元のビットが消え（削除）、移動先にビットが立つ（追加）——つまり駒の移動が1回の演算で完了します。
+</p>
+
+<figure>
+<img src="bitboard_xor.png" alt="XOR演算の例：駒の移動を1回のXORで実行" style="max-width: 400px; width: 100%;">
+<figcaption>XOR演算：3七の角を5五へ移動（移動元が消え、移動先に現れる）</figcaption>
+</figure>
+
+<pre><code>// 3七(マス60)から5五(マス40)へ角を移動
+Bitboard move_mask;
+move_mask.set(60);  // 移動元
+move_mask.set(40);  // 移動先
+piece_bb ^= move_mask;  // 移動元を削除、移動先を追加（1回のXOR）</code></pre>
+
+<div class="note">
+<strong>補集合（NOT）</strong>について<br>
+<code>~A</code> はビットボードの全ビットを反転し、「Aに含まれないマスの集合」を返します。
+例えば <code>~occupied</code> で「駒がないマス（空きマス）の集合」が得られます。
+NOT は単体で使うことは少なく、上記の AND NOT のように他の演算と組み合わせて使うのが一般的です。
+</div>
+
+<!-- ============================================================ -->
+<h2>3.2 81マスの表現：lo + hi の設計</h2>
+
+<p>
+チェス（64マス）では1つの <code>uint64_t</code>（64ビット符号なし整数）でビットボードを表現できますが、
+将棋は81マスあるため、64ビットには収まりません。
+Hayanagiでは <strong>2つの <code>uint64_t</code></strong> を使い、81マスを分割して格納します。
+</p>
+
+<ul>
+  <li><code>lo</code>（<strong>low</strong> の略）— マス番号の<strong>小さい方</strong>（マス番号0〜63）を格納する64ビット整数。64ビットすべてを使用します。</li>
+  <li><code>hi</code>（<strong>high</strong> の略）— マス番号の<strong>大きい方</strong>（マス番号64〜80）を格納する64ビット整数。下位17ビットだけを使用し、残りの上位47ビットは常に0です。</li>
+</ul>
+
+<p>
+ここで重要なのは、<strong><code>lo</code>/<code>hi</code> の分割は先手・後手とは無関係</strong>ということです。
+「low/high」はあくまでマス番号の小さい方・大きい方という意味であり、
+先手陣や後手陣といった将棋上の概念とは対応していません。
+</p>
+
+<p>
+マス番号は盤面の左上（9一、後手の陣地側）から右下（1九、先手の陣地側）へ順番に振られています。
+そのため、<code>lo</code> には一段目〜七段目の全マスと八段目の9筋が入り、
+<code>hi</code> には八段目の残り8マスと九段目の全マスが入ります。
+どちらの変数にも先手・後手両方の駒が含まれうるので、
+「<code>lo</code> = 後手側」「<code>hi</code> = 先手側」のような対応はありません。
+また、先手から見て盤面の上部が <code>hi</code>（high）、下部が <code>lo</code>（low）と思いがちですが、
+実際には<strong>逆</strong>です。マス番号は上側（一段目）が小さく下側（九段目）が大きいので、
+盤面の上側が <code>lo</code>、下側が <code>hi</code> になります。
+名前は盤面の位置ではなく、あくまでマス番号の大小に由来しています。
+</p>
+
+<p>
+では、なぜこのような分割なのでしょうか？
+理由は単純で、<strong>コンピュータが一度に扱える整数の最大幅が64ビットだから</strong>です。
+81マスを1つの変数に入れたいところですが、C++ の最大の整数型 <code>uint64_t</code> は64ビットまでしか持てません。
+そこで81マスを順番に並べて、最初の64マス（マス番号0〜63）を <code>lo</code> に、
+残りの17マス（マス番号64〜80）を <code>hi</code> に入れているだけです。
+64と17という不均等な分割は、64ビット整数の限界から来ています。
+</p>
+
+<div class="note">
+<strong>lo/hi を意識する必要はほとんどない</strong><br>
+「上側が lo で下側が hi」という対応は人間にとっては紛らわしいですが、
+実際にエンジンのコードを書くときに <code>lo</code>/<code>hi</code> のどちらがどの段かを意識する場面はほとんどありません。
+<code>set(square)</code> や <code>test(square)</code> がマス番号から自動的に <code>lo</code>/<code>hi</code> を振り分けてくれるので、
+プログラマは「マス番号40を操作する」とだけ考えれば済みます。
+<code>lo</code>/<code>hi</code> の分割はビットボード内部に隠された実装の都合であり、
+外側から使う分にはマス番号だけを意識すれば十分です。
+</div>
+
+<p class="source-ref">src/bitboard.h（抜粋）</p>
+<pre><code>struct Bitboard {
+    static constexpr std::uint64_t kHiMask = (1ULL &lt;&lt; 17) - 1;
+
+    std::uint64_t lo = 0;
+    std::uint64_t hi = 0;
+
+    constexpr Bitboard() = default;
+    constexpr Bitboard(std::uint64_t lo_bits, std::uint64_t hi_bits)
+        : lo(lo_bits), hi(hi_bits &amp; kHiMask) {}
+</code></pre>
+
+<p>
+マス番号0〜63が <code>lo</code> の各ビットに、マス番号64〜80が <code>hi</code> の下位17ビットに対応します。
+マス番号は <code>square = row × 9 + col</code> で計算されます（row-major 順）。
+以下の表で、各マスのマス番号・格納先・ビット位置を確認できます。
+</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>段</th>
+      <th>row</th>
+      <th>9筋<br>(col 0)</th>
+      <th>8筋<br>(col 1)</th>
+      <th>7筋<br>(col 2)</th>
+      <th>6筋<br>(col 3)</th>
+      <th>5筋<br>(col 4)</th>
+      <th>4筋<br>(col 5)</th>
+      <th>3筋<br>(col 6)</th>
+      <th>2筋<br>(col 7)</th>
+      <th>1筋<br>(col 8)</th>
+      <th>格納先</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>一</td><td>0</td><td>0</td><td>1</td><td>2</td><td>3</td><td>4</td><td>5</td><td>6</td><td>7</td><td>8</td><td><code>lo</code> bit 0〜8</td></tr>
+    <tr><td>二</td><td>1</td><td>9</td><td>10</td><td>11</td><td>12</td><td>13</td><td>14</td><td>15</td><td>16</td><td>17</td><td><code>lo</code> bit 9〜17</td></tr>
+    <tr><td>三</td><td>2</td><td>18</td><td>19</td><td>20</td><td>21</td><td>22</td><td>23</td><td>24</td><td>25</td><td>26</td><td><code>lo</code> bit 18〜26</td></tr>
+    <tr><td>四</td><td>3</td><td>27</td><td>28</td><td>29</td><td>30</td><td>31</td><td>32</td><td>33</td><td>34</td><td>35</td><td><code>lo</code> bit 27〜35</td></tr>
+    <tr><td>五</td><td>4</td><td>36</td><td>37</td><td>38</td><td>39</td><td>40</td><td>41</td><td>42</td><td>43</td><td>44</td><td><code>lo</code> bit 36〜44</td></tr>
+    <tr><td>六</td><td>5</td><td>45</td><td>46</td><td>47</td><td>48</td><td>49</td><td>50</td><td>51</td><td>52</td><td>53</td><td><code>lo</code> bit 45〜53</td></tr>
+    <tr><td>七</td><td>6</td><td>54</td><td>55</td><td>56</td><td>57</td><td>58</td><td>59</td><td>60</td><td>61</td><td>62</td><td><code>lo</code> bit 54〜62</td></tr>
+    <tr><td>八</td><td>7</td><td>63</td><td>64</td><td>65</td><td>66</td><td>67</td><td>68</td><td>69</td><td>70</td><td>71</td><td><code>lo</code> bit 63 /<br><code>hi</code> bit 0〜7</td></tr>
+    <tr><td>九</td><td>8</td><td>72</td><td>73</td><td>74</td><td>75</td><td>76</td><td>77</td><td>78</td><td>79</td><td>80</td><td><code>hi</code> bit 8〜16</td></tr>
+  </tbody>
+</table>
+
+<p>
+例えば「5五」は row=4, col=4 なので、マス番号は 4×9+4 = <strong>40</strong>、<code>lo</code> のビット40 に対応します。
+「1九」は row=8, col=8 なので、マス番号は 8×9+8 = <strong>80</strong>、<code>hi</code> のビット16（= 80−64）に対応します。
+</p>
+
+<div class="note">
+<strong>h段（row 7）の分割</strong><br>
+h段の9マス（sq 63〜71）はloとhiにまたがっています。
+sq 63 は lo のビット63（最上位ビット）に、sq 64〜71 は hi のビット0〜7に格納されます。
+この分割はrow-major順でマスを0から順に並べた結果であり、
+特に段の途中で分かれることによる問題はありません。
+ビットボード操作は個々のマスに対して行われるため、段の境界を意識する必要はないのです。
+</div>
+
+<!-- ============================================================ -->
+<h2>3.3 kHiMask によるマスキング</h2>
+
+<p>
+<code>hi</code> は64ビットの変数ですが、実際に使うのは下位17ビットだけです。
+上位47ビットにゴミが入ると集合演算の結果がおかしくなるため、
+<code>kHiMask</code> でマスキングして上位ビットをクリアします。
+</p>
+
+<pre><code>static constexpr std::uint64_t kHiMask = (1ULL &lt;&lt; 17) - 1;
+// kHiMask = 0x1FFFF
+//
+// 16進数: 0x  0001 FFFF
+// 2進数:  0b  0000 0000 ... 0001 1111 1111 1111 1111
+//                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+//                            下位17ビットがすべて1
+//
+// ※ 0x は16進数、0b は2進数を表すプレフィックス（接頭辞）です。
+//   C++ のコード中で 0xFF は16進数の255、0b1010 は2進数の10を意味します。</code></pre>
+
+<p>
+コンストラクタで <code>hi_bits &amp; kHiMask</code> が行われるほか、
+ビット操作のたびに <code>hi &amp;= kHiMask</code> や <code>(hi | other.hi) &amp; kHiMask</code>
+のようにマスキングされます。これにより、hi の上位47ビットが常に0であることが保証されます。
+</p>
+
+<!-- ============================================================ -->
+<h2>3.4 基本操作</h2>
+
+<h3>3.4.1 any() / none() — 空判定</h3>
+
+<p class="source-ref">src/bitboard.h（抜粋）</p>
+<pre><code>bool any() const {
+    return lo != 0 || hi != 0;
+}
+
+bool none() const {
+    return !any();
+}
+
+explicit operator bool() const {
+    return any();
+}
+</code></pre>
+
+<p>
+<code>any()</code> はビットボードに1つ以上のマスがセットされていれば <code>true</code>、
+<code>none()</code> は完全に空なら <code>true</code> を返します。
+<code>explicit operator bool()</code> により、<code>if (bb) { ... }</code> のような条件式でも使えます。
+</p>
+
+<div class="note">
+<strong>使用例</strong><br>
+<code>any()</code> は、あるマスに特定の駒の利きが届いているか（＝攻撃されているか）を判定する場面で頻繁に使われます。
+
+<figure>
+<img src="bb_any_example.png" alt="any()の使用例：後手の歩の利きが5五に届いているか判定" style="max-width: 700px; width: 100%;">
+<figcaption>左：後手の歩の位置、右：「ここに歩があれば5五に利きが届く」マス。AND で共通部分を取る</figcaption>
+</figure>
+
+<p>
+「5五が相手の歩に攻撃されているか？」を判定するには、逆方向から考えます。
+「どのマスに歩があれば5五に利きが届くか」を事前に計算しておき（右の図）、
+実際にそこに歩がいるか（左の図）を AND で調べます。
+</p>
+
+<pre><code>// src/position.cpp — あるマスに相手の歩の利きが届いているか？
+if ((piece_bb_[opponent][Pawn] &amp; step_to[opponent][Pawn][square]).any()) {
+    return true;  // 歩の利きが届いている → このマスは攻撃されている
+}</code></pre>
+<code>piece_bb_[opponent][Pawn]</code>（相手の歩があるマスの集合）と
+<code>step_to[opponent][Pawn][square]</code>（ここに歩があれば対象マスに利きが届くマスの集合）の AND を取り、
+結果が空でなければ（<code>.any()</code>）攻撃されていると判定します。
+上の図では、後手の歩が5四にあり、5四は「ここに歩があれば5五に利きが届く位置」でもあるため、AND の結果に5四が残り、<code>.any()</code> は <code>true</code> を返します。
+<br><br>
+<strong>ループの終了条件としての any()</strong><br>
+ビットボードから1マスずつ取り出して処理するパターンでも <code>any()</code> は欠かせません。
+具体的な例で、1ステップずつ見ていきましょう。
+
+<h4>例：角の移動先を1マスずつ処理する</h4>
+
+<p>
+5五にいる角の利きが 6四・4六・3七 の3マスだけに届いている状況を考えます。
+なぜ3マスだけかというと、下の図のように周囲に駒がいるためです。
+</p>
+<ul>
+  <li><strong>6四</strong>：ここに相手の駒がいるので、角は6四に移動して取れますが、その先の7三には進めません</li>
+  <li><strong>4六・3七</strong>：4六は空きマスなので通過でき、3七に相手の駒がいるのでそこまで届きます（3七の先の2八には進めません）</li>
+  <li>残りの2方向（4四方面・6六方面）には味方の駒がいて、そもそも1マスも進めません</li>
+</ul>
+<p>
+この3マスそれぞれに対して「角を5五からそこに動かす手」を作りたいとき、次のコードを使います。
+</p>
+
+<pre><code>// targets = 角の利きが届くマスの集合（6四, 4六, 3七 の3ビットが立っている）
+while (targets.any()) {          // まだマスが残っている？
+    int sq = targets.pop_lsb();  // 最小番号のマスを1つ取り出し、そのビットを消す
+    // sq への移動手を生成...
+}</code></pre>
+
+<p>
+<code>pop_lsb()</code> は、ビットボードの中で<strong>最もマス番号が小さい</strong>マスを1つ返し、
+そのビットを 0 にします（集合から1つ取り除く）。
+<code>any()</code> は「まだ 1 のビットが残っているか」を返します。
+この2つを組み合わせたループの動きを、1ステップずつ図で追ってみましょう。
+</p>
+
+<figure>
+<img src="bb_loop_steps.png" alt="pop_lsb()ループの各ステップ" style="max-width: 680px; width: 100%;">
+<figcaption>● が処理待ちのマス、★ が今取り出したマス、✓ が処理済みのマス</figcaption>
+</figure>
+
+<p><strong>Step 1（ループ開始前）：</strong>
+<code>targets</code> には 6四・4六・3七 の3ビットが立っています（●で表示）。
+<code>any()</code> は「ビットが残っている」ので <code>true</code> → ループに入ります。
+</p>
+
+<p><strong>Step 2（1回目）：</strong>
+<code>pop_lsb()</code> が最小番号のマス＝6四（マス番号28）を返し、そのビットを 0 にします（★で表示）。
+ここで「角を5五から6四に動かす手」を生成します。
+<code>targets</code> のビットは 3→2 に減りました。
+</p>
+
+<p><strong>Step 3（2回目）：</strong>
+<code>any()</code> はまだ <code>true</code>。
+<code>pop_lsb()</code> が次に小さいマス＝4六（マス番号50）を返します。
+「角を5五から4六に動かす手」を生成。残り1ビット。
+</p>
+
+<p><strong>Step 4（3回目）：</strong>
+<code>any()</code> はまだ <code>true</code>。
+<code>pop_lsb()</code> が最後のマス＝3七（マス番号60）を返します。
+「角を5五から3七に動かす手」を生成。残り0ビット。
+</p>
+
+<p><strong>終了：</strong>
+<code>any()</code> が <code>false</code>（ビットが1つも残っていない）を返すので、ループを抜けます。
+全3マスをちょうど1回ずつ、漏れなく処理できました。
+</p>
+
+<p>
+もし <code>any()</code> で判定せずにループすると、空のビットボードに対して
+<code>pop_lsb()</code> を呼んでしまい、未定義動作（プログラムの動作が保証されない状態）になります。
+<code>any()</code> が <code>false</code>（＝空）になった時点でループを抜けることで、安全に全マスを処理できます。
+</p>
+</div>
+
+<h3>3.4.2 test() — 特定マスの確認</h3>
+
+<p class="source-ref">src/bitboard.h（抜粋）</p>
+<pre><code>bool test(int square) const {
+    if (square &lt; 64) {
+        return ((lo >> square) &amp; 1ULL) != 0;
+    }
+    return ((hi >> (square - 64)) &amp; 1ULL) != 0;
+}
+</code></pre>
+
+<p>
+指定したマス番号のビットが立っているかを確認します。
+<code>square &lt; 64</code> なら <code>lo</code> を、それ以外なら <code>hi</code> を参照します。
+ビットシフトとANDで該当ビットだけを取り出す、標準的なビット操作です。
+</p>
+
+<div class="note">
+<strong>使用例</strong><br>
+<code>test()</code> は、スライダー型の利き計算で「レイの先に駒があるか」を判定するのに使われます。
+
+<figure>
+<img src="bb_test_example.png" alt="test()の使用例：角のレイが駒にぶつかって止まる" style="max-width: 700px; width: 100%;">
+<figcaption>5五の角が右上方向にレイを伸ばし、3三の駒で occupied.test() が true → そこで停止</figcaption>
+</figure>
+
+<pre><code>// src/position.cpp — ray_attacks_from() より
+for (int index = 0; index &lt; t.ray_lengths[from][dir]; ++index) {
+    const int to = t.ray_squares[from][dir][index];
+    attacks.set(to);            // このマスに利きを追加
+    if (occupied.test(to)) {    // ← このマスに駒がある？
+        break;                  // あればこの方向のレイは終了
+    }
+}</code></pre>
+<code>occupied</code>（盤上の全駒のビットボード）に対して <code>test(to)</code> を呼ぶことで、
+レイが進む先のマスに駒があるかどうかを1ビットの検査だけで判定しています。
+上の図では、4四 → 3三と進んだところで <code>occupied.test(3三)</code> が <code>true</code> になり、
+<code>break</code> でこの方向のループが終了します。2二・1一（×印）には利きが届きません。
+</div>
+
+<h3>3.4.3 set() — マスの追加</h3>
+
+<p class="source-ref">src/bitboard.h（抜粋）</p>
+<pre><code>void set(int square) {
+    if (square &lt; 64) {
+        lo |= 1ULL &lt;&lt; square;
+    } else {
+        hi |= 1ULL &lt;&lt; (square - 64);
+        hi &amp;= kHiMask;
+    }
+}
+</code></pre>
+
+<p>
+指定したマスのビットを1にセットします。
+<code>hi</code> への操作後に <code>kHiMask</code> でマスキングすることで、
+上位ビットが汚染されないようにしています。
+なお、<code>square - 64</code> が0〜16の範囲であれば <code>1ULL &lt;&lt; (square - 64)</code>
+は常に下位17ビット内に収まるため、実際にはマスキングがなくても問題ありませんが、
+安全のために付けられています。
+</p>
+
+<div class="note">
+<strong>使用例</strong><br>
+<code>set()</code> は、盤面に駒を追加するときにビットボードを更新する場面で使われます。
+
+<figure>
+<img src="bb_set_example.png" alt="set()の使用例：5五に銀を追加" style="max-width: 700px; width: 100%;">
+<figcaption>5五のマスに銀を追加 → ビットボードの該当ビットが 0→1 に変化</figcaption>
+</figure>
+
+<pre><code>// src/position.cpp — add_piece() より
+void Position::add_piece(int square, Color color, PieceType type) {
+    board_[square] = encode_piece(color, type);  // 盤面配列に駒を書き込み
+    occupied_.set(square);                        // ← 全駒ビットボードにマスを追加
+    color_bb_[color].set(square);                 // ← 色別ビットボードにマスを追加
+    piece_bb_[color][type].set(square);           // ← 駒種別ビットボードにマスを追加
+}</code></pre>
+1つの駒を追加するだけで、3つのビットボード（全駒・色別・駒種別）すべてに <code>set()</code> を呼んで同期させます。
+</div>
+
+<h3>3.4.4 reset() — マスの削除</h3>
+
+<p class="source-ref">src/bitboard.h（抜粋）</p>
+<pre><code>void reset(int square) {
+    if (square &lt; 64) {
+        lo &amp;= ~(1ULL &lt;&lt; square);
+    } else {
+        hi &amp;= ~(1ULL &lt;&lt; (square - 64));
+    }
+}
+</code></pre>
+
+<p>
+指定したマスのビットを0にリセットします。
+<code>~(1ULL &lt;&lt; square)</code> は、対象ビットだけが0で他がすべて1のマスクです。
+これとANDを取ることで、対象ビットだけをクリアします。
+<code>reset()</code> ではマスキングは不要です（0にするだけなので上位ビットは影響しません）。
+</p>
+
+<div class="note">
+<strong>使用例</strong><br>
+<code>reset()</code> は、盤面から駒を取り除くときにビットボードを更新する場面で使われます。
+<code>set()</code> の逆操作です。
+
+<figure>
+<img src="bb_reset_example.png" alt="reset()の使用例：5五の銀を削除" style="max-width: 700px; width: 100%;">
+<figcaption>5五のマスから銀を削除 → ビットボードの該当ビットが 1→0 に変化</figcaption>
+</figure>
+
+<pre><code>// src/position.cpp — remove_piece() より
+void Position::remove_piece(int square) {
+    const Color color = piece_color(board_[square]);
+    const PieceType type = piece_type(board_[square]);
+    occupied_.reset(square);            // ← 全駒ビットボードからマスを削除
+    color_bb_[color].reset(square);     // ← 色別ビットボードからマスを削除
+    piece_bb_[color][type].reset(square); // ← 駒種別ビットボードからマスを削除
+    board_[square] = 0;                 // 盤面配列をクリア
+}</code></pre>
+駒を取り除くときも、<code>set()</code> と同じ3つのビットボードに対して <code>reset()</code> を呼び、
+整合性を保ちます。<code>add_piece()</code> と <code>remove_piece()</code> が対になっていることがわかります。
+</div>
+
+<!-- ============================================================ -->
+<h2>3.5 pop_lsb() — 最下位ビットの取り出し</h2>
+
+<p>
+ビットボードの最も重要な操作の1つが <code>pop_lsb()</code> です。
+集合の中で最も小さいマス番号を取り出し、そのビットをクリアします。
+</p>
+
+<p class="source-ref">src/bitboard.h（抜粋）</p>
+<pre><code>int pop_lsb() {
+    if (lo != 0) {
+        const int bit = __builtin_ctzll(lo);
+        lo &amp;= lo - 1;
+        return bit;
+    }
+    const int bit = __builtin_ctzll(hi);
+    hi &amp;= hi - 1;
+    return 64 + bit;
+}
+</code></pre>
+
+<h3>3.5.1 __builtin_ctzll の解説</h3>
+
+<p>
+<code>__builtin_ctzll(x)</code> はGCC/Clangの組み込み関数で、
+<strong>count trailing zeros</strong>（末尾の連続する0の個数）を返します。
+つまり、最下位のセットされたビットの位置を返します。
+</p>
+
+<pre><code>例: __builtin_ctzll(0b 0000 1010 0000) = 5
+    //                           ^^^^^  5個の0が続く
+    // → ビット5が最下位のセットされたビット</code></pre>
+
+<p>
+この関数は多くのCPUでハードウェア命令（x86では <code>tzcnt</code> または <code>bsf</code>）に
+直接変換されるため、非常に高速（1〜3クロック）です。
+</p>
+
+<h3>3.5.2 lo &amp;= lo - 1 のトリック</h3>
+
+<p>
+最下位ビットをクリアするために <code>lo &amp;= lo - 1</code> という巧妙なビット操作が使われています。
+</p>
+
+<pre><code>例: lo     = 0b 1010 1100
+    lo - 1 = 0b 1010 1011  (最下位の1とそれ以下を反転)
+    lo &amp; (lo-1)
+           = 0b 1010 1000  (最下位の1だけがクリアされた)</code></pre>
+
+<p>
+<code>x - 1</code> は最下位のセットされたビットを0にし、
+それより下のビットをすべて1にします。
+したがって <code>x &amp; (x - 1)</code> は最下位のセットされたビットだけをクリアします。
+これは古典的なビット操作のテクニックで、分岐なしで実行できます。
+</p>
+
+<h3>3.5.3 pop_lsb の動作例</h3>
+
+<p>
+「先手の歩がマス20, 29, 38にある」ビットボードからマスを順に取り出す例です。
+</p>
+
+<pre><code>Bitboard pawns;  // sq 20, 29, 38 がセット
+
+int sq1 = pawns.pop_lsb();  // sq1 = 20, マス20のビットがクリア
+int sq2 = pawns.pop_lsb();  // sq2 = 29, マス29のビットがクリア
+int sq3 = pawns.pop_lsb();  // sq3 = 38, マス38のビットがクリア
+// pawns.none() == true</code></pre>
+
+<!-- ============================================================ -->
+<h2>3.6 count() — 要素数のカウント</h2>
+
+<p class="source-ref">src/bitboard.h（抜粋）</p>
+<pre><code>int count() const {
+    return __builtin_popcountll(lo) + __builtin_popcountll(hi);
+}
+</code></pre>
+
+<p>
+<code>__builtin_popcountll(x)</code> は、<strong>population count</strong>（セットされたビットの数）を返す
+GCC/Clangの組み込み関数です。
+x86では <code>popcnt</code> 命令に変換されます。
+</p>
+
+<pre><code>例: __builtin_popcountll(0b 1010 1100) = 4
+    //                      ^  ^ ^^      4個のビットが立っている</code></pre>
+
+<p>
+<code>lo</code> と <code>hi</code> それぞれのpopcountを足すことで、
+ビットボード全体のセットされたビット数（= マスの数）を得ます。
+例えば、先手の駒のビットボードに対して <code>count()</code> を呼べば、
+先手の盤上の駒数が得られます。
+</p>
+
+<!-- ============================================================ -->
+<h2>3.7 集合演算オペレータ</h2>
+
+<p>
+ビットボード同士の集合演算は、ビット演算オペレータで提供されています。
+複合代入演算子（メンバ関数）と、二項演算子（フリー関数）の両方が定義されています。
+</p>
+
+<h3>3.7.1 複合代入演算子</h3>
+
+<p class="source-ref">src/bitboard.h（抜粋）</p>
+<pre><code>Bitboard&amp; operator|=(const Bitboard&amp; other) {
+    lo |= other.lo;
+    hi = (hi | other.hi) &amp; kHiMask;
+    return *this;
+}
+
+Bitboard&amp; operator&amp;=(const Bitboard&amp; other) {
+    lo &amp;= other.lo;
+    hi &amp;= other.hi;
+    return *this;
+}
+
+Bitboard&amp; operator^=(const Bitboard&amp; other) {
+    lo ^= other.lo;
+    hi = (hi ^ other.hi) &amp; kHiMask;
+    return *this;
+}
+</code></pre>
+
+<p>
+<code>|=</code>（和集合）と <code>^=</code>（対称差）では <code>hi</code> に
+<code>kHiMask</code> でマスキングが入ります。
+これは、OR や XOR で上位ビットに1が立つ可能性があるためです。
+<code>&amp;=</code>（積集合）ではマスキングは不要です
+（AND は新たなビットを立てないので、元の <code>hi</code> が正しければ結果も正しくなります）。
+</p>
+
+<h3>3.7.2 二項演算子とその他</h3>
+
+<p class="source-ref">src/bitboard.h（抜粋）</p>
+<pre><code>inline Bitboard operator|(Bitboard lhs, const Bitboard&amp; rhs) {
+    lhs |= rhs;
+    return lhs;
+}
+
+inline Bitboard operator&amp;(Bitboard lhs, const Bitboard&amp; rhs) {
+    lhs &amp;= rhs;
+    return lhs;
+}
+
+inline Bitboard operator^(Bitboard lhs, const Bitboard&amp; rhs) {
+    lhs ^= rhs;
+    return lhs;
+}
+
+inline Bitboard operator~(const Bitboard&amp; value) {
+    return Bitboard(~value.lo, ~value.hi);
+}
+
+inline bool operator==(const Bitboard&amp; lhs, const Bitboard&amp; rhs) {
+    return lhs.lo == rhs.lo &amp;&amp; lhs.hi == rhs.hi;
+}
+
+inline bool operator!=(const Bitboard&amp; lhs, const Bitboard&amp; rhs) {
+    return !(lhs == rhs);
+}
+</code></pre>
+
+<p>
+二項演算子はコピーセマンティクスで実装されています。
+<code>lhs</code> を値渡しで受け取り、複合代入演算子を適用して返す、典型的なパターンです。
+</p>
+
+<p>
+<code>operator~</code>（補集合）は <code>Bitboard</code> のコンストラクタを通すため、
+<code>hi</code> には自動的に <code>kHiMask</code> が適用されます。
+<code>~value.lo</code> で lo の全64ビットが反転し、
+<code>~value.hi</code> で hi が反転された後、コンストラクタで上位47ビットがマスクされます。
+</p>
+
+<div class="note">
+<strong>集合演算の活用例</strong><br>
+合法手生成では、以下のような組み合わせが頻出します。
+<pre><code>// 角の利きのうち、味方の駒がないマス = 角の移動可能先
+Bitboard targets = bishop_attacks &amp; ~own_pieces;
+
+// 相手の利きがあるマスを除外した玉の移動先
+Bitboard king_moves = king_attacks &amp; ~opponent_attacks &amp; ~own_pieces;
+
+// 敵の駒があるマスとの積集合 = 取れる駒
+Bitboard captures = attacks &amp; opponent_pieces;
+</code></pre>
+</div>
+
+<!-- ============================================================ -->
+<h2>3.8 BitboardIterator — ビットボードの走査</h2>
+
+<p>
+Hayanagiの <code>Bitboard</code> にはイテレータは直接定義されていませんが、
+<code>pop_lsb()</code> を使った典型的な走査パターンがエンジン全体で使われています。
+</p>
+
+<pre><code>// ビットボード bb のすべてのマスを処理する典型パターン
+Bitboard bb = /* 何らかの集合 */;
+while (bb.any()) {
+    int sq = bb.pop_lsb();
+    // sq に対する処理
+}
+</code></pre>
+
+<p>
+このパターンは以下のように動作します。
+</p>
+
+<ol>
+  <li><code>bb.any()</code> で集合が空でないことを確認</li>
+  <li><code>bb.pop_lsb()</code> で最小のマス番号を取得し、そのビットをクリア</li>
+  <li>取得したマスに対する処理を行う</li>
+  <li>集合が空になるまで繰り返す</li>
+</ol>
+
+<p>
+ループ回数はセットされたビットの数（= マスの数）に正確に等しいため、
+不要な反復がありません。空マスの多い局面でも効率的に処理できます。
+</p>
+
+<p>
+例えば、先手の歩が3つある場合のループ展開は以下のようになります。
+</p>
+
+<pre><code>// 先手の歩: sq 47, 49, 56 にある場合
+Bitboard pawns;  // bit 47, 49, 56 がセット
+
+// 1回目: pop_lsb() → 47 (loの最下位セットビット)
+// 2回目: pop_lsb() → 49
+// 3回目: pop_lsb() → 56
+// 4回目: any() → false, ループ終了</code></pre>
+
+<!-- ============================================================ -->
+<h2>3.9 ビットボードの視覚的図解</h2>
+
+<p>
+81マスのビット位置と盤面の対応を視覚的に示します。
+各マスの数値はビット位置（= マス番号 = square）です。
+</p>
+
+<pre class="board-diagram">
+        9筋  8筋  7筋  6筋  5筋  4筋  3筋  2筋  1筋
+        col0 col1 col2 col3 col4 col5 col6 col7 col8
+       ┌────┬────┬────┬────┬────┬────┬────┬────┬────┐
+a段 r0 │  0 │  1 │  2 │  3 │  4 │  5 │  6 │  7 │  8 │  lo
+       ├────┼────┼────┼────┼────┼────┼────┼────┼────┤
+b段 r1 │  9 │ 10 │ 11 │ 12 │ 13 │ 14 │ 15 │ 16 │ 17 │  lo
+       ├────┼────┼────┼────┼────┼────┼────┼────┼────┤
+c段 r2 │ 18 │ 19 │ 20 │ 21 │ 22 │ 23 │ 24 │ 25 │ 26 │  lo
+       ├────┼────┼────┼────┼────┼────┼────┼────┼────┤
+d段 r3 │ 27 │ 28 │ 29 │ 30 │ 31 │ 32 │ 33 │ 34 │ 35 │  lo
+       ├────┼────┼────┼────┼────┼────┼────┼────┼────┤
+e段 r4 │ 36 │ 37 │ 38 │ 39 │ 40 │ 41 │ 42 │ 43 │ 44 │  lo
+       ├────┼────┼────┼────┼────┼────┼────┼────┼────┤
+f段 r5 │ 45 │ 46 │ 47 │ 48 │ 49 │ 50 │ 51 │ 52 │ 53 │  lo
+       ├────┼────┼────┼────┼────┼────┼────┼────┼────┤
+g段 r6 │ 54 │ 55 │ 56 │ 57 │ 58 │ 59 │ 60 │ 61 │ 62 │  lo
+       ├────┼────┼────┼────┼────┼────┼────┼────┼────┤
+h段 r7 │ 63 │ 64 │ 65 │ 66 │ 67 │ 68 │ 69 │ 70 │ 71 │ lo/hi
+       ├────┼────┼────┼────┼────┼────┼────┼────┼────┤   境界
+i段 r8 │ 72 │ 73 │ 74 │ 75 │ 76 │ 77 │ 78 │ 79 │ 80 │  hi
+       └────┴────┴────┴────┴────┴────┴────┴────┴────┘
+
+lo: ビット  0〜63 → マス  0〜63 (a段〜h段9筋)
+hi: ビット  0〜16 → マス 64〜80 (h段8筋〜i段1筋)
+</pre>
+
+<p>
+初期局面での先手の歩のビットボードを例にとると、以下のようになります。
+先手の歩はg段（7段目、row 6）の全9マス（sq 54〜62）にあります。
+</p>
+
+<pre class="board-diagram">
+先手の歩（初期局面）:
+
+        9筋  8筋  7筋  6筋  5筋  4筋  3筋  2筋  1筋
+       ┌────┬────┬────┬────┬────┬────┬────┬────┬────┐
+a段    │  . │  . │  . │  . │  . │  . │  . │  . │  . │
+b段    │  . │  . │  . │  . │  . │  . │  . │  . │  . │
+c段    │  . │  . │  . │  . │  . │  . │  . │  . │  . │
+d段    │  . │  . │  . │  . │  . │  . │  . │  . │  . │
+e段    │  . │  . │  . │  . │  . │  . │  . │  . │  . │
+f段    │  . │  . │  . │  . │  . │  . │  . │  . │  . │
+g段    │  1 │  1 │  1 │  1 │  1 │  1 │  1 │  1 │  1 │  ← 9つのビット
+h段    │  . │  . │  . │  . │  . │  . │  . │  . │  . │
+i段    │  . │  . │  . │  . │  . │  . │  . │  . │  . │
+       └────┴────┴────┴────┴────┴────┴────┴────┴────┘
+
+lo = 0x 007F C000 0000 0000   (ビット54〜62がセット)
+hi = 0x 0000 0000 0000 0000   (すべて0)
+count() = 9
+</code></pre>
+
+<!-- ============================================================ -->
+<h2>3.10 設計上の注意点</h2>
+
+<h3>3.10.1 コンパイラ組み込み関数への依存</h3>
+
+<p>
+<code>__builtin_ctzll</code> と <code>__builtin_popcountll</code> はGCC/Clangの拡張です。
+MSVCでは <code>_BitScanForward64</code> と <code>__popcnt64</code> に対応します。
+Hayanagiのコードでは直接GCC/Clang拡張を使っていますが、
+必要に応じてプリプロセッサマクロで切り替えることも可能です。
+</p>
+
+<h3>3.10.2 __builtin_ctzll(0) の未定義動作</h3>
+
+<p>
+<code>__builtin_ctzll(0)</code> は未定義動作です。
+<code>pop_lsb()</code> では <code>lo != 0</code> を先にチェックしてから
+<code>__builtin_ctzll(lo)</code> を呼び、
+<code>lo == 0</code> の場合は <code>hi</code> に対して操作するため、
+安全に使われています。ただし、<code>lo == 0 かつ hi == 0</code>（空のビットボード）に対して
+<code>pop_lsb()</code> を呼ぶと未定義動作になるため、
+呼び出し前に <code>any()</code> でチェックする必要があります。
+</p>
+
+<div class="warn">
+<strong>注意:</strong>
+空のビットボードに対して <code>pop_lsb()</code> を呼んではいけません。
+必ず <code>bb.any()</code> や <code>while (bb.any())</code> で空でないことを確認してから呼び出してください。
+</div>
+
+<h3>3.10.3 constexpr 対応</h3>
+
+<p>
+デフォルトコンストラクタと2引数コンストラクタは <code>constexpr</code> 宣言されています。
+これにより、コンパイル時に定数のビットボードを生成できます。
+事前計算テーブル（利きテーブルなど）の初期化に活用されます。
+</p>
+
+<pre><code>// コンパイル時に生成可能
+constexpr Bitboard kEmptyBoard{};                         // すべて0
+constexpr Bitboard kAllSquares{0xFFFFFFFFFFFFFFFFULL,
+                                0x1FFFFULL};              // 全81マス
+</code></pre>
+
+<!-- ============================================================ -->
+<h2>3.11 まとめ</h2>
+
+<p>本章ではHayanagiのビットボード実装を学びました。</p>
+
+<ul>
+  <li>ビットボードは盤面のマスの集合を整数のビットで表現し、集合演算をビット演算1回で実行する</li>
+  <li>81マスを <code>lo</code>（64ビット）+ <code>hi</code>（17ビット）の2つの <code>uint64_t</code> で表現する</li>
+  <li><code>kHiMask</code> で <code>hi</code> の上位47ビットをマスクし、不正なビットを防ぐ</li>
+  <li><code>test()</code>, <code>set()</code>, <code>reset()</code> で個別マスの確認・追加・削除を行う</li>
+  <li><code>pop_lsb()</code> は <code>__builtin_ctzll</code> で最下位ビットの位置を取得し、<code>x &amp;= x - 1</code> でクリアする</li>
+  <li><code>count()</code> は <code>__builtin_popcountll</code> でセットされたビット数を数える</li>
+  <li><code>|=</code>, <code>&amp;=</code>, <code>^=</code> で和集合・積集合・対称差を計算する</li>
+  <li><code>while (bb.any()) { int sq = bb.pop_lsb(); ... }</code> のパターンで全マスを走査する</li>
+</ul>
+
+<p>
+次章では、このビットボードと第2章の型定義を組み合わせて、
+局面全体を管理する <code>Position</code> クラスを見ていきます。
+</p>
+
+<nav class="chapter-nav">
+  <a href="chapter02.html">&larr; 前章: 第2章 型とデータ表現</a>
+  <a href="chapter04.html">次章: 第4章 局面管理 — 基礎編 &rarr;</a>
+</nav>
+
+</div>
+</body>
+</html>

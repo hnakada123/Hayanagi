@@ -1,0 +1,258 @@
+/* Hayanagi Textbook — style.css */
+
+:root {
+  --bg: #fafaf8;
+  --fg: #1a1a1a;
+  --accent: #2d5a27;
+  --accent-light: #e8f0e6;
+  --code-bg: #f4f1ec;
+  --code-border: #d6d0c4;
+  --sidebar-bg: #f0ede6;
+  --link: #2d5a27;
+  --link-hover: #1a3a17;
+  --heading: #1a3a17;
+  --border: #d6d0c4;
+  --note-bg: #e8f0e6;
+  --note-border: #2d5a27;
+  --warn-bg: #fff8e1;
+  --warn-border: #f9a825;
+  --max-width: 860px;
+  --font-sans: "Noto Sans JP", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", sans-serif;
+  --font-mono: "Source Code Pro", "Menlo", "Consolas", monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  font-size: 16px;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  color: var(--fg);
+  background: var(--bg);
+  line-height: 1.8;
+}
+
+/* --- Layout --- */
+.wrapper {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+
+/* --- Header / Nav --- */
+.site-header {
+  background: var(--accent);
+  color: #fff;
+  padding: 1rem 1.5rem;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 2px 8px rgba(0,0,0,.15);
+}
+.site-header .inner {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .5rem;
+}
+.site-header h1 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+.site-header h1 a {
+  color: #fff;
+  text-decoration: none;
+}
+.site-header nav a {
+  color: rgba(255,255,255,.85);
+  text-decoration: none;
+  font-size: .9rem;
+  margin-left: 1rem;
+}
+.site-header nav a:hover {
+  color: #fff;
+  text-decoration: underline;
+}
+
+/* --- Chapter navigation --- */
+.chapter-nav {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 3rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+  font-size: .95rem;
+}
+.chapter-nav a {
+  color: var(--link);
+  text-decoration: none;
+}
+.chapter-nav a:hover {
+  text-decoration: underline;
+}
+
+/* --- Typography --- */
+h1, h2, h3, h4 {
+  color: var(--heading);
+  line-height: 1.4;
+}
+h1 { font-size: 1.8rem; margin: 2rem 0 1rem; }
+h2 { font-size: 1.4rem; margin: 2.5rem 0 .8rem; border-bottom: 2px solid var(--accent-light); padding-bottom: .3rem; }
+h3 { font-size: 1.15rem; margin: 2rem 0 .6rem; }
+h4 { font-size: 1rem; margin: 1.5rem 0 .5rem; }
+
+p { margin: .8rem 0; }
+
+a { color: var(--link); }
+a:hover { color: var(--link-hover); }
+
+/* --- Code --- */
+code {
+  font-family: var(--font-mono);
+  font-size: .88em;
+  background: var(--code-bg);
+  padding: .15em .35em;
+  border-radius: 3px;
+}
+
+pre {
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: 6px;
+  padding: 1rem 1.2rem;
+  overflow-x: auto;
+  line-height: 1.5;
+  font-size: .85rem;
+  margin: 1.2rem 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  font-size: inherit;
+}
+
+/* --- Tables --- */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1.2rem 0;
+  font-size: .92rem;
+}
+th, td {
+  border: 1px solid var(--border);
+  padding: .5rem .8rem;
+  text-align: left;
+}
+th {
+  background: var(--accent-light);
+  font-weight: 600;
+}
+tr:nth-child(even) {
+  background: rgba(0,0,0,.02);
+}
+
+/* --- Notes / Boxes --- */
+.note {
+  background: var(--note-bg);
+  border-left: 4px solid var(--note-border);
+  padding: .8rem 1.2rem;
+  margin: 1.2rem 0;
+  border-radius: 0 6px 6px 0;
+  font-size: .93rem;
+}
+.note strong { color: var(--accent); }
+
+.warn {
+  background: var(--warn-bg);
+  border-left: 4px solid var(--warn-border);
+  padding: .8rem 1.2rem;
+  margin: 1.2rem 0;
+  border-radius: 0 6px 6px 0;
+  font-size: .93rem;
+}
+
+/* --- Lists --- */
+ul, ol { margin: .6rem 0; padding-left: 1.6rem; }
+li { margin: .3rem 0; }
+
+/* --- Figures --- */
+figure {
+  margin: 1.5rem 0;
+  text-align: center;
+}
+figcaption {
+  font-size: .88rem;
+  color: #666;
+  margin-top: .4rem;
+}
+
+/* --- Index / TOC --- */
+.toc {
+  list-style: none;
+  padding: 0;
+}
+.toc > li {
+  margin: .6rem 0;
+}
+.toc > li > a {
+  font-weight: 600;
+  font-size: 1.05rem;
+  text-decoration: none;
+}
+.toc > li > a:hover {
+  text-decoration: underline;
+}
+.toc .desc {
+  display: block;
+  color: #666;
+  font-size: .9rem;
+  font-weight: 400;
+  margin-top: .1rem;
+}
+
+/* --- Diagram (ASCII board) --- */
+.board-diagram {
+  font-family: var(--font-mono);
+  font-size: .82rem;
+  line-height: 1.4;
+  background: var(--code-bg);
+  border: 1px solid var(--code-border);
+  border-radius: 6px;
+  padding: 1rem 1.2rem;
+  display: inline-block;
+  margin: 1rem 0;
+  white-space: pre;
+}
+
+/* --- Keyword highlight --- */
+.keyword {
+  background: #fff3cd;
+  padding: .1em .3em;
+  border-radius: 3px;
+  font-weight: 600;
+}
+
+/* --- Source file reference --- */
+.source-ref {
+  font-family: var(--font-mono);
+  font-size: .85rem;
+  color: #666;
+  font-style: italic;
+}
+
+/* --- Responsive --- */
+@media (max-width: 640px) {
+  html { font-size: 15px; }
+  .wrapper { padding: 1.2rem 1rem 3rem; }
+  h1 { font-size: 1.5rem; }
+  pre { font-size: .8rem; padding: .8rem; }
+}

@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第10章 詰み探索 — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
+    <nav><a href="index.html">目次</a></nav>
+  </div>
+</header>
+<div class="wrapper">
+
+<h1>第10章 詰み探索</h1>
+
+<p>
+将棋エンジンにおいて「詰み」を確実に発見することは、勝利に直結する最重要課題のひとつです。
+しかし通常のアルファベータ探索だけでは、探索深さの制限や枝刈りにより短手数の詰みを見逃してしまう場合があります。
+本章では、Hayanagiが実装する専用の詰み探索アルゴリズムについて、コードを読みながら解説します。
+</p>
+
+<!-- ============================================================ -->
+<h2>10.1 なぜ専用の詰み探索が必要か</h2>
+
+<p>
+通常の反復深化探索では、各深さにおいてアルファベータ枝刈りやLMR（Late Move Reduction）、
+ヌルムーブ枝刈りなどの高速化手法が適用されます。
+これらの手法は大部分の局面で正しく機能しますが、詰み手順は「王手の連続」という非常に特殊な手順であるため、
+通常の評価関数による枝刈りで重要な王手が切り捨てられることがあります。
+</p>
+
+<p>
+例えば、3手詰みの局面であっても、通常探索の深さ3では王手以外の手も含めて膨大な候補手を調べるため、
+時間制約内に詰み手順に辿り着けないことがあります。
+専用の詰み探索では、攻撃側は王手をかける手のみ、防御側は合法手すべて（逃げ手）を調べるという制約を加えることで、
+探索木を大幅に削減し、短時間で短手数の詰みを発見できます。
+</p>
+
+<!-- ============================================================ -->
+<h2>10.2 find_forced_mate() の設計</h2>
+
+<p>
+詰み探索のエントリーポイントは <code>find_forced_mate()</code> です。
+この関数は最大手数（<code>max_ply</code>）を受け取り、その手数以内の詰みがあるかどうかを判定します。
+Hayanagiでは定数 <code>kMateSearchMaxPly = 5</code> が定義されており、最大5手詰みまでを探索します。
+</p>
+
+<pre><code>bool Search::find_forced_mate(const Position&amp; position, int max_ply, std::vector&lt;Move&gt;&amp; pv) {
+    pv.clear();
+    const int normalized_ply = std::max(1, max_ply | 1);
+    return mate_search_attack(position, normalized_ply, &amp;pv);
+}</code></pre>
+
+<p>
+<code>max_ply | 1</code> によって手数が必ず奇数に正規化されます。
+これは詰み手順が「攻撃→防御→攻撃→...→攻撃」と奇数手で終わるためです。
+結果はPV（主変化手順）として <code>pv</code> ベクタに格納されます。
+</p>
+
+<!-- ============================================================ -->
+<h2>10.3 mate_search_attack() — 攻撃側の探索</h2>
+
+<p>
+攻撃側の探索関数 <code>mate_search_attack()</code> は、王手をかける手のみを生成して探索します。
+</p>
+
+<pre><code>bool Search::mate_search_attack(const Position&amp; position,
+                                int remaining_ply,
+                                std::vector&lt;Move&gt;* pv) {
+    if (should_stop()) {
+        aborted_ = true;
+        return false;
+    }
+    count_node();
+
+    if (remaining_ply &lt;= 0) {
+        return false;
+    }
+
+    auto checking_moves = position.generate_checking_moves();
+    if (checking_moves.empty()) {
+        return false;
+    }
+
+    const Move no_tt_move;
+    const auto ordered_moves = score_moves(position, checking_moves, 0, no_tt_move);
+    for (const OrderedMove&amp; ordered_move : ordered_moves) {
+        const Move&amp; move = ordered_move.move;
+        Position child = position;
+        child.do_move(move);
+        std::vector&lt;Move&gt; defense_line;
+        std::vector&lt;Move&gt;* next_pv = pv != nullptr ? &amp;defense_line : nullptr;
+        if (mate_search_defense(child, remaining_ply - 1, next_pv)) {
+            if (pv != nullptr) {
+                pv-&gt;clear();
+                pv-&gt;push_back(move);
+                pv-&gt;insert(pv-&gt;end(), defense_line.begin(), defense_line.end());
+            }
+            return true;
+        }
+        if (aborted_) {
+            return false;
+        }
+    }
+
+    return false;
+}</code></pre>
+
+<p>
+この関数の重要なポイントを整理します。
+</p>
+
+<ul>
+  <li><strong>王手手のみ生成:</strong> <code>position.generate_checking_moves()</code> を呼び出し、
+  相手玉に王手をかける手だけを候補として取得します。これにより探索木が劇的に小さくなります。</li>
+  <li><strong>手の順序付け:</strong> 通常探索と同じ <code>score_moves()</code> を使い、
+  駒取りや成りなどを優先して効率的に詰み手順を発見します。</li>
+  <li><strong>再帰呼び出し:</strong> 各王手手について局面を進め、防御側の探索 <code>mate_search_defense()</code> を呼びます。
+  防御側が「全ての応手に対して詰みが成立する」と返せば、この王手手は詰みに寄与する手です。</li>
+  <li><strong>PVの構築:</strong> 詰みが見つかった場合、王手手と防御側の応手列をPVに連結して返します。</li>
+  <li><strong>中断処理:</strong> <code>should_stop()</code> による時間制限やストップ命令に対応します。</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>10.4 mate_search_defense() — 防御側の探索</h2>
+
+<p>
+防御側の探索関数 <code>mate_search_defense()</code> は、玉方のすべての合法手を試し、
+逃れ手があるかどうかを判定します。
+</p>
+
+<pre><code>bool Search::mate_search_defense(const Position&amp; position,
+                                 int remaining_ply,
+                                 std::vector&lt;Move&gt;* pv) {
+    if (should_stop()) {
+        aborted_ = true;
+        return false;
+    }
+    count_node();
+
+    auto legal_moves = position.generate_search_legal_moves();
+    if (legal_moves.empty()) {
+        return position.is_in_check(position.side_to_move());
+    }
+    if (remaining_ply &lt;= 0) {
+        return false;
+    }
+
+    const Move no_tt_move;
+    const auto ordered_moves = score_moves(position, legal_moves, 0, no_tt_move);
+
+    Move selected_move;
+    std::vector&lt;Move&gt; selected_line;
+    std::size_t selected_length = 0;
+    bool has_selected = false;
+
+    for (const OrderedMove&amp; ordered_move : ordered_moves) {
+        const Move&amp; move = ordered_move.move;
+        Position child = position;
+        child.do_move(move);
+        std::vector&lt;Move&gt; attack_line;
+        std::vector&lt;Move&gt;* next_pv = pv != nullptr ? &amp;attack_line : nullptr;
+        if (!mate_search_attack(child, remaining_ply - 1, next_pv)) {
+            return false;
+        }
+        if (pv != nullptr) {
+            const std::size_t candidate_length = 1 + attack_line.size();
+            if (!has_selected || candidate_length &gt; selected_length) {
+                has_selected = true;
+                selected_move = move;
+                selected_length = candidate_length;
+                selected_line = std::move(attack_line);
+            }
+        }
+        if (aborted_) {
+            return false;
+        }
+    }
+
+    if (pv != nullptr) {
+        pv-&gt;clear();
+        if (has_selected) {
+            pv-&gt;push_back(selected_move);
+            pv-&gt;insert(pv-&gt;end(), selected_line.begin(), selected_line.end());
+        }
+    }
+
+    return true;
+}</code></pre>
+
+<p>
+防御側の探索における重要な判定ロジックは以下の通りです。
+</p>
+
+<ul>
+  <li><strong>合法手がない場合:</strong> <code>legal_moves.empty()</code> かつ王手がかかっていれば、
+  それは詰みです（<code>return position.is_in_check(...)</code>）。
+  王手がかかっていない場合はステイルメイト（将棋では通常発生しない）として偽を返します。</li>
+  <li><strong>残り手数が0の場合:</strong> まだ合法手があるなら詰んでいないので <code>false</code> を返します。</li>
+  <li><strong>全合法手の検証:</strong> すべての合法手に対して攻撃側の探索を呼び、
+  どの手を指しても詰まされる場合のみ <code>true</code> を返します。
+  1つでも逃れ手（攻撃側が詰ませられない手）があれば即座に <code>false</code> を返します。</li>
+  <li><strong>最長手順の選択:</strong> PVを構築する際は、防御側が最も長く粘れる手順（最長手順）を選択します。
+  これにより、実際の対局で最も正確な詰み手数を報告できます。</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>10.5 通常探索との統合</h2>
+
+<p>
+詰み探索は <code>find_best_move()</code> の冒頭、反復深化ループに入る前に呼び出されます。
+</p>
+
+<pre><code>std::vector&lt;Move&gt; mating_line;
+if ((options.infinite || options.max_depth &gt;= 3 || options.time_limit_ms &gt;= 200) &amp;&amp;
+    find_forced_mate(root, kMateSearchMaxPly, mating_line) &amp;&amp; !mating_line.empty()) {
+    result.best_move = mating_line.front();
+    result.has_best_move = true;
+    result.score_cp = kMateScore - 1;
+    result.completed_depth = kMateSearchMaxPly;
+    // ... info出力 ...
+    return result;
+}</code></pre>
+
+<p>
+呼び出し条件として、探索深さが3以上、または持ち時間が200ms以上、あるいは無限探索モードであることが要求されます。
+これは、極めて短い探索（深さ1〜2）で詰み探索のオーバーヘッドを避けるための配慮です。
+</p>
+
+<p>
+詰みが見つかった場合、通常の反復深化探索を一切行わず、即座に詰み手順を返します。
+スコアは <code>kMateScore - 1</code> として報告され、これはGUIに対して「1手詰み以上の詰みが見つかった」ことを示します。
+</p>
+
+<!-- ============================================================ -->
+<h2>10.6 詰みスコアの表現</h2>
+
+<p>
+Hayanagiでは詰みスコアを <code>kMateScore - ply</code> という形式で表現します。
+<code>kMateScore</code> は十分に大きな定数で、通常の評価値とは明確に区別されます。
+</p>
+
+<pre><code>int terminal_score(const TerminalStatus&amp; status, int ply) {
+    switch (status.outcome) {
+        case TerminalOutcome::Win:
+            return kMateScore - ply;
+        case TerminalOutcome::Loss:
+            return -kMateScore + ply;
+        case TerminalOutcome::Draw:
+            return 0;
+        // ...
+    }
+}</code></pre>
+
+<p>
+<code>ply</code> を引くことにより、より短い手数での詰みがより高いスコアを持ちます。
+例えば1手詰み（ply=1）は3手詰み（ply=3）よりも高く評価されます。
+これにより探索は最短の詰み手順を優先的に選択します。
+</p>
+
+<p>
+また、詰みスコアかどうかの判定には閾値 <code>kMateThreshold = kMateScore - 256</code> が使われます。
+スコアがこの閾値を超える場合は「詰みに近い」と判断し、
+置換表への保存時にply補正（<code>score_to_tt</code> / <code>score_from_tt</code>）を適用して、
+異なる深さからの参照でも正しい手数情報を維持します。
+</p>
+
+<!-- ============================================================ -->
+<h2>10.7 まとめ</h2>
+
+<p>
+Hayanagiの詰み探索は、以下の設計方針に基づいています。
+</p>
+
+<ul>
+  <li>通常探索とは独立した専用ルーチンで、王手手のみを生成することで探索木を大幅に削減する</li>
+  <li>攻撃側（<code>mate_search_attack</code>）と防御側（<code>mate_search_defense</code>）を交互に呼び出す再帰構造</li>
+  <li>最大5手までの短手数詰みに特化し、通常探索の前に実行することで即座に詰みを報告する</li>
+  <li>詰みスコアは <code>kMateScore - ply</code> で表現し、最短手順を優先する</li>
+</ul>
+
+<p>
+この仕組みにより、計算コストを抑えつつ、対局において重要な短手数の詰みを確実に発見できます。
+</p>
+
+  <div class="chapter-nav">
+    <span><a href="chapter09.html">&larr; 前章</a></span>
+    <span><a href="chapter11.html">次章 &rarr;</a></span>
+  </div>
+</div>
+</body>
+</html>

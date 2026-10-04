@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第11章 評価関数 — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
+    <nav><a href="index.html">目次</a></nav>
+  </div>
+</header>
+<div class="wrapper">
+
+<h1>第11章 評価関数</h1>
+
+<p>
+探索アルゴリズムがどれほど優れていても、局面の良し悪しを正確に判断できなければ強い将棋エンジンにはなりません。
+評価関数は探索の末端ノードで呼び出され、現在の局面が手番側にとってどれだけ有利かを数値（centipawn単位）で返します。
+本章では、Hayanagiの手作り評価関数 <code>evaluate()</code> の全体構造と各構成要素を詳しく解説します。
+</p>
+
+<!-- ============================================================ -->
+<h2>11.1 evaluate() 関数の全体構造</h2>
+
+<p>
+<code>evaluate()</code> は先手（Black）と後手（White）のスコアを個別に計算し、最終的にその差を手番側の視点で返します。
+</p>
+
+<pre><code>int Search::evaluate(const Position&amp; position) const {
+    int black_score = 0;
+    int white_score = 0;
+    int phase = 0;
+
+    for (int square = 0; square &lt; kSquareCount; ++square) {
+        const int piece = position.piece_at(square);
+        if (piece == 0) {
+            continue;
+        }
+
+        const Color color = piece_color(piece);
+        const PieceType type = piece_type(piece);
+        const int row = square_row(square);
+        const int col = square_col(square);
+
+        int contribution = piece_value(type);
+        if (type != PieceType::King) {
+            contribution += piece_square_bonus(type, color, row, col);
+            contribution += mobility_bonus(position, square, type, color);
+            if (is_in_promotion_zone(color, row)) {
+                contribution += camp_bonus(type);
+            }
+            phase += piece_value(unpromote(type)) / 100;
+        }
+
+        if (color == Color::Black) {
+            black_score += contribution;
+        } else {
+            white_score += contribution;
+        }
+    }
+
+    for (int index = 1; index &lt;= static_cast&lt;int&gt;(PieceType::Rook); ++index) {
+        const PieceType piece = static_cast&lt;PieceType&gt;(index);
+        const int material = piece_value(piece);
+        const int bonus = hand_bonus(piece);
+        const int black_count = position.hand_count(Color::Black, piece);
+        const int white_count = position.hand_count(Color::White, piece);
+
+        black_score += black_count * (material + bonus);
+        white_score += white_count * (material + bonus);
+        phase += (black_count + white_count) * (material / 100);
+    }
+
+    black_score += king_safety_score(position, Color::Black, phase);
+    white_score += king_safety_score(position, Color::White, phase);
+
+    if (position.is_in_check(Color::Black)) {
+        black_score -= 40;
+    }
+    if (position.is_in_check(Color::White)) {
+        white_score -= 40;
+    }
+
+    int score = black_score - white_score;
+    score += position.side_to_move() == Color::Black ? kTempoBonus : -kTempoBonus;
+    return position.side_to_move() == Color::Black ? score : -score;
+}</code></pre>
+
+<p>
+全体の流れは以下の通りです。
+</p>
+
+<ol>
+  <li>盤上の全駒について、駒得・位置評価・利き評価・敵陣ボーナスを加算</li>
+  <li>持ち駒について、駒得と持ち駒ボーナスを加算</li>
+  <li>両玉の安全度を加算</li>
+  <li>王手がかかっている側にペナルティを課す</li>
+  <li>先手スコアと後手スコアの差にテンポボーナスを加え、手番側の視点に変換して返す</li>
+</ol>
+
+<!-- ============================================================ -->
+<h2>11.2 駒得（Material）</h2>
+
+<p>
+評価の基盤となるのは駒の素点（<code>piece_value(type)</code>）です。
+各駒種に対して定義された静的な値で、例えば歩=100、銀=500、飛車=1000といった相対的な価値を持ちます。
+盤上の駒も持ち駒も、まずこの素点が加算されます。
+</p>
+
+<p>
+持ち駒にはさらに <code>hand_bonus()</code> が上乗せされます。
+持ち駒は盤上の駒よりも柔軟に使える（好きな場所に打てる）ため、同じ駒種でも追加の価値があります。
+</p>
+
+<pre><code>int hand_bonus(PieceType type) {
+    switch (type) {
+        case PieceType::Pawn:   return 18;
+        case PieceType::Lance:
+        case PieceType::Knight: return 24;
+        case PieceType::Silver: return 28;
+        case PieceType::Gold:   return 24;
+        case PieceType::Bishop: return 36;
+        case PieceType::Rook:   return 42;
+        default:                return 0;
+    }
+}</code></pre>
+
+<!-- ============================================================ -->
+<h2>11.3 テンポボーナス</h2>
+
+<p>
+Hayanagiでは手番を持つこと自体に <code>kTempoBonus = 12</code> の価値を与えています。
+</p>
+
+<pre><code>score += position.side_to_move() == Color::Black ? kTempoBonus : -kTempoBonus;</code></pre>
+
+<p>
+将棋では手番側が先に指せるため、わずかながら有利です。
+テンポボーナスはこの「先手の利」を評価値に反映するもので、
+ヌルムーブ枝刈りの判定にも間接的に影響します。
+12cpという値は控えめな設定で、評価を大きく歪めることなく手番の優位性を表現しています。
+</p>
+
+<!-- ============================================================ -->
+<h2>11.4 駒の位置評価 piece_square_bonus()</h2>
+
+<p>
+同じ駒でも、盤上のどこにいるかによって価値が異なります。
+<code>piece_square_bonus()</code> は駒種・手番・位置から追加の評価値を計算します。
+</p>
+
+<pre><code>int piece_square_bonus(PieceType type, Color color, int row, int col) {
+    const int progress = forward_progress(color, row);
+    const int center = center_bonus(row, col);
+
+    switch (type) {
+        case PieceType::Pawn:
+            return progress * 10 - std::abs(col - 4) * 2;
+        case PieceType::Lance:
+            return progress * 6 - std::abs(col - 4) * 2;
+        case PieceType::Knight:
+            return progress * 7 + center * 4;
+        case PieceType::Silver:
+            return progress * 5 + center * 5;
+        case PieceType::Gold:
+            return progress * 4 + center * 3;
+        case PieceType::Bishop:
+            return center * 8 + progress * 2;
+        case PieceType::Rook:
+            return center * 5 + progress * 2;
+        case PieceType::ProPawn:
+        case PieceType::ProLance:
+        case PieceType::ProKnight:
+        case PieceType::ProSilver:
+            return progress * 4 + center * 5;
+        case PieceType::Horse:
+            return center * 12 + progress * 3;
+        case PieceType::Dragon:
+            return center * 10 + progress * 3;
+        case PieceType::King:
+        case PieceType::Empty:
+        default:
+            return 0;
+    }
+}</code></pre>
+
+<p>
+ここで使われる2つの基本量を説明します。
+</p>
+
+<h3>前進度（forward_progress）</h3>
+
+<pre><code>int forward_progress(Color color, int row) {
+    return color == Color::Black ? 8 - row : row;
+}</code></pre>
+
+<p>
+先手は盤面上部（row=0）に向かって進むため、<code>8 - row</code> が前進度になります。
+後手はその逆です。前進度が大きいほど敵陣に近く、歩や香、桂などの駒にとって有利な位置です。
+</p>
+
+<h3>中央ボーナス（center_bonus）</h3>
+
+<pre><code>int center_distance(int row, int col) {
+    return std::abs(row - 4) + std::abs(col - 4);
+}
+int center_bonus(int row, int col) {
+    return 8 - center_distance(row, col);
+}</code></pre>
+
+<p>
+盤面中央（5五の位置、row=4, col=4）からのマンハッタン距離を基に計算されます。
+中央に近いほどボーナスが大きくなります。角や馬など、利きが中央で最大化される駒に重要です。
+</p>
+
+<h3>各駒種の位置評価の考え方</h3>
+
+<ul>
+  <li><strong>歩・香:</strong> 前進度を重視し、中央の筋を僅かに優遇。敵陣に近い歩は成りの可能性が高い。</li>
+  <li><strong>桂:</strong> 前進度と中央ボーナスの両方を重視。中央にいる桂は跳躍先が多い。</li>
+  <li><strong>銀:</strong> 中央ボーナスをやや重視。銀は斜め移動が得意で中央配置が活きる。</li>
+  <li><strong>金:</strong> 前進度と中央をバランスよく評価。守りにも攻めにも使える汎用駒。</li>
+  <li><strong>角:</strong> 中央ボーナスを最も重視（係数8）。中央の角は斜め方向の利きが最大化される。</li>
+  <li><strong>飛:</strong> 中央と前進度をバランスよく評価。</li>
+  <li><strong>成駒:</strong> 成金系は中央ボーナスと前進度を均等に評価。馬（係数12）と龍（係数10）は中央重視。</li>
+  <li><strong>玉:</strong> 位置評価は0。玉の評価は別途 <code>king_safety_score()</code> で行う。</li>
+</ul>
+
+<p>
+さらに、敵陣（成れるゾーン）にいる駒には <code>camp_bonus()</code> が追加されます。
+成駒や大駒が敵陣にいることの戦略的価値を反映しています。
+</p>
+
+<pre><code>int camp_bonus(PieceType type) {
+    switch (type) {
+        case PieceType::Pawn:             return 10;
+        case PieceType::Lance:
+        case PieceType::Knight:           return 8;
+        case PieceType::Silver:
+        case PieceType::Gold:             return 10;
+        case PieceType::Bishop:
+        case PieceType::Rook:             return 12;
+        case PieceType::ProPawn:
+        case PieceType::ProLance:
+        case PieceType::ProKnight:
+        case PieceType::ProSilver:        return 14;
+        case PieceType::Horse:
+        case PieceType::Dragon:           return 18;
+        default:                          return 0;
+    }
+}</code></pre>
+
+<!-- ============================================================ -->
+<h2>11.5 利きの広さ mobility_bonus()</h2>
+
+<p>
+駒の利き（移動可能なマスの数）は、その駒の活動度を表す重要な指標です。
+<code>mobility_bonus()</code> は各駒の利き数を計算し、駒種ごとの重みを乗じて返します。
+</p>
+
+<pre><code>int mobility_bonus(const Position&amp; position, int square, PieceType type, Color color) {
+    switch (type) {
+        case PieceType::Pawn:
+            return count_step_mobility(position, square, kPawnDirections, color) * 2;
+        case PieceType::Lance:
+            return count_slider_mobility(position, square, kLanceDirections, color) * 2;
+        case PieceType::Knight:
+            return count_step_mobility(position, square, kKnightDirections, color) * 3;
+        case PieceType::Silver:
+            return count_step_mobility(position, square, kSilverDirections, color) * 3;
+        case PieceType::Gold:
+            return count_step_mobility(position, square, kGoldDirections, color) * 2;
+        case PieceType::Bishop:
+            return count_slider_mobility(position, square, kBishopDirections, color) * 5;
+        case PieceType::Rook:
+            return count_slider_mobility(position, square, kRookDirections, color) * 4;
+        case PieceType::King:
+            return 0;
+        case PieceType::ProPawn:
+        case PieceType::ProLance:
+        case PieceType::ProKnight:
+        case PieceType::ProSilver:
+            return count_step_mobility(position, square, kGoldDirections, color) * 3;
+        case PieceType::Horse:
+            return count_slider_mobility(position, square, kBishopDirections, color) * 5 +
+                   count_step_mobility(position, square, kRookDirections, color) * 2;
+        case PieceType::Dragon:
+            return count_slider_mobility(position, square, kRookDirections, color) * 4 +
+                   count_step_mobility(position, square, kBishopDirections, color) * 3;
+        case PieceType::Empty:
+        default:
+            return 0;
+    }
+}</code></pre>
+
+<h3>ステップ型駒の利き数計算</h3>
+
+<p>
+歩・桂・銀・金・成駒など、1マスずつ移動する駒の利き数は <code>count_step_mobility()</code> で計算します。
+</p>
+
+<pre><code>template &lt;std::size_t N&gt;
+int count_step_mobility(const Position&amp; position,
+                        int square,
+                        const int (&amp;directions)[N][2],
+                        Color color) {
+    const int sign = orientation(color);
+    const int row = square_row(square);
+    const int col = square_col(square);
+    int mobility = 0;
+
+    for (const auto&amp; direction : directions) {
+        const int to_row = row + direction[0] * sign;
+        const int to_col = col + direction[1] * sign;
+        if (!is_on_board(to_row, to_col)) {
+            continue;
+        }
+        const int target = position.piece_at(make_square(to_row, to_col));
+        if (target == 0 || piece_color(target) != color) {
+            ++mobility;
+        }
+    }
+    return mobility;
+}</code></pre>
+
+<p>
+各方向について、盤内かつ味方駒で塞がれていなければ利きとしてカウントします。
+<code>orientation(color)</code> により先手・後手で方向が反転されます。
+</p>
+
+<h3>スライダー型駒の利き数計算</h3>
+
+<p>
+飛車・角・香など、直線上を複数マス移動できる駒は <code>count_slider_mobility()</code> で計算します。
+</p>
+
+<pre><code>template &lt;std::size_t N&gt;
+int count_slider_mobility(const Position&amp; position,
+                          int square,
+                          const int (&amp;directions)[N][2],
+                          Color color) {
+    const int sign = orientation(color);
+    const int row = square_row(square);
+    const int col = square_col(square);
+    int mobility = 0;
+
+    for (const auto&amp; direction : directions) {
+        int to_row = row + direction[0] * sign;
+        int to_col = col + direction[1] * sign;
+        while (is_on_board(to_row, to_col)) {
+            const int target = position.piece_at(make_square(to_row, to_col));
+            if (target != 0 &amp;&amp; piece_color(target) == color) {
+                break;
+            }
+            ++mobility;
+            if (target != 0) {
+                break;
+            }
+            to_row += direction[0] * sign;
+            to_col += direction[1] * sign;
+        }
+    }
+
+    return mobility;
+}</code></pre>
+
+<p>
+各方向に対して、味方駒に当たるまで（または敵駒を取れるマスまで）利きを延ばしてカウントします。
+</p>
+
+<h3>駒種ごとの重み</h3>
+
+<p>
+利き数に乗じる重みは駒種によって異なります。
+</p>
+
+<ul>
+  <li><strong>歩:</strong> 利き数 x 2 — 歩の利きは限定的なので控えめ</li>
+  <li><strong>香:</strong> 利き数 x 2 — 前方にしか進めないため控えめ</li>
+  <li><strong>桂・銀:</strong> 利き数 x 3 — 中程度の機動力</li>
+  <li><strong>金・成駒:</strong> 利き数 x 2〜3</li>
+  <li><strong>飛車:</strong> 利き数 x 4 — 直線方向の広い利きを重視</li>
+  <li><strong>角:</strong> 利き数 x 5 — 斜め方向の利きを最も高く評価</li>
+  <li><strong>馬:</strong> 角方向 x 5 + 十字方向 x 2 — 角の利き + ステップ移動</li>
+  <li><strong>龍:</strong> 飛車方向 x 4 + 斜め方向 x 3 — 飛車の利き + ステップ移動</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>11.6 玉の安全度 king_safety_score()</h2>
+
+<p>
+玉の安全度は将棋の評価において極めて重要な要素です。
+<code>king_safety_score()</code> は局面のフェーズ（序盤〜終盤）に応じて玉の評価を動的に変化させます。
+</p>
+
+<pre><code>int king_safety_score(const Position&amp; position, Color color, int phase) {
+    const int king_square = position.find_king(color);
+    if (king_square == -1) {
+        return 0;
+    }
+
+    const int row = square_row(king_square);
+    const int col = square_col(king_square);
+    const int opening_weight = std::min(phase, 96);
+    const int endgame_weight = 96 - opening_weight;
+    int defenders = 0;
+    int enemy_attacks = 0;
+    int safe_squares = 0;
+
+    for (const auto&amp; direction : kKingDirections) {
+        const int to_row = row + direction[0];
+        const int to_col = col + direction[1];
+        if (!is_on_board(to_row, to_col)) {
+            continue;
+        }
+        const int square = make_square(to_row, to_col);
+        const int piece = position.piece_at(square);
+        if (piece != 0 &amp;&amp; piece_color(piece) == color) {
+            ++defenders;
+        }
+        if (position.is_square_attacked(square, opposite(color))) {
+            ++enemy_attacks;
+        } else {
+            ++safe_squares;
+        }
+    }
+
+    int score = defenders * (6 + opening_weight / 12);
+    score -= enemy_attacks * (10 + opening_weight / 10);
+    score += safe_squares * 2;
+
+    const int distance = center_distance(row, col);
+    score += distance * (opening_weight / 6);
+    score += center_bonus(row, col) * (endgame_weight / 6);
+
+    const int front_row_delta = -orientation(color);
+    for (int step = 1; step &lt;= 2; ++step) {
+        const int front_row = row + front_row_delta * step;
+        if (!is_on_board(front_row, col)) {
+            continue;
+        }
+        const int square = make_square(front_row, col);
+        const int piece = position.piece_at(square);
+        if (piece == 0) {
+            score -= 4 + opening_weight / 16;
+        } else if (piece_color(piece) != color) {
+            score -= 8 + opening_weight / 14;
+        }
+        if (position.is_square_attacked(square, opposite(color))) {
+            score -= 8;
+        }
+    }
+
+    return score;
+}</code></pre>
+
+<h3>フェーズ計算</h3>
+
+<p>
+<code>phase</code> は盤上と持ち駒の駒価値合計を100で割った値の累積で、局面の「重さ」を表します。
+駒が多いほどphaseは大きくなり序盤的、駒交換が進んでphaseが小さくなると終盤的になります。
+<code>opening_weight</code> は最大96にクランプされ、<code>endgame_weight = 96 - opening_weight</code> と合わせて
+序盤要素と終盤要素のブレンド比率を決定します。
+</p>
+
+<h3>序盤: 中央からの距離</h3>
+
+<pre><code>score += distance * (opening_weight / 6);</code></pre>
+
+<p>
+序盤では玉が盤面中央から離れていることが安全とされます。
+将棋の序盤では玉を隅に囲うのが基本戦略であり、中央に玉がいると攻撃を受けやすくなります。
+<code>opening_weight</code> が大きい（駒が多い）ほどこのボーナスの影響が大きくなります。
+</p>
+
+<h3>終盤: 中央への接近</h3>
+
+<pre><code>score += center_bonus(row, col) * (endgame_weight / 6);</code></pre>
+
+<p>
+終盤では逆に玉が中央に近い方が有利になります。
+駒が少なくなると囲いの意味が薄れ、玉の機動力（逃げ道の多さ）が重要になるためです。
+</p>
+
+<h3>守り駒・敵の攻撃・安全マス</h3>
+
+<pre><code>int score = defenders * (6 + opening_weight / 12);
+score -= enemy_attacks * (10 + opening_weight / 10);
+score += safe_squares * 2;</code></pre>
+
+<p>
+玉の周囲8マスについて3つの指標を計算します。
+</p>
+
+<ul>
+  <li><strong>守り駒（defenders）:</strong> 玉の隣に味方駒がいる数。序盤ほど高く評価される。</li>
+  <li><strong>敵の攻撃（enemy_attacks）:</strong> 敵に利かれているマスの数。序盤ほどペナルティが大きい。</li>
+  <li><strong>安全マス（safe_squares）:</strong> 敵に利かれていないマスの数。逃げ道の確保を評価。</li>
+</ul>
+
+<h3>前方の歩の構造</h3>
+
+<pre><code>const int front_row_delta = -orientation(color);
+for (int step = 1; step &lt;= 2; ++step) {
+    const int front_row = row + front_row_delta * step;
+    // ...
+    if (piece == 0) {
+        score -= 4 + opening_weight / 16;
+    } else if (piece_color(piece) != color) {
+        score -= 8 + opening_weight / 14;
+    }
+    if (position.is_square_attacked(square, opposite(color))) {
+        score -= 8;
+    }
+}</code></pre>
+
+<p>
+玉の前方1〜2マスの状態を調べます。
+前方に味方の駒（特に歩）がないと玉頭が弱くなり、ペナルティが課されます。
+敵駒がいる場合はさらに大きなペナルティとなり、そのマスが敵に利かれていれば追加の減点があります。
+</p>
+
+<!-- ============================================================ -->
+<h2>11.7 全体のスコア計算</h2>
+
+<p>
+最終的なスコアは以下の手順で合算されます。
+</p>
+
+<ol>
+  <li>盤上の各駒について: 駒得 + 位置評価 + 利き評価 + 敵陣ボーナス</li>
+  <li>持ち駒について: 駒得 + 持ち駒ボーナス</li>
+  <li>各玉の安全度スコア</li>
+  <li>王手ペナルティ（王手がかかっている側に -40）</li>
+  <li><code>score = black_score - white_score + tempo_bonus</code></li>
+  <li>手番側の視点に変換（後手番なら符号を反転）</li>
+</ol>
+
+<p>
+この設計は Negamax フレームワークと自然に整合します。
+<code>evaluate()</code> は常に手番側にとってのスコアを返すため、
+探索関数は単純に <code>-negamax(...)</code> と符号を反転するだけで相手の評価を得られます。
+</p>
+
+<!-- ============================================================ -->
+<h2>11.8 まとめ</h2>
+
+<p>
+Hayanagiの評価関数は、ニューラルネットワークを使わない古典的な手作り評価関数です。
+駒得・位置評価・利き・玉の安全度という4つの要素を組み合わせ、
+フェーズに応じて重みを動的に変化させることで、序盤から終盤まで一貫した評価を実現しています。
+</p>
+
+<ul>
+  <li>駒得は評価の基盤であり、持ち駒には追加ボーナスが付与される</li>
+  <li>位置評価は前進度と中央距離の2軸で駒種ごとに異なる重みを設定</li>
+  <li>利き評価はステップ型とスライダー型で別々に計算し、駒種固有の重みを適用</li>
+  <li>玉の安全度はフェーズに応じて序盤重視（囲い）から終盤重視（機動力）へと遷移</li>
+  <li>テンポボーナスにより手番の有利さを反映</li>
+</ul>
+
+  <div class="chapter-nav">
+    <span><a href="chapter10.html">&larr; 前章</a></span>
+    <span><a href="chapter12.html">次章 &rarr;</a></span>
+  </div>
+</div>
+</body>
+</html>

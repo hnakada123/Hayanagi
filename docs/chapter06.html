@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第6章 合法手生成 — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
+    <nav><a href="index.html">目次</a></nav>
+  </div>
+</header>
+<div class="wrapper">
+
+<h1>第6章 合法手生成</h1>
+
+<p>
+将棋エンジンの核心部分ともいえる合法手生成について解説します。
+局面に対して指せる手をすべて正確に列挙する処理は、探索の土台であり、
+そのパフォーマンスがエンジン全体の速度を大きく左右します。
+</p>
+
+<!-- ============================================================ -->
+<h2>6.1 設計思想: 疑似合法手生成 vs 直接合法手生成</h2>
+
+<p>
+合法手生成には大きく分けて2つのアプローチがあります。
+</p>
+
+<p>
+<strong>疑似合法手生成 + フィルタ方式</strong>は、王手を考慮せず全ての「疑似合法手」を生成してから
+自玉への王手をチェックする方式です。実装はシンプルですが無駄な計算が発生します。
+</p>
+
+<p>
+Hayanagi は<strong>直接合法手生成方式</strong>を採用しています。
+ピン（動かすと自玉に王手がかかる駒）と王手の状態を事前に計算し、最初から合法な手だけを生成します。
+具体的には、(1) <code>compute_pins_and_checks()</code> でピンと王手を同時検出、
+(2) 王手の数に応じて分岐（両王手なら玉移動のみ）、
+(3) ピンされた駒は移動ライン上にのみ移動可能、
+(4) 各駒種の手を直接生成、という流れです。
+</p>
+
+<!-- ============================================================ -->
+<h2>6.2 generate_legal_moves() のエントリポイント</h2>
+
+<p>
+<code>Position</code> クラスには、合法手生成のための複数のオーバーロードが用意されています。
+</p>
+
+<pre><code>// position.h より
+std::vector&lt;Move&gt; generate_legal_moves() const;
+std::vector&lt;Move&gt; generate_legal_moves(bool include_drops,
+                                        bool enforce_pawn_drop_mate) const;
+std::vector&lt;Move&gt; generate_search_legal_moves() const;
+std::vector&lt;Move&gt; generate_quiescence_moves() const;
+std::vector&lt;Move&gt; generate_checking_moves() const;</code></pre>
+
+<p>
+これらはすべて、最終的に以下のプライベートメソッドに委譲されます。
+</p>
+
+<pre><code>// position.cpp 1228行目
+std::vector&lt;Move&gt; Position::generate_legal_moves(bool include_drops,
+                                                 bool enforce_pawn_drop_mate,
+                                                 MoveSelection selection) const {
+    std::vector&lt;Move&gt; moves;
+    moves.reserve(256);
+    const Color color = side_to_move_;
+    const auto&amp; t = tables();
+    const Bitboard own_occ = color_bb_[static_cast&lt;int&gt;(color)];
+
+    Bitboard checkers;
+    Bitboard pinned;
+    std::array&lt;Bitboard, kSquareCount&gt; pin_lines{};
+    compute_pins_and_checks(color, checkers, pinned, pin_lines);
+
+    const int check_count = checkers.count();
+    const bool in_check = check_count &gt; 0;
+    generate_king_moves(color, selection, in_check, moves);
+    if (check_count &gt;= 2) {
+        return moves;
+    }
+    // ... 以下、個別の駒種の手生成が続く
+}</code></pre>
+
+<p>
+各公開メソッドは <code>MoveSelection</code> を変えてこのプライベートメソッドに委譲しています。
+<code>moves.reserve(256)</code> は典型的な局面の手数をカバーする初期確保で、再アロケーションの回数を減らします。
+</p>
+
+<!-- ============================================================ -->
+<h2>6.3 MoveSelection 列挙型</h2>
+
+<p>
+<code>MoveSelection</code> は、生成する手の種類を制御するための列挙型です。
+</p>
+
+<pre><code>// position.h 70行目
+enum class MoveSelection : int {
+    All = 0,
+    Tactical,
+    Checking,
+};</code></pre>
+
+<table>
+  <thead>
+    <tr><th>値</th><th>用途</th><th>生成される手</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>All</code></td><td>通常探索</td><td>全ての合法手</td></tr>
+    <tr><td><code>Tactical</code></td><td>静止探索</td><td>駒取り・成り・王手回避手</td></tr>
+    <tr><td><code>Checking</code></td><td>王手生成</td><td>相手玉に王手をかける手のみ</td></tr>
+  </tbody>
+</table>
+
+<p>
+フィルタリングは <code>should_keep_generated_move()</code> で行われます（後述）。
+全ての手を一度生成してからフィルタするのではなく、各手の生成時点で即座にフィルタが適用される設計です。
+</p>
+
+<!-- ============================================================ -->
+<h2>6.4 compute_pins_and_checks() — ピンと王手の同時検出</h2>
+
+<p>
+合法手生成の前処理として、ピンされている駒と王手をかけている駒を同時に検出します。
+この処理は盤面の8方向（縦横斜め）の X 線（X-ray）検出に基づいています。
+</p>
+
+<pre><code>// position.cpp 1036行目
+void Position::compute_pins_and_checks(Color color,
+                                       Bitboard&amp; checkers,
+                                       Bitboard&amp; pinned,
+                                       std::array&lt;Bitboard, kSquareCount&gt;&amp; pin_lines) const {
+    const auto&amp; t = tables();
+    const Color enemy = opposite(color);
+    const int king_square = find_king(color);
+
+    checkers = attackers_to(king_square, enemy);
+    pinned = Bitboard{};
+    for (auto&amp; line : pin_lines) {
+        line = t.all_squares;
+    }
+
+    for (int dir = 0; dir &lt; 8; ++dir) {
+        int candidate = -1;
+        for (int index = 0; index &lt; t.ray_lengths[king_square][dir]; ++index) {
+            const int sq = t.ray_squares[king_square][dir][index];
+            const int piece = board_[sq];
+            if (is_empty(piece)) {
+                continue;
+            }
+            if (piece_color(piece) == color) {
+                if (candidate != -1) {
+                    break;
+                }
+                candidate = sq;
+                continue;
+            }
+            if (!is_slider_for_direction(piece_type(piece), enemy, dir)) {
+                break;
+            }
+            if (candidate != -1) {
+                pinned.set(candidate);
+                pin_lines[candidate] = t.between[king_square][sq] | t.square_bb[sq];
+            }
+            break;
+        }
+    }
+}</code></pre>
+
+<h3>アルゴリズムの詳細</h3>
+
+<p>
+処理は2段階で構成されています。
+</p>
+
+<p>
+第1段階として、<code>attackers_to(king_square, enemy)</code> で王手駒のビットボード (<code>checkers</code>) を取得します。
+第2段階として、自玉から8方向にレイ（ray）を飛ばし、以下のロジックでピンを検出します。
+</p>
+
+<ol>
+  <li>レイ上の各マスを自玉から順に走査する</li>
+  <li>空きマスはスキップする</li>
+  <li>自分の駒を見つけたら、ピン候補 (<code>candidate</code>) として記録する。
+      ただし既に候補がある場合（自分の駒が2つ並んでいる場合）は、
+      その方向のピンはありえないので打ち切る</li>
+  <li>敵の駒を見つけた場合:
+    <ul>
+      <li>その駒がその方向のスライダーでなければ (<code>is_slider_for_direction</code> が <code>false</code>)、打ち切る</li>
+      <li>スライダーであり、かつ候補があれば、候補の駒はピンされている</li>
+    </ul>
+  </li>
+</ol>
+
+<p>
+ピンされた駒の移動可能範囲は <code>pin_lines[candidate]</code> に設定されます。
+これは玉と敵スライダーの間のマス (<code>t.between[king_square][sq]</code>) と
+敵スライダー自身のマス (<code>t.square_bb[sq]</code>) の和集合です。
+つまり、ピンされた駒はピンラインの上でのみ移動（合駒位置への移動、または敵スライダーの駒取り）が許されます。
+</p>
+
+<p>
+ピンされていない駒の <code>pin_lines</code> は <code>t.all_squares</code>（全マス）に初期化されているため、
+移動制限がかからない仕組みです。
+</p>
+
+<!-- ============================================================ -->
+<h2>6.5 両王手時の処理（玉移動のみ）</h2>
+
+<p>
+両王手（double check）の場合、2つの駒から同時に王手がかかっているため、
+合駒や駒取りでは王手を解消できません。唯一の選択肢は玉を動かすことです。
+</p>
+
+<pre><code>    const int check_count = checkers.count();
+    const bool in_check = check_count &gt; 0;
+    generate_king_moves(color, selection, in_check, moves);
+    if (check_count &gt;= 2) {
+        return moves;  // 両王手: 玉移動のみで即座にリターン
+    }</code></pre>
+
+<p>
+このように、<code>check_count &gt;= 2</code> の場合は <code>generate_king_moves()</code> の結果だけを返します。
+王手している駒の数を数えるだけで、大幅な枝刈りが実現できています。
+</p>
+
+<!-- ============================================================ -->
+<h2>6.6 単王手時の move_mask（合駒・駒取りの制限）</h2>
+
+<p>
+王手をかけている駒が1つだけの場合（単王手）、玉以外の駒による王手回避方法は以下の2つです。
+</p>
+
+<ol>
+  <li><strong>駒取り</strong>: 王手している駒を取る</li>
+  <li><strong>合駒</strong>: 王手している駒と玉の間に駒を挟む（スライダーによる王手の場合のみ）</li>
+</ol>
+
+<pre><code>    Bitboard move_mask = t.all_squares;
+    if (check_count == 1) {
+        Bitboard single = checkers;
+        const int checker_square = single.pop_lsb();
+        move_mask = t.square_bb[checker_square];
+        const PieceType checker_type = piece_type(board_[checker_square]);
+        if (checker_type == PieceType::Lance || checker_type == PieceType::Bishop ||
+            checker_type == PieceType::Rook || checker_type == PieceType::Horse ||
+            checker_type == PieceType::Dragon) {
+            move_mask |= t.between[find_king(color)][checker_square];
+        }
+    }</code></pre>
+
+<p>
+<code>move_mask</code> は「玉以外の駒が移動できるマスの集合」です。
+王手がない場合は全マス、単王手の場合は王手駒のマス（駒取り）とスライダーの場合は間のマス（合駒）の和集合になります。
+桂馬や歩による王手の場合はその駒を取る以外に回避方法がありません（玉移動を除く）。
+</p>
+
+<!-- ============================================================ -->
+<h2>6.7 generate_king_moves() — 玉の移動生成</h2>
+
+<p>
+玉の移動は他の駒と異なり、移動先が敵に攻撃されていないことを確認する必要があります。
+</p>
+
+<pre><code>// position.cpp 1077行目
+void Position::generate_king_moves(Color color,
+                                   MoveSelection selection,
+                                   bool in_check,
+                                   std::vector&lt;Move&gt;&amp; moves) const {
+    const int from = find_king(color);
+    Bitboard targets = attacks_from(from, PieceType::King, color, occupied_);
+    targets &amp;= ~color_bb_[static_cast&lt;int&gt;(color)];
+    const Color enemy = opposite(color);
+
+    while (targets.any()) {
+        const int to = targets.pop_lsb();
+        const Move move{from, to, PieceType::King, false, false};
+        if (!is_square_attacked_after_king_move(to, enemy, from) &amp;&amp;
+            should_keep_generated_move(move, selection, in_check)) {
+            moves.push_back(move);
+        }
+    }
+}</code></pre>
+
+<p>
+ポイントは <code>is_square_attacked_after_king_move(to, enemy, from)</code> です。
+「玉が <code>from</code> からいなくなった状態で <code>to</code> が攻撃されているか」を判定し、
+玉自身が遮蔽物となっているケース（背後のスライダーから逃げる方向に動く場合）を正しく処理します。
+<code>targets &amp;= ~color_bb_[...]</code> で自分の駒がいるマスへの移動を除外しています。
+</p>
+
+<!-- ============================================================ -->
+<h2>6.8 generate_piece_moves() — 各駒種の移動生成</h2>
+
+<p>
+玉以外の全駒種は <code>generate_piece_moves()</code> で統一的に処理されます。
+</p>
+
+<pre><code>// position.cpp 1096行目
+void Position::generate_piece_moves(Color color,
+                                    PieceType type,
+                                    Bitboard pieces,
+                                    const Bitboard&amp; own_occ,
+                                    const Bitboard&amp; move_mask,
+                                    const Bitboard&amp; pinned,
+                                    const std::array&lt;Bitboard, kSquareCount&gt;&amp; pin_lines,
+                                    MoveSelection selection,
+                                    bool in_check,
+                                    std::vector&lt;Move&gt;&amp; moves) const {
+    while (pieces.any()) {
+        const int from = pieces.pop_lsb();
+        Bitboard targets = attacks_from(from, type, color, occupied_);
+        targets &amp;= ~own_occ;
+        targets &amp;= move_mask;
+        if (pinned.test(from)) {
+            targets &amp;= pin_lines[from];
+        }
+
+        while (targets.any()) {
+            const int to = targets.pop_lsb();
+            add_move_variants(from, to, type, selection, in_check, moves);
+        }
+    }
+}</code></pre>
+
+<h3>ピンされた駒の移動ライン制限</h3>
+
+<p>
+<code>pinned.test(from)</code> が <code>true</code> の場合、その駒はピンラインの上でしか動けません。
+<code>targets &amp;= pin_lines[from]</code> により、ピンライン外への移動が除外されます。
+ピンされていない駒は <code>pin_lines[from]</code> が <code>all_squares</code> のため、この AND 演算は実質的に無効です。
+</p>
+
+<h3>move_mask による王手回避の制限</h3>
+
+<p>
+<code>targets &amp;= move_mask</code> により、王手がかかっている場合は合駒・駒取り可能なマスのみに制限されます。
+王手がかかっていない場合は <code>move_mask</code> が全マスなので、この AND 演算は無影響です。
+</p>
+
+<h3>成り生成（add_move_variants）</h3>
+
+<p>
+移動先が確定した後、<code>add_move_variants()</code> が成りと不成の手を適切に生成します。
+</p>
+
+<pre><code>// position.cpp 1122行目
+void Position::add_move_variants(int from,
+                                 int to,
+                                 PieceType piece,
+                                 MoveSelection selection,
+                                 bool in_check,
+                                 std::vector&lt;Move&gt;&amp; moves) const {
+    const int target = board_[to];
+    if (!is_empty(target) &amp;&amp; piece_type(target) == PieceType::King) {
+        return;
+    }
+
+    const Color color = side_to_move_;
+    const int from_row = square_row(from);
+    const int to_row = square_row(to);
+    const bool promotion_available =
+        can_promote(piece) &amp;&amp;
+        (is_in_promotion_zone(color, from_row) || is_in_promotion_zone(color, to_row));
+    const bool promotion_required = must_promote(piece, color, to_row);
+
+    if (!promotion_required) {
+        const Move move{from, to, piece, false, false};
+        if (should_keep_generated_move(move, selection, in_check)) {
+            moves.push_back(move);
+        }
+    }
+    if (promotion_available) {
+        const Move move{from, to, piece, true, false};
+        if (should_keep_generated_move(move, selection, in_check)) {
+            moves.push_back(move);
+        }
+    }
+}</code></pre>
+
+<p>
+<code>promotion_available</code> は成り可能な駒種で移動元か移動先が敵陣にある場合、
+<code>promotion_required</code> は歩・香が最奥段、桂馬が最奥2段に到達した場合に <code>true</code> になります。
+成り必須でなければ不成の手を、成れるなら成りの手も生成します。
+敵玉を取る手は生成しません（<code>piece_type(target) == PieceType::King</code> のチェック）。
+</p>
+
+<!-- ============================================================ -->
+<h2>6.9 add_drop_moves() — 駒打ち生成</h2>
+
+<p>
+持ち駒を盤上に打つ手の生成です。将棋特有の複雑なルールが反映されています。
+</p>
+
+<pre><code>// position.cpp 1155行目
+void Position::add_drop_moves(Color color,
+                              const Bitboard&amp; move_mask,
+                              bool enforce_pawn_drop_mate,
+                              MoveSelection selection,
+                              bool in_check,
+                              std::vector&lt;Move&gt;&amp; moves) const {
+    if (selection == MoveSelection::Tactical &amp;&amp; !in_check) {
+        return;
+    }
+
+    const auto&amp; t = tables();
+    Bitboard empty = t.all_squares &amp; ~occupied_;
+    empty &amp;= move_mask;
+
+    for (int index = 1; index &lt;= static_cast&lt;int&gt;(PieceType::Rook); ++index) {
+        const PieceType piece = static_cast&lt;PieceType&gt;(index);
+        if (piece == PieceType::King || hand_count(color, piece) == 0) {
+            continue;
+        }
+
+        Bitboard targets = empty;
+        for (int file = 0; file &lt; kBoardSize; ++file) {
+            if (piece == PieceType::Pawn &amp;&amp;
+                (piece_bb_[static_cast&lt;int&gt;(color)][static_cast&lt;int&gt;(PieceType::Pawn)] &amp;
+                 t.file_bb[file])
+                    .any()) {
+                targets &amp;= ~t.file_bb[file];
+            }
+        }
+
+        while (targets.any()) {
+            const int to = targets.pop_lsb();
+            const int row = square_row(to);
+            if ((piece == PieceType::Pawn || piece == PieceType::Lance) &amp;&amp;
+                is_last_rank(color, row)) {
+                continue;
+            }
+            if (piece == PieceType::Knight &amp;&amp; is_last_two_ranks(color, row)) {
+                continue;
+            }
+
+            const Move move{-1, to, piece, false, true};
+            if (piece == PieceType::Pawn &amp;&amp; enforce_pawn_drop_mate &amp;&amp;
+                is_pawn_drop_mate(move)) {
+                continue;
+            }
+            if (should_keep_generated_move(move, selection, in_check)) {
+                moves.push_back(move);
+            }
+        }
+    }
+}</code></pre>
+
+<h3>二歩判定</h3>
+
+<p>
+歩を打つ場合、同じ筋（file）に自分の歩が既にあるかをチェックします。
+<code>piece_bb_</code>（駒種別ビットボード）と <code>file_bb</code>（筋ビットボード）の AND をとることで、
+その筋に歩があるかをビットボード演算で高速に判定しています。
+二歩の筋は <code>targets &amp;= ~t.file_bb[file]</code> で打てるマスから一括除外されます。
+</p>
+
+<h3>行き所のない駒の禁止</h3>
+
+<p>
+移動できなくなるマスへの駒打ちは禁止されています。
+</p>
+
+<ul>
+  <li><strong>歩・香</strong>: 最奥段（<code>is_last_rank</code>）への打ちは禁止</li>
+  <li><strong>桂馬</strong>: 最奥2段（<code>is_last_two_ranks</code>）への打ちは禁止</li>
+</ul>
+
+<h3>打ち歩詰め判定（is_pawn_drop_mate）</h3>
+
+<p>
+歩を打って相手玉を即座に詰ます手（打ち歩詰め）は将棋のルールで禁止されています。
+<code>enforce_pawn_drop_mate</code> フラグが <code>true</code> の場合、この判定が行われます。
+</p>
+
+<pre><code>// position.cpp 1437行目
+bool Position::is_pawn_drop_mate(const Move&amp; move) const {
+    Position next = *this;
+    next.do_move_unchecked(move);
+    const Color attacker = side_to_move_;
+    const Color defender = next.side_to_move_;
+    const int king_square = next.find_king(defender);
+    if (king_square == -1 || !next.is_square_attacked(king_square, attacker)) {
+        return false;
+    }
+    return next.generate_legal_moves(false, false).empty();
+}</code></pre>
+
+<p>
+歩を打った局面を作成し、王手になっていれば相手の合法手が0かどうかを調べます。
+合法手が0なら打ち歩詰めであり、この手は禁止されます。
+<code>generate_legal_moves(false, false)</code> の第1引数は「駒打ちを含めない」、
+第2引数は「打ち歩詰め判定を行わない」（再帰防止）を意味します。
+</p>
+
+<p>
+なお、<code>selection == MoveSelection::Tactical &amp;&amp; !in_check</code> の場合は駒打ちが全てスキップされます。
+静止探索では駒取り・成りのみを探索するため、王手回避中でない限り駒打ちは不要です。
+</p>
+
+<!-- ============================================================ -->
+<h2>6.10 should_keep_generated_move() — 戦術手/王手手のフィルタ</h2>
+
+<p>
+生成された手を <code>MoveSelection</code> に応じてフィルタリングする関数です。
+</p>
+
+<pre><code>// position.cpp 1409行目
+bool Position::should_keep_generated_move(const Move&amp; move,
+                                          MoveSelection selection,
+                                          bool in_check) const {
+    switch (selection) {
+        case MoveSelection::All:
+            return true;
+        case MoveSelection::Tactical:
+            return in_check || board_[move.to] != 0 || move.promote;
+        case MoveSelection::Checking:
+            return gives_check(move);
+        default:
+            return true;
+    }
+}</code></pre>
+
+<table>
+  <thead>
+    <tr><th>MoveSelection</th><th>保持条件</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>All</code></td><td>常に <code>true</code>（全手生成）</td></tr>
+    <tr><td><code>Tactical</code></td><td>王手中 / 駒取り / 成り のいずれか</td></tr>
+    <tr><td><code>Checking</code></td><td><code>gives_check(move)</code> が <code>true</code> の手のみ</td></tr>
+  </tbody>
+</table>
+
+<p>
+<code>Tactical</code> で <code>in_check</code> が含まれているのは、王手回避時は全手を探索する必要があるためです。
+</p>
+
+<!-- ============================================================ -->
+<h2>6.11 generate_quiescence_moves() と generate_checking_moves() の違い</h2>
+
+<p>
+この2つの関数は、目的の異なる手の部分集合を生成します。
+</p>
+
+<h3>generate_quiescence_moves()（静止探索用）</h3>
+<pre><code>std::vector&lt;Move&gt; Position::generate_quiescence_moves() const {
+    return generate_legal_moves(true, true, MoveSelection::Tactical);
+}</code></pre>
+<p>
+<code>MoveSelection::Tactical</code> を使用し、駒取り・成り・王手回避の手だけを生成します。
+静止探索（quiescence search）は、評価値が大きく変動する手（captures/promotions）のみを探索して
+水平線効果を軽減する手法です。駒打ちは王手回避中を除きスキップされます。
+</p>
+
+<h3>generate_checking_moves()（王手生成用）</h3>
+<pre><code>std::vector&lt;Move&gt; Position::generate_checking_moves() const {
+    return generate_legal_moves(true, true, MoveSelection::Checking);
+}</code></pre>
+<p>
+<code>MoveSelection::Checking</code> を使用し、相手玉に王手をかける手だけを生成します。
+<code>gives_check(move)</code> は移動後の局面で相手玉が攻撃されているかを判定する関数で、
+コストが高いため、詰み探索など特定の状況でのみ使用されます。
+</p>
+
+<!-- ============================================================ -->
+<h2>6.12 全体の処理フロー</h2>
+
+<p>
+合法手生成の全体フローを整理すると、以下のようになります。
+</p>
+
+<pre><code>generate_legal_moves(include_drops, enforce_pawn_drop_mate, selection)
+  +-- compute_pins_and_checks()    // ピン・王手の検出
+  +-- generate_king_moves()        // 玉の移動生成
+  +-- [両王手なら即リターン]
+  +-- move_mask の計算              // 単王手なら合駒・取りの制限
+  +-- generate_piece_moves() x 13  // 各駒種の移動生成
+  +-- add_drop_moves()             // 駒打ち生成</code></pre>
+
+<p>
+全13種の駒種（歩・香・桂・銀・金・角・飛・と・成香・成桂・成銀・馬・龍）に対して
+<code>generate_piece_moves()</code> を順に呼び出し、
+該当する駒種のビットボード <code>piece_bb_[color][type]</code> を渡すことで一括生成します。
+全ての合法性チェックが事前のビットボード計算に集約され、
+生成される手はすべて合法であることが保証されます。
+</p>
+
+  <div class="chapter-nav">
+    <span><a href="chapter05.html">&larr; 前章</a></span>
+    <span><a href="chapter07.html">次章 &rarr;</a></span>
+  </div>
+</div>
+</body>
+</html>

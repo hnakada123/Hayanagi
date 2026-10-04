@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第1章 はじめに — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
+  </div>
+</header>
+<div class="wrapper">
+
+<h1>第1章 はじめに</h1>
+
+<p>
+本章では、将棋エンジンとは何か、エンジンとGUIがどのように分離されているのかを解説し、
+その通信プロトコルであるUSI（Universal Shogi Interface）の概要を説明します。
+続いて、本書の題材であるHayanagiエンジンの全体アーキテクチャを俯瞰し、
+実際にビルドして動かすところまでを体験します。
+</p>
+
+<!-- ============================================================ -->
+<h2>1.1 将棋エンジンとは何か</h2>
+
+<p>
+将棋エンジンとは、将棋の局面を受け取り、最善と考えられる手を返すプログラムです。
+チェスの世界では「チェスエンジン」と呼ばれ、Stockfishなどが有名ですが、
+将棋でも同様のアーキテクチャが広く採用されています。
+</p>
+
+<p>
+重要な設計原則として、将棋エンジンは<strong>GUI（グラフィカルユーザーインターフェース）とは完全に分離</strong>されています。
+エンジンは盤面の描画や駒のドラッグ操作といった表示機能を一切持たず、
+テキストベースのコマンドを標準入出力でやり取りするだけのプログラムです。
+</p>
+
+<div class="note">
+<strong>エンジンとGUIの分離</strong><br>
+この分離により、任意のGUIソフト（将棋所、ShogiGUIなど）と任意のエンジンを自由に組み合わせることができます。
+エンジン開発者はGUIを作る必要がなく、思考アルゴリズムの開発に集中できます。
+</div>
+
+<pre class="board-diagram">
+  ┌──────────────┐          stdin / stdout          ┌──────────────┐
+  │              │  ─── USIコマンド (テキスト) ───>  │              │
+  │   GUI        │                                   │   エンジン   │
+  │  (将棋所等)  │  <── 応答 (bestmove等) ─────────  │  (Hayanagi)  │
+  │              │                                   │              │
+  └──────────────┘                                   └──────────────┘
+</pre>
+
+<p>
+GUIはユーザーの操作を受けてエンジンに局面を送り、エンジンが返した最善手を盤面に反映します。
+この通信に使われるのがUSIプロトコルです。
+</p>
+
+<!-- ============================================================ -->
+<h2>1.2 USIプロトコルの概要</h2>
+
+<p>
+USI（Universal Shogi Interface）は、将棋エンジンとGUIの間の通信規約です。
+チェスにおけるUCI（Universal Chess Interface）を将棋向けに拡張したもので、
+テキスト行ベースの簡潔なプロトコルです。
+</p>
+
+<h3>1.2.1 主要コマンド一覧</h3>
+
+<p>以下の表に、USIプロトコルの主要コマンドをまとめます。</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>方向</th>
+      <th>コマンド</th>
+      <th>説明</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>GUI→エンジン</td><td><code>usi</code></td><td>USIモードの開始を要求</td></tr>
+    <tr><td>エンジン→GUI</td><td><code>id name ...</code></td><td>エンジン名の応答</td></tr>
+    <tr><td>エンジン→GUI</td><td><code>id author ...</code></td><td>作者名の応答</td></tr>
+    <tr><td>エンジン→GUI</td><td><code>option name ... type ...</code></td><td>設定可能なオプションの通知</td></tr>
+    <tr><td>エンジン→GUI</td><td><code>usiok</code></td><td>USI初期化完了の応答</td></tr>
+    <tr><td>GUI→エンジン</td><td><code>setoption name ... value ...</code></td><td>オプションの設定</td></tr>
+    <tr><td>GUI→エンジン</td><td><code>isready</code></td><td>準備完了の確認</td></tr>
+    <tr><td>エンジン→GUI</td><td><code>readyok</code></td><td>準備完了の応答</td></tr>
+    <tr><td>GUI→エンジン</td><td><code>usinewgame</code></td><td>新しい対局の開始</td></tr>
+    <tr><td>GUI→エンジン</td><td><code>position ...</code></td><td>局面の設定（SFEN + 指し手列）</td></tr>
+    <tr><td>GUI→エンジン</td><td><code>go ...</code></td><td>思考開始（深さ・時間等を指定）</td></tr>
+    <tr><td>エンジン→GUI</td><td><code>info ...</code></td><td>探索途中の情報（評価値・読み筋等）</td></tr>
+    <tr><td>エンジン→GUI</td><td><code>bestmove ...</code></td><td>最善手の応答</td></tr>
+    <tr><td>GUI→エンジン</td><td><code>stop</code></td><td>思考の中断要求</td></tr>
+    <tr><td>GUI→エンジン</td><td><code>ponderhit</code></td><td>先読みが的中した通知</td></tr>
+    <tr><td>GUI→エンジン</td><td><code>quit</code></td><td>エンジンの終了</td></tr>
+    <tr><td>GUI→エンジン</td><td><code>gameover ...</code></td><td>対局結果の通知</td></tr>
+  </tbody>
+</table>
+
+<h3>1.2.2 典型的な通信フロー</h3>
+
+<p>
+エンジンが起動されてから1手指すまでの典型的な通信フローは以下の通りです。
+</p>
+
+<pre><code>GUI:    usi
+Engine: id name Hayanagi
+Engine: id author OpenAI
+Engine: option name USI_Ponder type check default false
+Engine: option name MultiPV type spin default 1 min 1 max 500
+Engine: option name Threads type spin default 1 min 1 max 256
+Engine: option name Hash type spin default 256 min 1 max 65536
+Engine: usiok
+
+GUI:    isready
+Engine: readyok
+
+GUI:    usinewgame
+GUI:    position startpos
+GUI:    go btime 60000 wtime 60000 byoyomi 10000
+
+Engine: info depth 1 score cp 50 nodes 20 time 1 pv 7g7f
+Engine: info depth 2 score cp 30 nodes 150 time 3 pv 7g7f 3c3d
+  ...
+Engine: bestmove 7g7f ponder 3c3d
+</code></pre>
+
+<p>
+まず <code>usi</code> コマンドでプロトコルを確立し、
+<code>isready</code> / <code>readyok</code> で初期化を確認した後、
+<code>position</code> で局面を設定し、<code>go</code> で思考を開始します。
+エンジンは <code>info</code> で途中経過を報告し、最終的に <code>bestmove</code> で最善手を返します。
+</p>
+
+<div class="note">
+<strong>SFEN記法</strong><br>
+USIでは局面をSFEN（Shogi Forsyth-Edwards Notation）という文字列で表現します。
+初期局面のSFENは以下の通りです：<br>
+<code>lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1</code><br>
+大文字が先手（Black）、小文字が後手（White）の駒を表します。
+</div>
+
+<!-- ============================================================ -->
+<h2>1.3 Hayanagiの全体アーキテクチャ</h2>
+
+<p>
+Hayanagiは約4,900行のC++17コードで構成される、コンパクトな将棋エンジンです。
+ソースコードは <code>src/</code> ディレクトリにあり、以下のコンパイル単位で構成されています。
+</p>
+
+<pre class="board-diagram">
+                        ┌──────────────────┐
+                        │    main.cpp      │  エントリポイント（12行）
+                        │  UsiEngineを起動 │
+                        └────────┬─────────┘
+                                 │ 依存
+                                 v
+                        ┌──────────────────┐
+                        │  usi_engine.h/cpp │  USIプロトコル処理
+                        │  コマンド解析     │  探索スレッド管理
+                        │  オプション管理   │  bench / perft
+                        └───┬──────────┬───┘
+                            │          │ 依存
+                    ┌───────┘          └───────┐
+                    v                          v
+          ┌──────────────────┐       ┌──────────────────┐
+          │   search.h/cpp   │       │    book.h/cpp    │
+          │  反復深化探索     │       │  定跡データベース │
+          │  alpha-beta      │       │  読み込み・検索   │
+          │  評価関数        │       └──────────────────┘
+          │  置換表          │
+          └────────┬─────────┘
+                   │ 依存
+                   v
+          ┌──────────────────┐
+          │  position.h/cpp  │  局面管理
+          │  合法手生成       │  SFEN解析
+          │  王手検出        │  千日手判定
+          │  SEE             │  入玉判定
+          └────────┬─────────┘
+                   │ 依存
+          ┌────────┴─────────┐
+          v                  v
+  ┌──────────────┐   ┌──────────────┐
+  │   types.h    │   │  bitboard.h  │
+  │  駒・座標    │   │  81マス      │
+  │  Move構造体  │   │  ビットボード │
+  │  定数定義    │   │  集合演算    │
+  └──────────────┘   └──────────────┘
+</pre>
+
+<p>
+各コンパイル単位の概要を以下の表にまとめます。
+</p>
+
+<table>
+  <thead>
+    <tr><th>ファイル</th><th>行数</th><th>役割</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>types.h</code></td><td>304</td><td>Color, PieceType, Move などの基本型、定数、駒操作ユーティリティ</td></tr>
+    <tr><td><code>bitboard.h</code></td><td>114</td><td>81マスビットボード（2つの <code>uint64_t</code> で実装）</td></tr>
+    <tr><td><code>position.h/cpp</code></td><td>1,848</td><td>盤面管理、合法手生成、王手検出、ピン判定、千日手、入玉判定</td></tr>
+    <tr><td><code>search.h/cpp</code></td><td>1,608</td><td>反復深化、alpha-beta、PVS、静止探索、置換表、評価関数、詰み探索</td></tr>
+    <tr><td><code>usi_engine.h/cpp</code></td><td>924</td><td>USIプロトコル処理、コマンドディスパッチ、オプション管理</td></tr>
+    <tr><td><code>book.h/cpp</code></td><td>87</td><td>定跡ファイル（やねうら王DB2016形式）の読み込みと検索</td></tr>
+    <tr><td><code>main.cpp</code></td><td>12</td><td>エントリポイント</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2>1.4 ビルド方法</h2>
+
+<p>
+HayanagiはCMakeを使ってビルドします。C++17対応のコンパイラ（GCC 7以降、Clang 5以降、MSVC 2017以降）が必要です。
+</p>
+
+<h3>1.4.1 ビルド手順</h3>
+
+<pre><code># ビルドディレクトリを作成してCMakeを実行
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+# ビルド実行
+cmake --build build
+</code></pre>
+
+<p>
+ビルドが成功すると、<code>build/hayanagi</code> という実行ファイルが生成されます。
+</p>
+
+<div class="note">
+<strong>コンパイラ警告</strong><br>
+Hayanagiでは <code>-Wall -Wextra -Wpedantic</code>（GCC/Clang）
+または <code>/W4</code>（MSVC）の警告フラグが有効になっています。
+コードの品質を保つため、警告が出ない状態を維持しています。
+</div>
+
+<h3>1.4.2 動作確認：benchコマンド</h3>
+
+<p>
+<code>bench</code> コマンドは、組み込みのテスト局面群に対して探索を行い、
+ノード数や速度を計測するベンチマーク機能です。
+エンジンが正しくビルドできたことの確認に使えます。
+</p>
+
+<pre><code>$ echo "bench nodes 10000" | ./build/hayanagi
+</code></pre>
+
+<p>
+これにより、固定ノード数での探索が実行され、合計ノード数、経過時間、NPS（ノード/秒）が表示されます。
+</p>
+
+<h3>1.4.3 動作確認：perftコマンド</h3>
+
+<p>
+<code>perft</code> は、指定した深さまでの合法手の総数を数えるテストです。
+合法手生成が正しいことを検証するために使います。
+</p>
+
+<pre><code>$ echo -e "position startpos\nperft depth 3 divide" | ./build/hayanagi
+</code></pre>
+
+<p>
+<code>divide</code> オプションを付けると、初手ごとの合法手数内訳が表示され、
+バグの特定に役立ちます。
+</p>
+
+<h3>1.4.4 動作確認：goコマンド</h3>
+
+<p>
+USIの <code>go</code> コマンドで実際に探索させることもできます。
+</p>
+
+<pre><code>$ echo -e "position startpos\ngo depth 5" | ./build/hayanagi
+</code></pre>
+
+<p>
+<code>go depth N</code> は深さN手まで、<code>go nodes N</code> はN局面まで探索します。
+探索の途中経過が <code>info</code> 行で表示され、最後に <code>bestmove</code> が出力されます。
+</p>
+
+<!-- ============================================================ -->
+<h2>1.5 main.cppのコード解説</h2>
+
+<p>
+Hayanagiのエントリポイントである <code>main.cpp</code> は、わずか12行です。
+将棋エンジンとしての複雑なロジックはすべて <code>UsiEngine</code> クラスに委譲されており、
+<code>main</code> 関数は驚くほどシンプルです。
+</p>
+
+<p class="source-ref">src/main.cpp</p>
+<pre><code>#include &lt;iostream&gt;
+
+#include "usi_engine.h"
+
+int main() {
+    std::ios::sync_with_stdio(false);
+    std::cin.tie(nullptr);
+
+    shogi::UsiEngine engine;
+    engine.loop();
+    return 0;
+}
+</code></pre>
+
+<p>各行を見ていきましょう。</p>
+
+<h3>1.5.1 入出力の高速化</h3>
+
+<pre><code>std::ios::sync_with_stdio(false);
+std::cin.tie(nullptr);
+</code></pre>
+
+<p>
+<code>sync_with_stdio(false)</code> は、C++の標準入出力ストリーム（<code>cin</code>/<code>cout</code>）と
+Cの標準入出力（<code>stdin</code>/<code>stdout</code>）の同期を解除します。
+これにより、入出力のバッファリングが最適化され、速度が向上します。
+</p>
+
+<p>
+<code>cin.tie(nullptr)</code> は、<code>cin</code> と <code>cout</code> の紐付けを解除します。
+通常は <code>cin</code> からの入力前に <code>cout</code> のバッファが自動フラッシュされますが、
+USIプロトコルでは <code>std::endl</code> で明示的にフラッシュするため、
+この自動フラッシュは不要です。
+</p>
+
+<h3>1.5.2 エンジンのメインループ</h3>
+
+<pre><code>shogi::UsiEngine engine;
+engine.loop();
+</code></pre>
+
+<p>
+<code>UsiEngine</code> クラスのインスタンスを生成し、<code>loop()</code> を呼び出すだけです。
+<code>loop()</code> メソッドは標準入力から1行ずつ読み取り、
+各行をUSIコマンドとして解釈・処理します。
+</p>
+
+<p>
+実際の <code>loop()</code> の実装は以下のようになっています。
+</p>
+
+<p class="source-ref">src/usi_engine.cpp（抜粋）</p>
+<pre><code>void UsiEngine::loop() {
+    std::string line;
+    while (std::getline(std::cin, line)) {
+        handle_line(line);
+        if (line == "quit") {
+            break;
+        }
+    }
+}
+</code></pre>
+
+<p>
+標準入力が閉じられるか、<code>quit</code> コマンドが送られるまで、
+無限ループでコマンドを処理し続けます。
+<code>handle_line()</code> がコマンドのディスパッチを行い、
+<code>usi</code>、<code>isready</code>、<code>position</code>、<code>go</code> などの
+各コマンドに応じた処理を呼び出します。
+</p>
+
+<div class="note">
+<strong>12行の意味</strong><br>
+<code>main.cpp</code> がこれほど短いのは、すべての責務が適切にクラスに分離されているためです。
+エントリポイントの役割は「入出力の初期化」と「メインループの起動」だけであり、
+これは将棋エンジンに限らず、よく設計されたC++プログラムに共通する特徴です。
+</div>
+
+<!-- ============================================================ -->
+<h2>1.6 まとめ</h2>
+
+<p>本章では以下の内容を学びました。</p>
+
+<ul>
+  <li>将棋エンジンはGUIと分離されたプログラムであり、テキストベースのUSIプロトコルで通信する</li>
+  <li>USIプロトコルの主要コマンドと典型的な通信フロー</li>
+  <li>Hayanagiは <code>types.h</code>、<code>bitboard.h</code>、<code>position.h/cpp</code>、<code>search.h/cpp</code>、<code>usi_engine.h/cpp</code>、<code>book.h/cpp</code>、<code>main.cpp</code> で構成される</li>
+  <li>CMakeでビルドし、<code>bench</code>、<code>perft</code>、<code>go</code> コマンドで動作確認ができる</li>
+  <li><code>main.cpp</code> はわずか12行で、すべてのロジックを <code>UsiEngine</code> に委譲している</li>
+</ul>
+
+<p>
+次章では、Hayanagiの最も基本的な型定義を見ていきます。
+盤面の座標系、駒の表現、指し手の表現など、エンジン全体の土台となるデータ構造を理解しましょう。
+</p>
+
+<nav class="chapter-nav">
+  <span></span>
+  <a href="chapter02.html">次章: 第2章 型とデータ表現 &rarr;</a>
+</nav>
+
+</div>
+</body>
+</html>

@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>第4章 局面管理 — 基礎編 — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header">
+  <div class="inner">
+    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
+    <nav><a href="index.html">目次</a></nav>
+  </div>
+</header>
+<div class="wrapper">
+
+<h1>第4章 局面管理 — 基礎編</h1>
+
+<p>
+前章まででビットボードと型の基礎を学びました。本章では、それらを組み合わせて「局面（Position）」全体を管理する仕組みを見ていきます。
+将棋エンジンにおいて局面クラスはまさに中核であり、盤面の状態保持、指し手の適用、SFEN の読み書き、そしてハッシュキーの管理まで、
+あらゆる処理がここを起点に動きます。
+</p>
+
+<!-- ======================================== -->
+<h2>4.1 Position クラスの全体設計</h2>
+
+<p>
+<code>Position</code> クラスは <code>position.h</code> に宣言されています。
+公開インターフェースとして「局面の設定」「合法手生成」「指し手適用」「状態問い合わせ」の4カテゴリの関数を提供し、
+内部データとしてボード配列・持ち駒・ビットボード・ハッシュキー・履歴を保持します。
+</p>
+
+<pre><code>class Position {
+public:
+    Position();
+
+    void set_startpos();
+    bool set_sfen(const std::string&amp; sfen);
+    bool apply_usi_move(const std::string&amp; move_text);
+
+    std::vector&lt;Move&gt; generate_legal_moves() const;
+    bool do_move(const Move&amp; move);
+    TerminalStatus terminal_status() const;
+
+    Color side_to_move() const { return side_to_move_; }
+    int piece_at(int square) const { return board_[square]; }
+    std::uint64_t position_key() const { return position_key_; }
+    int hand_count(Color color, PieceType type) const;
+    bool is_in_check(Color color) const;
+    int find_king(Color color) const;
+    // ... 他多数
+};</code></pre>
+
+<p>
+コンストラクタは <code>set_startpos()</code> を呼び出し、平手初期局面を設定します。
+</p>
+
+<pre><code>Position::Position() {
+    set_startpos();
+}</code></pre>
+
+<!-- ======================================== -->
+<h2>4.2 盤面配列 board_[81]</h2>
+
+<p>
+盤面は <code>int</code> 型の 81 要素配列で表現されます。
+</p>
+
+<pre><code>std::array&lt;int, kSquareCount&gt; board_{};</code></pre>
+
+<p>
+各マスに格納される値は<strong>符号付き駒コード</strong>です。第2章で解説した <code>encode_piece()</code> により、
+先手（Black）の駒は正の値、後手（White）の駒は負の値、空マスは 0 となります。
+</p>
+
+<pre><code>// types.h より
+inline int encode_piece(Color color, PieceType type) {
+    if (type == PieceType::Empty) return 0;
+    return color == Color::Black ? static_cast&lt;int&gt;(type)
+                                 : -static_cast&lt;int&gt;(type);
+}</code></pre>
+
+<p>
+たとえば先手の歩は <code>+1</code>、後手の飛は <code>-7</code>、先手の馬は <code>+13</code> です。
+この符号方式のおかげで、<code>piece_color()</code> は符号を見るだけ、<code>piece_type()</code> は絶対値を取るだけで判定できます。
+</p>
+
+<p>
+配列のインデックスは <code>square = row * 9 + col</code> です。
+row 0 が1段目（先手の成りゾーン側）、col 0 が9筋に対応します。
+</p>
+
+<!-- ======================================== -->
+<h2>4.3 持ち駒 hands_[2][8]</h2>
+
+<p>
+持ち駒は2色 x 8駒種の2次元配列で枚数を管理します。
+</p>
+
+<pre><code>std::array&lt;std::array&lt;int, kHandPieceKinds&gt;, 2&gt; hands_{};</code></pre>
+
+<p>
+<code>kHandPieceKinds</code> は 8 で、インデックス 0 は未使用（Empty に対応）、1 が歩、2 が香、...、7 が飛です。
+<code>hand_index()</code> は成駒を元の駒種に戻してからインデックスに変換します。
+</p>
+
+<pre><code>int Position::hand_count(Color color, PieceType type) const {
+    return hands_[static_cast&lt;int&gt;(color)][hand_index(type)];
+}</code></pre>
+
+<p>
+持ち駒の追加・削除は Zobrist ハッシュの更新と連動しています（後述）。
+</p>
+
+<!-- ======================================== -->
+<h2>4.4 色別ビットボードと駒種別ビットボード</h2>
+
+<p>
+高速な利き計算・合法手生成のため、<code>board_[]</code> と並行してビットボードを管理します。
+</p>
+
+<pre><code>std::array&lt;Bitboard, 2&gt; color_bb_{};                  // 色別
+std::array&lt;std::array&lt;Bitboard, 15&gt;, 2&gt; piece_bb_{};  // 色別×駒種別
+Bitboard occupied_;                                     // 全駒の合成</code></pre>
+
+<p>
+<code>color_bb_[0]</code> は先手の全駒のビットボード、<code>color_bb_[1]</code> は後手の全駒のビットボードです。
+<code>piece_bb_[color][type]</code> は特定の色・駒種の駒が立っているマスを表します。
+<code>occupied_</code> は両色のビットボードの OR で、スライダー利き計算時に占有判定として使います。
+</p>
+
+<p>
+さらに玉の位置は頻繁にアクセスされるため、専用の配列でキャッシュしています。
+</p>
+
+<pre><code>std::array&lt;int, 2&gt; king_square_ = {-1, -1};</code></pre>
+
+<!-- ======================================== -->
+<h2>4.5 盤面操作: clear(), add_piece(), remove_piece()</h2>
+
+<p>
+盤面データの一貫性を保つため、駒の配置・除去はすべて専用関数を経由します。
+</p>
+
+<h3>clear()</h3>
+<p>すべてのデータをゼロクリアします。</p>
+
+<pre><code>void Position::clear() {
+    board_.fill(0);
+    for (auto&amp; hand : hands_) {
+        hand.fill(0);
+    }
+    for (auto&amp; color_bits : piece_bb_) {
+        for (auto&amp; piece_bits : color_bits) {
+            piece_bits = Bitboard{};
+        }
+    }
+    color_bb_[0] = Bitboard{};
+    color_bb_[1] = Bitboard{};
+    occupied_ = Bitboard{};
+    king_square_ = {-1, -1};
+    side_to_move_ = Color::Black;
+    ply_count_ = 0;
+    position_key_ = 0;
+    history_.reset();
+}</code></pre>
+
+<h3>add_piece()</h3>
+<p>
+指定マスに駒を配置します。<code>board_[]</code> への書き込みと同時に、3種のビットボード（<code>occupied_</code>、<code>color_bb_</code>、<code>piece_bb_</code>）をセットし、
+Zobrist ハッシュキーも XOR で更新します。玉の場合は <code>king_square_</code> も更新します。
+</p>
+
+<pre><code>void Position::add_piece(int square, Color color, PieceType type) {
+    position_key_ ^= zobrist().board[static_cast&lt;int&gt;(color)]
+                                     [static_cast&lt;int&gt;(type)][square];
+    board_[square] = encode_piece(color, type);
+    occupied_.set(square);
+    color_bb_[static_cast&lt;int&gt;(color)].set(square);
+    piece_bb_[static_cast&lt;int&gt;(color)][static_cast&lt;int&gt;(type)].set(square);
+    if (type == PieceType::King) {
+        king_square_[static_cast&lt;int&gt;(color)] = square;
+    }
+}</code></pre>
+
+<h3>remove_piece()</h3>
+<p>
+<code>add_piece()</code> の逆操作です。<code>board_[]</code> から駒コードを読み取り、該当するビットボードとハッシュキーを元に戻します。
+</p>
+
+<pre><code>void Position::remove_piece(int square) {
+    const int piece = board_[square];
+    if (is_empty(piece)) return;
+    const Color color = piece_color(piece);
+    const PieceType type = piece_type(piece);
+    position_key_ ^= zobrist().board[static_cast&lt;int&gt;(color)]
+                                     [static_cast&lt;int&gt;(type)][square];
+    occupied_.reset(square);
+    color_bb_[static_cast&lt;int&gt;(color)].reset(square);
+    piece_bb_[static_cast&lt;int&gt;(color)][static_cast&lt;int&gt;(type)].reset(square);
+    board_[square] = 0;
+    if (type == PieceType::King) {
+        king_square_[static_cast&lt;int&gt;(color)] = -1;
+    }
+}</code></pre>
+
+<p>
+この設計のポイントは、<code>board_[]</code> とビットボードが<strong>常に同期</strong>していることです。
+直接 <code>board_[]</code> を書き換えるコードは存在せず、必ず <code>add_piece()</code> / <code>remove_piece()</code> を経由します。
+</p>
+
+<!-- ======================================== -->
+<h2>4.6 SFEN 文字列の読み込み — set_sfen()</h2>
+
+<p>
+SFEN（Shogi Forsyth-Edwards Notation）は将棋の局面を1行の文字列で表現する標準形式です。
+<code>set_sfen()</code> はこの文字列をパースして局面を構築します。
+</p>
+
+<p>SFEN 文字列は空白区切りで4つのトークンからなります:</p>
+<ol>
+  <li>盤面配置（<code>/</code> で段を区切り、数字は空マスの連続数）</li>
+  <li>手番（<code>b</code> = 先手、<code>w</code> = 後手）</li>
+  <li>持ち駒（<code>-</code> = なし、または <code>2P</code> のように枚数+駒文字）</li>
+  <li>手数（1始まり）</li>
+</ol>
+
+<h3>盤面パース部分</h3>
+<pre><code>int row = 0;
+int col = 0;
+bool promoted = false;
+for (char ch : tokens[0]) {
+    if (ch == '/') {
+        if (col != kBoardSize) return false;
+        ++row;
+        col = 0;
+        continue;
+    }
+    if (ch == '+') {
+        promoted = true;    // 次の駒文字が成駒
+        continue;
+    }
+    if (std::isdigit(static_cast&lt;unsigned char&gt;(ch))) {
+        col += ch - '0';   // 空マスをスキップ
+        promoted = false;
+        continue;
+    }
+    // 駒文字の処理
+    const auto base = piece_from_letter(ch);
+    if (!base.has_value()) return false;
+    PieceType type = base.value();
+    if (promoted) type = promote(type);
+    const Color color = std::isupper(static_cast&lt;unsigned char&gt;(ch))
+                             ? Color::Black : Color::White;
+    add_piece(make_square(row, col), color, type);
+    ++col;
+    promoted = false;
+}</code></pre>
+
+<p>
+大文字が先手、小文字が後手という規約です。<code>+</code> プレフィクスがあれば <code>promote()</code> で成駒に変換します。
+</p>
+
+<h3>手番と持ち駒の読み込み</h3>
+<pre><code>// 手番
+if (tokens[1] == "b") {
+    side_to_move_ = Color::Black;
+} else if (tokens[1] == "w") {
+    side_to_move_ = Color::White;
+    position_key_ ^= zobrist().side_to_move;  // 後手番なら手番キーを反映
+}
+
+// 持ち駒
+if (tokens[2] != "-") {
+    int count = 0;
+    for (char ch : tokens[2]) {
+        if (std::isdigit(static_cast&lt;unsigned char&gt;(ch))) {
+            count = count * 10 + (ch - '0');  // 複数桁に対応
+            continue;
+        }
+        const auto piece = piece_from_letter(ch);
+        const Color color = std::isupper(static_cast&lt;unsigned char&gt;(ch))
+                                 ? Color::Black : Color::White;
+        for (int remaining = std::max(count, 1); remaining &gt; 0; --remaining) {
+            add_hand_piece(color, piece.value());
+        }
+        count = 0;
+    }
+}</code></pre>
+
+<p>
+最後に手数をパースし、<code>rebuild_history()</code> で履歴の初期ノードを作成してパースは完了です。
+</p>
+
+<!-- ======================================== -->
+<h2>4.7 SFEN 出力 — to_sfen()</h2>
+
+<p>
+<code>to_sfen()</code> は現在の局面から SFEN 文字列を生成します。<code>set_sfen()</code> の逆変換で、ラウンドトリップが保証されています。
+</p>
+
+<pre><code>std::string Position::to_sfen() const {
+    std::string sfen;
+    for (int row = 0; row &lt; kBoardSize; ++row) {
+        if (row &gt; 0) sfen += '/';
+        int empty_count = 0;
+        for (int col = 0; col &lt; kBoardSize; ++col) {
+            const int piece = board_[make_square(row, col)];
+            if (is_empty(piece)) {
+                ++empty_count;
+                continue;
+            }
+            if (empty_count &gt; 0) {
+                sfen += static_cast&lt;char&gt;('0' + empty_count);
+                empty_count = 0;
+            }
+            const PieceType type = piece_type(piece);
+            if (is_promoted(type)) sfen += '+';
+            char letter = piece_letter(type);
+            if (piece_color(piece) == Color::White)
+                letter = static_cast&lt;char&gt;(
+                    std::tolower(static_cast&lt;unsigned char&gt;(letter)));
+            sfen += letter;
+        }
+        if (empty_count &gt; 0)
+            sfen += static_cast&lt;char&gt;('0' + empty_count);
+    }
+    // 手番・持ち駒・手数を追加（省略）
+    return sfen;
+}</code></pre>
+
+<!-- ======================================== -->
+<h2>4.8 USI 指し手の適用 — apply_usi_move()</h2>
+
+<p>
+USI プロトコルでは指し手を <code>"7g7f"</code>（移動）や <code>"P*3d"</code>（駒打ち）のような文字列で表現します。
+<code>apply_usi_move()</code> はこの文字列を受け取り、合法手リストと照合して適用します。
+</p>
+
+<pre><code>bool Position::apply_usi_move(const std::string&amp; move_text) {
+    const auto legal_moves = generate_legal_moves();
+    const auto it = std::find_if(
+        legal_moves.begin(), legal_moves.end(),
+        [&amp;](const Move&amp; move) {
+            return move_to_usi(move) == move_text;
+        });
+    if (it == legal_moves.end()) return false;
+    do_move_unchecked(*it);
+    return true;
+}</code></pre>
+
+<p>
+合法手リストから一致する手を検索し、見つからなければ <code>false</code> を返します。
+見つかった場合は <code>do_move_unchecked()</code> を呼び出して局面を進めます。
+この方式により、不正な指し手は自動的に拒否されます。
+</p>
+
+<!-- ======================================== -->
+<h2>4.9 do_move() の処理フロー</h2>
+
+<p>
+<code>do_move()</code> はバリデーション後に <code>do_move_unchecked()</code> を呼びます。
+後者の処理フローは以下のとおりです。
+</p>
+
+<pre><code>void Position::do_move_unchecked(const Move&amp; move) {
+    const Color mover = side_to_move_;
+
+    if (move.drop) {
+        // (1) 駒打ち: 持ち駒から盤上へ
+        add_piece(move.to, mover, move.piece);
+        remove_hand_piece(mover, move.piece);
+    } else {
+        // (2) 盤上の移動
+        const int moving_piece = board_[move.from];
+        const PieceType moving_type = piece_type(moving_piece);
+        const int captured_piece = board_[move.to];
+
+        // (2a) 捕獲処理
+        if (!is_empty(captured_piece)) {
+            const PieceType captured_type =
+                unpromote(piece_type(captured_piece));
+            add_hand_piece(mover, captured_type);   // 持ち駒に追加
+            remove_piece(move.to);                   // 盤上から除去
+        }
+
+        // (2b) 移動元を除去し、移動先に配置
+        remove_piece(move.from);
+        add_piece(move.to, mover,
+                  move.promote ? promote(moving_type) : moving_type);
+    }
+
+    // (3) 手番交替・手数更新・履歴追加
+    ++ply_count_;
+    side_to_move_ = opposite(side_to_move_);
+    position_key_ ^= zobrist().side_to_move;
+    append_history();
+}</code></pre>
+
+<p>処理の流れを整理すると:</p>
+<ol>
+  <li><strong>駒打ちの場合</strong> — 駒を盤上に配置し、持ち駒を減らす</li>
+  <li><strong>盤上移動の場合</strong>:
+    <ul>
+      <li>移動先に敵駒があれば、成りを解除して持ち駒に加える</li>
+      <li>移動元から駒を除去し、移動先に配置（成り指定があれば成駒に変換）</li>
+    </ul>
+  </li>
+  <li>手番を交替し、Zobrist キーの手番ビットを反転させ、履歴に追加する</li>
+</ol>
+
+<p>
+すべてのステップで <code>add_piece()</code> / <code>remove_piece()</code> を使うため、
+<code>board_[]</code>・ビットボード・Zobrist ハッシュが<strong>自動的に整合</strong>します。
+</p>
+
+<!-- ======================================== -->
+<h2>4.10 Zobrist ハッシュ</h2>
+
+<p>
+Zobrist ハッシュは、局面を 64 ビットの整数値（ハッシュキー）で高速に識別する手法です。
+置換表（第9章）や千日手検出に不可欠です。
+</p>
+
+<h3>ZobristTables の構造</h3>
+<pre><code>struct ZobristTables {
+    // board[色][駒種][マス] — 盤上の駒に対応する乱数値
+    std::array&lt;std::array&lt;std::array&lt;std::uint64_t, kSquareCount&gt;, 15&gt;, 2&gt; board{};
+    // hand[色][駒種インデックス][枚数] — 持ち駒に対応する乱数値
+    std::array&lt;std::array&lt;std::array&lt;std::uint64_t, kMaxHandCount&gt;, kHandPieceKinds&gt;, 2&gt; hand{};
+    // 手番用の乱数値
+    std::uint64_t side_to_move = 0;
+};</code></pre>
+
+<h3>splitmix64 による乱数生成</h3>
+<p>
+テーブルの初期化には splitmix64 という高品質な擬似乱数生成器を使います。
+固定シードから決定的に生成されるため、実行ごとに同じテーブルが得られます。
+</p>
+
+<pre><code>std::uint64_t splitmix64(std::uint64_t&amp; state) {
+    std::uint64_t value = (state += 0x9E3779B97F4A7C15ULL);
+    value = (value ^ (value &gt;&gt; 30)) * 0xBF58476D1CE4E5B9ULL;
+    value = (value ^ (value &gt;&gt; 27)) * 0x94D049BB133111EBULL;
+    return value ^ (value &gt;&gt; 31);
+}</code></pre>
+
+<h3>テーブルの構築</h3>
+<pre><code>ZobristTables build_zobrist() {
+    ZobristTables zobrist;
+    std::uint64_t seed = 0x7F4A7C159E3779B9ULL;
+
+    for (int color = 0; color &lt; 2; ++color) {
+        for (int type = 0; type &lt; 15; ++type) {
+            for (int square = 0; square &lt; kSquareCount; ++square) {
+                zobrist.board[color][type][square] = splitmix64(seed);
+            }
+        }
+        for (int index = 0; index &lt; kHandPieceKinds; ++index) {
+            for (int count = 0; count &lt; kMaxHandCount; ++count) {
+                zobrist.hand[color][index][count] = splitmix64(seed);
+            }
+        }
+    }
+    zobrist.side_to_move = splitmix64(seed);
+    return zobrist;
+}</code></pre>
+
+<p>
+テーブルは <code>static</code> ローカル変数として一度だけ構築され、以降は参照のみで使われます。
+</p>
+
+<h3>ハッシュキーの更新</h3>
+<p>
+Zobrist ハッシュの最大の利点は<strong>差分更新</strong>です。駒を追加するときも除去するときも、
+同じ乱数値を XOR するだけで正しいキーが得られます（<code>a ^ a = 0</code> の性質を利用）。
+<code>add_piece()</code> と <code>remove_piece()</code> の冒頭で行われている
+<code>position_key_ ^= zobrist().board[...][...][...]</code> がまさにこの差分更新です。
+</p>
+
+<p>
+持ち駒の場合は、枚数をインデックスとしたテーブルを使います。
+枚数変更前の値で XOR してから枚数を変更することで、累積的に正しいキーを維持します。
+</p>
+
+<pre><code>void Position::add_hand_piece(Color color, PieceType type) {
+    const int index = hand_index(type);
+    int&amp; count = hands_[static_cast&lt;int&gt;(color)][index];
+    position_key_ ^= zobrist().hand[static_cast&lt;int&gt;(color)][index][count];
+    ++count;
+}
+
+void Position::remove_hand_piece(Color color, PieceType type) {
+    const int index = hand_index(type);
+    int&amp; count = hands_[static_cast&lt;int&gt;(color)][index];
+    --count;
+    position_key_ ^= zobrist().hand[static_cast&lt;int&gt;(color)][index][count];
+}</code></pre>
+
+<!-- ======================================== -->
+<h2>4.11 HistoryNode 連結リスト — 千日手検出</h2>
+
+<p>
+将棋では同一局面が4回出現すると千日手（引き分け）となります。
+Hayanagi はこの判定のために、局面のハッシュキーを連結リストで保持します。
+</p>
+
+<pre><code>struct HistoryNode {
+    std::uint64_t key = 0;          // 局面のハッシュキー
+    Color side_to_move = Color::Black;
+    bool side_in_check = false;      // 王手がかかっているか
+    std::shared_ptr&lt;const HistoryNode&gt; previous;  // 前の局面へのリンク
+};</code></pre>
+
+<p>
+<code>std::shared_ptr</code> を使った不変連結リストです。局面をコピーしても履歴は共有されるため、
+探索木の各ノードで独立した履歴チェーンを安全に参照できます。
+</p>
+
+<h3>履歴の構築と追加</h3>
+<pre><code>void Position::rebuild_history() {
+    history_ = std::make_shared&lt;HistoryNode&gt;(
+        HistoryNode{repetition_key(), side_to_move_,
+                    is_in_check(side_to_move_), nullptr});
+}
+
+void Position::append_history() {
+    history_ = std::make_shared&lt;HistoryNode&gt;(
+        HistoryNode{repetition_key(), side_to_move_,
+                    is_in_check(side_to_move_), history_});
+}</code></pre>
+
+<p>
+<code>rebuild_history()</code> は SFEN 読み込み時に呼ばれ、<code>previous</code> を <code>nullptr</code> にしてチェーンを開始します。
+<code>append_history()</code> は <code>do_move_unchecked()</code> の最後に呼ばれ、現在の履歴を <code>previous</code> に設定した新ノードを追加します。
+</p>
+
+<h3>千日手判定</h3>
+<pre><code>bool Position::is_repetition_draw() const {
+    if (history_ == nullptr) return false;
+
+    int occurrences = 0;
+    for (auto node = history_; node != nullptr; node = node-&gt;previous) {
+        if (node-&gt;key == history_-&gt;key &amp;&amp; ++occurrences &gt;= 4) {
+            return true;
+        }
+    }
+    return false;
+}</code></pre>
+
+<p>
+現在のハッシュキーと一致するノードを履歴チェーンの先頭から遡って数え、4回以上出現していれば千日手と判定します。
+ハッシュキーが同じであれば高い確率で同一局面であるため、この簡潔な判定で十分な精度が得られます。
+</p>
+
+<!-- ======================================== -->
+<h2>4.12 まとめ</h2>
+
+<p>本章のポイントを整理します。</p>
+
+<table>
+  <thead>
+    <tr><th>要素</th><th>実装</th><th>目的</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>盤面</td><td><code>int board_[81]</code></td><td>符号付き駒コードで高速な駒判定</td></tr>
+    <tr><td>持ち駒</td><td><code>int hands_[2][8]</code></td><td>枚数管理</td></tr>
+    <tr><td>色別BB</td><td><code>Bitboard color_bb_[2]</code></td><td>自陣/敵陣の高速識別</td></tr>
+    <tr><td>駒種別BB</td><td><code>Bitboard piece_bb_[2][15]</code></td><td>特定の駒の位置を即座に取得</td></tr>
+    <tr><td>盤面操作</td><td><code>add/remove_piece()</code></td><td>board_[] とBBの同期を保証</td></tr>
+    <tr><td>SFEN</td><td><code>set_sfen() / to_sfen()</code></td><td>標準形式での入出力</td></tr>
+    <tr><td>Zobrist</td><td>splitmix64 + XOR 差分更新</td><td>O(1) での局面識別</td></tr>
+    <tr><td>履歴</td><td><code>shared_ptr</code> 連結リスト</td><td>千日手検出（4回同一局面）</td></tr>
+  </tbody>
+</table>
+
+<p>
+次章では、この局面データの上に構築される<strong>攻撃テーブルと利き計算</strong>を解説します。
+合法手生成の前提となる重要な事前計算の仕組みです。
+</p>
+
+  <div class="chapter-nav">
+    <span><a href="chapter03.html">&larr; 前章</a></span>
+    <span><a href="chapter05.html">次章 &rarr;</a></span>
+  </div>
+</div>
+</body>
+</html>
