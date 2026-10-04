@@ -14,6 +14,31 @@ bool is_abort(TsumeStatus status) {
     return status == TsumeStatus::Timeout || status == TsumeStatus::Cancelled;
 }
 
+bool is_decisive_reply(bool attack, TsumeStatus status) {
+    return status == (attack ? TsumeStatus::Mate : TsumeStatus::NoMate);
+}
+
+// 候補順に集約し、結論または中断が確定したら true を返す。
+// 逐次探索と並列探索で、打ち切り・逃れ・最長抵抗の選択規則を共有する。
+bool accumulate_reply(bool attack, const Move& move, const TsumeResult& reply,
+                      TsumeResult& result) {
+    if (is_abort(reply.status)) {
+        result = reply;
+        return true;
+    }
+    if (is_decisive_reply(attack, reply.status)) {
+        result = TsumeResult{reply.status, move, reply.plies + 1, 0};
+        return true;
+    }
+    if (reply.status == TsumeStatus::Limit) {
+        result = TsumeResult{TsumeStatus::Limit, move, 0, 0};
+    } else if (!attack && result.status == TsumeStatus::Mate && reply.plies + 1 > result.plies) {
+        // 玉方は詰みまでの手数が最も長い応手を選ぶ。
+        result = TsumeResult{TsumeStatus::Mate, move, reply.plies + 1, 0};
+    }
+    return false;
+}
+
 }  // namespace
 
 TsumeSearch::TsumeSearch() = default;
@@ -230,8 +255,7 @@ TsumeResult TsumeSearch::visit_parallel(int remaining, int ply, const std::vecto
         MoveUndo undo;
         worker.position_.make_move(moves[index], undo);
         replies[index] = worker.visit(remaining - 1, ply + 1);
-        if ((attack && replies[index].status == TsumeStatus::Mate) ||
-            (!attack && replies[index].status == TsumeStatus::NoMate)) {
+        if (is_decisive_reply(attack, replies[index].status)) {
             std::size_t previous = cutoff.load(std::memory_order_relaxed);
             while (index < previous && !cutoff.compare_exchange_weak(
                        previous, index, std::memory_order_relaxed)) {}
@@ -244,17 +268,7 @@ TsumeResult TsumeSearch::visit_parallel(int remaining, int ply, const std::vecto
     // 元の候補順で集約する。先着順にすると最善手の選択が不安定になる。
     TsumeResult result{attack ? TsumeStatus::NoMate : TsumeStatus::Mate, {}, 0, 0};
     for (std::size_t i = 0; i < moves.size(); ++i) {
-        const TsumeResult& reply = replies[i];
-        if (is_abort(reply.status)) return reply;
-        if ((attack && reply.status == TsumeStatus::Mate) ||
-            (!attack && reply.status == TsumeStatus::NoMate)) {
-            return TsumeResult{reply.status, moves[i], reply.plies + 1, 0};
-        }
-        if (reply.status == TsumeStatus::Limit) {
-            result = TsumeResult{TsumeStatus::Limit, moves[i], 0, 0};
-        } else if (!attack && result.status == TsumeStatus::Mate && reply.plies + 1 > result.plies) {
-            result = TsumeResult{TsumeStatus::Mate, moves[i], reply.plies + 1, 0};
-        }
+        if (accumulate_reply(attack, moves[i], replies[i], result)) break;
     }
     return result;
 }
@@ -318,23 +332,9 @@ TsumeResult TsumeSearch::visit(int remaining, int ply) {
         position_.make_move(move, undo);
         const TsumeResult reply = visit(remaining - 1, ply + 1);
         position_.unmake_move(move, undo);
-        if (is_abort(reply.status)) {
-            return reply;
-        }
-        if ((attack && reply.status == TsumeStatus::Mate) ||
-            (!attack && reply.status == TsumeStatus::NoMate)) {
-            result = TsumeResult{reply.status, move, reply.plies + 1, 0};
-            break;
-        }
-        if (reply.status == TsumeStatus::Limit) {
-            result = TsumeResult{TsumeStatus::Limit, move, 0, 0};
-        } else if (!attack && result.status == TsumeStatus::Mate &&
-                   reply.plies + 1 > result.plies) {
-            // 玉方は詰みまでの手数が最も長い応手を選ぶ
-            result = TsumeResult{TsumeStatus::Mate, move, reply.plies + 1, 0};
-        }
+        if (accumulate_reply(attack, move, reply, result)) break;
     }
-    store(key, remaining, result);
+    if (!is_abort(result.status)) store(key, remaining, result);
     return result;
 }
 

@@ -237,6 +237,19 @@ bool load_position_from_command(const std::string& line, Position& next) {
     return load_position_from_tokens(tokens, 1, next);
 }
 
+// 着手後の局面と着手情報から、末端の統計を集計する。
+PerftStats perft_leaf_stats(const Position& position, const Move& move, const MoveUndo& undo) {
+    PerftStats stats;
+    stats.nodes = 1;
+    stats.captures = undo.captured != 0 ? 1 : 0;
+    stats.promotions = move.promote ? 1 : 0;
+    if (position.is_in_check(position.side_to_move())) {
+        stats.checks = 1;
+        if (!position.has_legal_move()) stats.mates = 1;
+    }
+    return stats;
+}
+
 PerftStats perft_stats(Position& position, int depth, std::vector<std::vector<Move>>& buffers) {
     PerftStats stats;
     if (depth <= 0) {
@@ -248,23 +261,9 @@ PerftStats perft_stats(Position& position, int depth, std::vector<std::vector<Mo
     position.generate_legal_moves(moves);
     if (depth == 1) {
         for (const Move& move : moves) {
-            ++stats.nodes;
-            if (position.piece_at(move.to) != 0) {
-                ++stats.captures;
-            }
-            if (move.promote) {
-                ++stats.promotions;
-            }
-
             MoveUndo undo;
             position.make_move(move, undo);
-            const bool gives_check = position.is_in_check(position.side_to_move());
-            if (gives_check) {
-                ++stats.checks;
-                if (!position.has_legal_move()) {
-                    ++stats.mates;
-                }
-            }
+            stats += perft_leaf_stats(position, move, undo);
             position.unmake_move(move, undo);
         }
         return stats;
@@ -284,22 +283,7 @@ PerftStats perft_stats_for_root_move(const Position& position, const Move& move,
     MoveUndo undo;
     child.make_move(move, undo);
     if (depth == 1) {
-        PerftStats stats;
-        stats.nodes = 1;
-        if (position.piece_at(move.to) != 0) {
-            ++stats.captures;
-        }
-        if (move.promote) {
-            ++stats.promotions;
-        }
-        const bool gives_check = child.is_in_check(child.side_to_move());
-        if (gives_check) {
-            ++stats.checks;
-            if (!child.has_legal_move()) {
-                ++stats.mates;
-            }
-        }
-        return stats;
+        return perft_leaf_stats(child, move, undo);
     }
     std::vector<std::vector<Move>> buffers(static_cast<std::size_t>(depth));
     return perft_stats(child, depth - 1, buffers);
@@ -610,7 +594,6 @@ void UsiEngine::stop_search(bool report_bestmove) {
     if (search_thread_.joinable()) {
         search_thread_.join();
     }
-    searching_.store(false);
     std::lock_guard<std::mutex> lock(search_state_mutex_);
     pondering_ = false;
     ponderhit_ = false;
@@ -676,7 +659,6 @@ void UsiEngine::start_search(const std::string& line) {
     }
     const int resign_value = analyse_mode_ ? kMaxResignValue : resign_value_;
     const bool show_ponder = !analyse_mode_ && usi_ponder_.load();
-    searching_.store(true);
 
     search_thread_ = std::thread([this, snapshot, options, resign_value, show_ponder, valid]() mutable {
         SearchResult result;
@@ -699,7 +681,6 @@ void UsiEngine::start_search(const std::string& line) {
             ponderhit_ = false;
         }
 
-        searching_.store(false);
         search_state_cv_.notify_all();
     });
 }
@@ -722,7 +703,6 @@ void UsiEngine::start_mate(const std::string& line) {
     const Position snapshot = position_;
     const int threads = std::clamp(threads_.load(), 1, kMaxThreads);
     stop_requested_.store(false);
-    searching_.store(true);
     search_thread_ = std::thread([this, snapshot, threads, deadline, infinite]() {
         TsumeSearch solver;
         Position work = snapshot;
@@ -769,7 +749,6 @@ void UsiEngine::start_mate(const std::string& line) {
             else search_state_cv_.wait_until(lock, deadline, stopped);
         }
         if (!suppress_bestmove_) ProtocolOutput{} << "checkmate " << response << std::endl;
-        searching_.store(false);
         search_state_cv_.notify_all();
     });
 }
@@ -795,7 +774,6 @@ void UsiEngine::start_tsume(const std::string& line) {
         if (tokens[i] == "movetime") millis = std::clamp(parse_int(tokens[i + 1], 5000), 1, 600000);
     }
     stop_requested_.store(false);
-    searching_.store(true);
     const int threads = std::clamp(threads_.load(), 1, kMaxThreads);
     search_thread_ = std::thread([this, snapshot, attacker, depth, millis, threads]() {
         TsumeSearch solver;
@@ -806,7 +784,6 @@ void UsiEngine::start_tsume(const std::string& line) {
                       << (result.move.is_valid() ? snapshot.move_to_usi(result.move) : "none")
                       << " plies " << result.plies << " nodes " << result.nodes << std::endl;
         }
-        searching_.store(false);
     });
 }
 

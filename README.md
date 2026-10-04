@@ -959,7 +959,8 @@ python3 tests/bench_tsume.py build/hayanagi [--baseline /path/to/previous/hayana
 | `src/types.h`, `src/bitboard.h` | 基本型、81 升ビットボード |
 | `src/position.h/.cpp` | 局面、SFEN、合法手・王手生成、終局判定 |
 | `src/tsume.h/.cpp` | 詰み探索 `TsumeSearch` |
-| `src/search.h/.cpp` | 通常対局用の探索と評価 |
+| `src/search.h/.cpp` | 通常対局用の探索 |
+| `src/evaluation.h/.cpp` | 駒の価値・配置・利き・玉の安全度による静的評価 |
 | `src/parallel.h` | 再利用可能な並列ワーカー群 |
 | `src/book.h/.cpp` | 定跡の読み込み |
 | `src/usi_engine.h/.cpp`, `src/main.cpp` | USI プロトコル処理、`bench` / `perft` |

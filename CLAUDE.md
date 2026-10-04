@@ -35,7 +35,8 @@ All code lives in `src/` under the `shogi` namespace. The main compilation units
 - **bitboard.h** — 81-square bitboard using two `uint64_t` fields (lo: 64 bits, hi: 17 bits). Provides set operations, pop (LSB extraction), and iteration via `BitboardIterator`.
 - **position.h/cpp** — Board state, SFEN parsing, USI move application, legal move generation. Uses color/piece-type bitboards for check detection, pin computation, and direct move generation (no post-filter). Maintains a linked-list history (`HistoryNode`) for repetition detection. Includes SEE, null-move generation, and entering-king (impasse) rule variants.
 - **tsume.h/cpp** — Depth-first iterative-deepening mate search (`TsumeSearch`) used by ShogiBoardQ through the `hayanagi_tsume` static library. Uses `make_move`/`unmake_move` and a fixed-size transposition table that keeps mate/no-mate proofs across depths; `Limit` (no mate within depth) must never be reported as `NoMate`.
-- **search.h/cpp** — Iterative-deepening negamax with alpha-beta. Features: lockless shared transposition table (`Hash` option), PVS, quiescence search, SEE-based move ordering, killer/history heuristics, LMR, null-move pruning, dedicated mate search. Multi-threaded via root move splitting (`Threads` option). Hand-crafted evaluation (material + positional terms).
+- **search.h/cpp** — Iterative-deepening negamax with alpha-beta. Features: lockless shared transposition table (`Hash` option), PVS, quiescence search, SEE-based move ordering, killer/history heuristics, LMR, null-move pruning, dedicated mate search. Multi-threaded via root move splitting (`Threads` option).
+- **evaluation.h/cpp** — 手番側から見た静的評価（駒の価値・配置・利き・玉の安全度）。終局判定と確定スコアの値域への制限は `Search` が担当。`hayanagi_search` 静的ライブラリとして通常探索とともに本体・テストから利用する。
 - **usi_engine.h/cpp** — USI protocol handler. Runs search on a worker thread with `stop` support. Implements `bench`, `perft`, ponder, MultiPV, and all engine options.
 
 ## Key Design Details

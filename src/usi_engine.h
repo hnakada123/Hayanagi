@@ -34,7 +34,6 @@ private:
     std::condition_variable search_state_cv_;
     std::thread search_thread_;
     std::atomic_bool stop_requested_{false};
-    std::atomic_bool searching_{false};
     std::atomic_bool usi_ponder_{false};
     std::atomic_bool debug_{false};
     std::atomic_bool show_currline_{false};

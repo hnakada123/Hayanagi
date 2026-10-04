@@ -25,15 +25,19 @@ target_include_directories(hayanagi_tsume SYSTEM PUBLIC src)
 target_link_libraries(hayanagi_tsume PUBLIC Threads::Threads)
 set_target_properties(hayanagi_tsume PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
 
+# 通常探索と評価を本体・単体テストで共有し、同じソースの二重コンパイルを避ける。
+add_library(hayanagi_search STATIC src/search.cpp src/evaluation.cpp)
+target_link_libraries(hayanagi_search PUBLIC hayanagi_tsume)
+set_target_properties(hayanagi_search PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+
 add_executable(hayanagi
     src/main.cpp
     src/book.cpp
-    src/search.cpp
     src/usi_engine.cpp
 )
 
 target_include_directories(hayanagi PRIVATE src)
-target_link_libraries(hayanagi PRIVATE hayanagi_tsume Threads::Threads)
+target_link_libraries(hayanagi PRIVATE hayanagi_search)
 set_target_properties(hayanagi PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
 
 # 実行ファイルと説明書の配置。定跡同梱物は出典確認付きのpackage_release.pyで作成する。
@@ -51,7 +55,7 @@ else()
 endif()
 option(HAYANAGI_BUILD_TESTS "Hayanagi の単体テストをビルドする" ${HAYANAGI_BUILD_TESTS_DEFAULT})
 
-set(HAYANAGI_TARGETS hayanagi hayanagi_tsume)
+set(HAYANAGI_TARGETS hayanagi hayanagi_tsume hayanagi_search)
 option(HAYANAGI_BUILD_BOOK_TOOLS "Build opening-book validation and match tools" ${HAYANAGI_BUILD_TESTS_DEFAULT})
 if(HAYANAGI_BUILD_BOOK_TOOLS)
     add_executable(hayanagi_book_positions tools/book_positions.cpp)
@@ -90,9 +94,8 @@ if(HAYANAGI_BUILD_TESTS)
         tests/test_tsume.cpp
         tests/test_parallel.cpp
         tests/test_search.cpp
-        src/search.cpp
     )
-    target_link_libraries(hayanagi_tests PRIVATE hayanagi_tsume)
+    target_link_libraries(hayanagi_tests PRIVATE hayanagi_search)
     set_target_properties(hayanagi_tests PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
     add_test(NAME hayanagi_tests COMMAND hayanagi_tests)
     if(HAYANAGI_BUILD_BOOK_TOOLS)
