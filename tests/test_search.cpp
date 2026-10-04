@@ -4,12 +4,66 @@
 
 #include <algorithm>
 #include <atomic>
+#include <memory>
+#include <stdexcept>
 #include <vector>
 
 using namespace shogi;
 
+namespace {
+
+void test_callback_lifetime(int threads) {
+    enum class Exit { Normal, Terminal, NoMoves, Cancelled, Exception };
+    for (const auto exit : {Exit::Normal, Exit::Terminal, Exit::NoMoves,
+                            Exit::Cancelled, Exit::Exception}) {
+        Position root;
+        SearchOptions options;
+        options.threads = threads;
+        options.max_depth = 1;
+        if (exit == Exit::Terminal) {
+            PositionRules rules;
+            rules.max_moves_to_draw = 1;
+            root.set_rules(rules);
+            CHECK(root.apply_usi_move("7g7f"));
+            CHECK(root.terminal_status().is_terminal());
+        }
+        if (exit == Exit::NoMoves) options.restrict_searchmoves = true;
+        std::atomic_bool stop{exit == Exit::Cancelled};
+        auto search = std::make_shared<Search>();
+        std::weak_ptr<Search> lifetime = search;
+        auto captured = std::make_shared<int>(0);
+        std::weak_ptr<int> captured_lifetime = captured;
+        bool caught = false;
+        try {
+            search->find_best_move(root, options, stop,
+                [search, captured, exit](const SearchInfo&) {
+                    ++*captured;
+                    if (exit == Exit::Exception) throw std::runtime_error("callback test");
+                });
+        } catch (const std::runtime_error&) {
+            caught = true;
+        }
+        CHECK(caught == (exit == Exit::Exception));
+        if (exit == Exit::Normal || exit == Exit::Exception) CHECK(*captured > 0);
+        // 同期呼び出しが戻った時点で通知先を解放し、探索器との循環参照も残さない。
+        captured.reset();
+        CHECK(captured_lifetime.expired());
+        search.reset();
+        CHECK(lifetime.expired());
+        // 修正前でも、失敗したテスト自身が探索器とスレッドを残さないようにする。
+        if (auto retained = lifetime.lock()) {
+            options.restrict_searchmoves = true;
+            options.searchmoves.clear();
+            retained->find_best_move(root, options, stop, [](const SearchInfo&) {});
+        }
+    }
+}
+
+}  // namespace
+
 int run_search_tests() {
     for (const int threads : {1, 4}) {
+        test_callback_lifetime(threads);
         Position root;
         root.set_startpos();
         SearchOptions options;

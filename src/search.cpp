@@ -735,6 +735,12 @@ SearchResult Search::find_best_move(const Position& root,
         tt_key_salt_ = salt_counter.fetch_add(increment, std::memory_order_relaxed) + increment;
     }
     progress_ = std::make_shared<Progress>();
+    // 通知先や局面履歴を呼び出し後まで保持しない。早期 return と例外でも解放し、
+    // 通知先が Search を所有している場合の循環参照を防ぐ。
+    struct ProgressReset {
+        std::shared_ptr<Progress>& progress;
+        ~ProgressReset() { progress.reset(); }
+    } progress_reset{progress_};
     progress_->callback = on_info;
     progress_->root = root;
     progress_->cpu_start = process_cpu_seconds();

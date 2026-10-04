@@ -118,7 +118,13 @@ class LineProcess:
                                         stderr=None, text=True, encoding='utf-8', bufsize=1)
         self.lines = queue.Queue()
         self.reader = threading.Thread(target=self._read, daemon=True)
-        self.reader.start()
+        try:
+            self.reader.start()
+        except BaseException:
+            # __enter__ より前の失敗でも子プロセスとパイプを残さない。
+            self.process.kill()
+            self.process.communicate()
+            raise
 
     def _read(self):
         for line in self.process.stdout:
@@ -151,15 +157,20 @@ class LineProcess:
                 return lines
 
     def close(self):
-        if self.process.poll() is None:
-            self.process.stdin.close()
+        try:
+            try:
+                # 既に終了した子プロセスの stdin も明示的に閉じる。
+                self.process.stdin.close()
+            except BrokenPipeError:
+                pass
             try:
                 self.process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self.process.kill()
                 self.process.wait()
-        self.reader.join(timeout=5)
-        self.process.stdout.close()
+        finally:
+            self.reader.join(timeout=5)
+            self.process.stdout.close()
 
     def __enter__(self):
         return self

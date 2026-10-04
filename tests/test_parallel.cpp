@@ -4,6 +4,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <memory>
 #include <stdexcept>
 #include <thread>
 
@@ -31,6 +32,21 @@ int run_parallel_tests() {
         caught = true;
     }
     CHECK(caught);
+
+    // 呼び出し元が例外を処理した後は、例外の所有する資源も解放する。
+    // 例外がワーカー群を所有していても循環参照や待機スレッドを残さない。
+    auto owner = std::make_shared<shogi::ParallelTeam>(2);
+    std::weak_ptr<shogi::ParallelTeam> lifetime = owner;
+    struct TaskError { std::shared_ptr<shogi::ParallelTeam> owner; };
+    try {
+        owner->run(2, [owner](std::size_t, std::size_t) { throw TaskError{owner}; });
+        CHECK(false);
+    } catch (const TaskError&) {
+    }
+    owner.reset();
+    CHECK(lifetime.expired());
+    if (auto retained = lifetime.lock()) retained->run(2, [](std::size_t, std::size_t) {});
+
     for (int repeat = 0; repeat < 100; ++repeat) {
         std::array<int, 137> results{};
         team.run(results.size(), [&](std::size_t i, std::size_t) { ++results[i]; });

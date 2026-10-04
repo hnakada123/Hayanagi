@@ -99,25 +99,29 @@ class Referee(LineProcess):
 class Player(LineProcess):
     def __init__(self, executable, book_path=None, analysis=False):
         super().__init__([str(executable.resolve())])
-        self.send('usi')
-        self.identity = [line for line in self.until('usiok') if line.startswith('id name ')]
-        self.send('setoption name Threads value 1\nsetoption name Hash value 16\n'
-                  'setoption name MultiPV value 1\nsetoption name USI_Ponder value false\n'
-                  'setoption name USI_LimitStrength value false\n'
-                  'setoption name ResignValue value 99999\n'
-                  'setoption name MaxMovesToDraw value 0\n'
-                  'setoption name EnteringKingRule value CSARule24\n'
-                  f'setoption name USI_AnalyseMode value {str(analysis).lower()}\n'
-                  f'setoption name USI_OwnBook value {str(book_path is not None).lower()}')
-        if book_path:
-            self.send(f'setoption name BookDir value {book_path.resolve().parent}\n'
-                      f'setoption name BookFile value {book_path.name}')
-        self.send('isready')
-        lines = self.until('readyok')
-        if book_path and not any('book loaded ' in line for line in lines):
+        try:
+            self.send('usi')
+            self.identity = [line for line in self.until('usiok') if line.startswith('id name ')]
+            self.send('setoption name Threads value 1\nsetoption name Hash value 16\n'
+                      'setoption name MultiPV value 1\nsetoption name USI_Ponder value false\n'
+                      'setoption name USI_LimitStrength value false\n'
+                      'setoption name ResignValue value 99999\n'
+                      'setoption name MaxMovesToDraw value 0\n'
+                      'setoption name EnteringKingRule value CSARule24\n'
+                      f'setoption name USI_AnalyseMode value {str(analysis).lower()}\n'
+                      f'setoption name USI_OwnBook value {str(book_path is not None).lower()}')
+            if book_path:
+                self.send(f'setoption name BookDir value {book_path.resolve().parent}\n'
+                          f'setoption name BookFile value {book_path.name}')
+            self.send('isready')
+            lines = self.until('readyok')
+            if book_path and not any('book loaded ' in line for line in lines):
+                raise RuntimeError(f'Book not loaded: {lines}')
+            self.send('usinewgame')
+        except BaseException:
+            # 初期化中は with / ExitStack の終了処理がまだ登録されていない。
             self.close()
-            raise RuntimeError(f'Book not loaded: {lines}')
-        self.send('usinewgame')
+            raise
 
     def search(self, history, nodes):
         return self.search_command(history, f'go nodes {nodes}')

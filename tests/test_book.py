@@ -14,6 +14,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
 import build_book as book
@@ -29,6 +30,42 @@ def csa(moves='+7776FU -3334FU +2726FU -8384FU', ending='%TORYO', name='A'):
     return (f'V2\nN+{name}\nN-B\n$EVENT:wdoor+floodgate-300-10F+test\nPI\n+\n'
             "'black_rate:A:3500\n'white_rate:B:3600\n" + '\n'.join(moves.split()) +
             '\n' + ending + '\n').encode()
+
+
+class ProcessLifetimeTests(unittest.TestCase):
+    def test_close_releases_pipes_after_process_exit(self):
+        worker = book.LineProcess([sys.executable, '-c', 'pass'])
+        self.addCleanup(worker.close)
+        worker.process.wait(timeout=5)
+        worker.close()
+        self.assertFalse(worker.reader.is_alive())
+        self.assertTrue(worker.process.stdin.closed)
+        self.assertTrue(worker.process.stdout.closed)
+
+    def test_reader_start_failure_releases_process(self):
+        processes = []
+        original_popen = subprocess.Popen
+
+        def start_process(*args, **kwargs):
+            process = original_popen(*args, **kwargs)
+            processes.append(process)
+            return process
+
+        try:
+            with mock.patch.object(book.subprocess, 'Popen', start_process), \
+                 mock.patch.object(book.threading.Thread, 'start', side_effect=RuntimeError('thread test')):
+                with self.assertRaisesRegex(RuntimeError, 'thread test'):
+                    book.LineProcess([sys.executable, '-c', 'import sys; sys.stdin.read()'])
+            self.assertEqual(len(processes), 1)
+            process = processes[0]
+            self.assertIsNotNone(process.poll())
+            self.assertTrue(process.stdin.closed)
+            self.assertTrue(process.stdout.closed)
+        finally:
+            for process in processes:
+                if process.poll() is None:
+                    process.kill()
+                process.communicate(timeout=5)
 
 
 class ImportTests(unittest.TestCase):

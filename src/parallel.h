@@ -8,6 +8,7 @@
 #include <functional>
 #include <mutex>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace shogi {
@@ -53,7 +54,8 @@ public:
         std::unique_lock<std::mutex> lock(mutex_);
         done_.wait(lock, [this] { return active_ == 0; });
         task_ = {};
-        if (error_) std::rethrow_exception(error_);
+        // 例外が所有する資源を次の run やデストラクターまで保持しない。
+        if (error_) std::rethrow_exception(std::exchange(error_, nullptr));
     }
 
 private:

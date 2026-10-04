@@ -9,6 +9,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
@@ -16,6 +17,36 @@ import match_book as match
 
 ENGINE = ROOT / 'build/hayanagi'
 REFEREE = ROOT / 'build/hayanagi_match_referee'
+
+
+class PlayerLifetimeTests(unittest.TestCase):
+    def test_initialization_failure_releases_process_and_reader(self):
+        for failed_prefix, error_type in [('usiok', RuntimeError),
+                                          ('readyok', RuntimeError),
+                                          ('readyok', KeyboardInterrupt)]:
+            with self.subTest(prefix=failed_prefix, error=error_type.__name__):
+                players = []
+                original_until = match.Player.until
+
+                def fail_handshake(player, prefix, *args, **kwargs):
+                    if prefix == failed_prefix:
+                        players.append(player)
+                        raise error_type('handshake test')
+                    return original_until(player, prefix, *args, **kwargs)
+
+                try:
+                    with mock.patch.object(match.Player, 'until', fail_handshake):
+                        with self.assertRaises(error_type):
+                            match.Player(ENGINE)
+                    self.assertEqual(len(players), 1)
+                    player = players[0]
+                    self.assertIsNotNone(player.process.poll())
+                    self.assertFalse(player.reader.is_alive())
+                    self.assertTrue(player.process.stdin.closed)
+                    self.assertTrue(player.process.stdout.closed)
+                finally:
+                    for player in players:
+                        player.close()
 
 
 class RefereeTests(unittest.TestCase):

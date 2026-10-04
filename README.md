@@ -4,8 +4,8 @@ Hayanagi は、C++17 で実装した USI プロトコル対応の最小構成将
 通常対局用の探索に加えて、詰将棋用の詰み探索（`TsumeSearch`）を備え、
 将棋 GUI [ShogiBoardQ](https://github.com/hnakada123/ShogiBoardQ) に静的ライブラリとして組み込まれています。
 
-- 現在のバージョン: **1.5.0**（[変更履歴](#バージョンと変更履歴)）
-- USI の `id name` は `Hayanagi 1.5.0`。`./build/hayanagi --version` でも表示できます
+- 現在のバージョン: **1.5.1**（[変更履歴](#バージョンと変更履歴)）
+- USI の `id name` は `Hayanagi 1.5.1`。`./build/hayanagi --version` でも表示できます
 - CMake の生成実行ファイル名は `hayanagi`、組み込み用の静的ライブラリは `hayanagi_tsume`
 - 合法手生成、終局判定、通常探索、詰み探索、`bench` / `perft` をひととおり実装
 
@@ -52,7 +52,7 @@ cmake --build build
 ## 実行例
 
 ```bash
-./build/hayanagi --version   # Hayanagi 1.5.0
+./build/hayanagi --version   # Hayanagi 1.5.1
 ./build/hayanagi             # USI エンジンとして起動
 ```
 
@@ -67,10 +67,10 @@ go nodes 5000
 quit
 ```
 
-`usi` に対しては次のように応答します（`Hayanagi 1.5.0` の出力）。
+`usi` に対しては次のように応答します（`Hayanagi 1.5.1` の出力）。
 
 ```text
-id name Hayanagi 1.5.0
+id name Hayanagi 1.5.1
 id author hnakada123
 option name USI_Ponder type check default false
 option name MultiPV type spin default 1 min 1 max 32
@@ -975,10 +975,11 @@ python3 tests/bench_tsume.py build/hayanagi [--baseline /path/to/previous/hayana
 
 バージョンは `src/version.h` の `HAYANAGI_VERSION` が唯一の定義元で、CMake の `project(... VERSION)`、
 USI の `id name`、`--version` はすべてここから読みます。リリース時はこの値と本節を更新し、
-同じ番号のタグ（`v1.5.0` など）を付けます。ShogiBoardQ はタグで指定した版をサブモジュールとして参照します。
+同じ番号のタグ（`v1.5.1` など）を付けます。ShogiBoardQ はタグで指定した版をサブモジュールとして参照します。
 
 | バージョン | タグ | 日付 | 概要 |
 |---|---|---|---|
+| 1.5.1 | 未作成（未リリース） | 2026-10-04 | 探索・並列処理の循環参照と補助ツールのリソース解放漏れを修正 |
 | 1.5.0 | 未作成（未リリース） | 2026-10-01 | 独自定跡の生成・検証、通常探索・評価と定跡読込の改善、配布準備 |
 | 1.4.0 | [v1.4.0](https://github.com/hnakada123/Hayanagi/releases/tag/v1.4.0) | 2026-09-28 | 棋力制限・解析モード、コピー保護状態の通知 |
 | 1.3.0 | [v1.3.0](https://github.com/hnakada123/Hayanagi/releases/tag/v1.3.0) | 2026-09-28 | 初手制限・残り手数指定・デバッグ、追加探索情報と評価値の上下限通知 |
@@ -986,6 +987,13 @@ USI の `id name`、`--version` はすべてここから読みます。リリー
 | 1.1.0 | [v1.1.0](https://github.com/hnakada123/Hayanagi/releases/tag/v1.1.0) | 2026-09-28 | 詰み確認・詰将棋・perft の並列化、ワーカー再利用、逐次処理の高速化 |
 | 1.0.1 | [v1.0.1](https://github.com/hnakada123/Hayanagi/releases/tag/v1.0.1) | 2026-09-25 | Clang での `-Wsign-conversion` 警告を解消（ShogiBoardQ が参照中） |
 | 1.0.0 | [v1.0.0](https://github.com/hnakada123/Hayanagi/releases/tag/v1.0.0) | 2026-09-25 | 詰み探索と局面処理の高速化、ベンチマーク、単体テスト、バージョン情報 |
+
+### 1.5.1（2026-10-04、未リリース）
+
+- 通常探索の終了時に通知用コールバックと局面履歴を解放し、通知先が探索器を所有する場合の循環参照によるメモリーリークを修正しました。早期終了と例外発生時も解放します。
+- 並列処理で発生した例外を呼び出し元へ渡した後も保持し続ける問題を修正し、例外が所有する資源とワーカースレッドの解放を妨げないようにしました。
+- 定跡生成・対局検証ツールで、初期化失敗時の子プロセス・読取スレッドと、終了済みプロセスのパイプの解放漏れを修正しました。
+- 解放漏れを再現する回帰テストを追加しました。AddressSanitizer・LeakSanitizer・UBSan を有効にして CTest 全7項目と USI テスト35件を通過しました（旧版との比較用2件はスキップ）。
 
 ### 1.5.0（2026-10-01、未リリース）
 
