@@ -1,6 +1,6 @@
 <p align="center"><img src="assets/banner/hayanagi-banner.svg" alt="Hayanagi" width="800"></p>
 
-# Hayanagi
+<h1 align="center">Hayanagi</h1>
 
 Hayanagi は、C++17 で実装した USI プロトコル対応の最小構成将棋エンジンです。
 通常対局用の探索に加えて、詰将棋用の詰み探索（`TsumeSearch`）を備え、
