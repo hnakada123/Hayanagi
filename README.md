@@ -10,7 +10,7 @@ Hayanagi は、C++17 で実装した USI プロトコル対応の最小構成将
 - USI の `id name` は `Hayanagi 1.5.1`。`./build/hayanagi --version` でも表示できます
 - CMake の生成実行ファイル名は `hayanagi`、組み込み用の静的ライブラリは `hayanagi_tsume`
 - 合法手生成、終局判定、通常探索、詰み探索、`bench` / `perft` をひととおり実装
-- 機能・使い方・主な設定は紹介ページ [`docs/index.html`](docs/index.html) にまとめています（ブラウザーで開きます）
+- 機能・使い方・主な設定は紹介ページ <https://hnakada123.github.io/Hayanagi/> にまとめています（ソースは [`docs/index.html`](docs/index.html)）
 
 ## 目次
 
@@ -29,12 +29,16 @@ Hayanagi は、C++17 で実装した USI プロトコル対応の最小構成将
 
 ## コード解説
 
-[Hayanagi で学ぶ将棋エンジンの仕組み](docs/textbook.html) は、ソースコードを題材にした全15章のHTML教材です。
+[Hayanagi で学ぶ将棋エンジンの仕組み](https://hnakada123.github.io/Hayanagi/textbook.html) は、ソースコードを題材にした全15章のHTML教材です。
 C++の基本文法と将棋のルールを知っている方に向けて、データ表現、ビットボード、局面管理、合法手生成、
 終局判定、探索と評価、並列化、定跡、USIプロトコルを図とコード例で解説しています。
 
-リポジトリを取得し、`docs/textbook.html` をブラウザーで開いてください。
-Hayanagi 自体の紹介ページ `docs/index.html` からも教材に移動できます。
+教材と紹介ページは GitHub Pages で公開しています。
+
+- 紹介ページ: <https://hnakada123.github.io/Hayanagi/>
+- 教材: <https://hnakada123.github.io/Hayanagi/textbook.html>
+
+手元で読む場合は、リポジトリを取得して `docs/textbook.html`（紹介ページは `docs/index.html`）をブラウザーで開いてください。
 HTML・CSS・図版を同梱しているため、ビルドやWebサーバーの起動は不要です。
 
 教材内のコード例や行数には執筆時点の構成が含まれます。最新の実装は [`src/`](src/) を参照してください。
