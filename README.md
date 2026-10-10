@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/banner/hayanagi-banner.svg" alt="Hayanagi" width="800"></p>
+
 # Hayanagi
 
 Hayanagi は、C++17 で実装した USI プロトコル対応の最小構成将棋エンジンです。
@@ -987,6 +989,8 @@ python3 tests/bench_tsume.py build/hayanagi [--baseline /path/to/previous/hayana
 | `BENCHMARK.md` | ベンチマークの計測結果 |
 | `docs/index.html`, `docs/chapter*.html` | 将棋エンジンの仕組みを解説するHTML教材（全15章） |
 | `docs/style.css`, `docs/*.png` | 教材のスタイルシートと図版 |
+| `assets/icon/` | アイコン（SVG、16〜1024px の PNG、`favicon.ico`）。48px 以下は線を太くした `hayanagi-icon-small.svg` から書き出す |
+| `assets/banner/` | README 冒頭のバナー（文字をアウトライン化した SVG と 2 倍解像度の PNG） |
 
 ## バージョンと変更履歴
 
