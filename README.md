@@ -1,4 +1,9 @@
-<p align="center"><img src="assets/banner/hayanagi-banner.svg" alt="Hayanagi" width="800"></p>
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/banner/hayanagi-banner-dark.svg">
+    <img src="assets/banner/hayanagi-banner.svg" alt="Hayanagi" width="800">
+  </picture>
+</p>
 
 <h1 align="center">Hayanagi</h1>
 
@@ -998,7 +1003,7 @@ python3 tests/bench_tsume.py build/hayanagi [--baseline /path/to/previous/hayana
 | `docs/style.css`, `docs/script.js` | 教材のスタイルシートと、章ページの「この章の内容」を見出しから組み立てるスクリプト |
 | `docs/*.png`, `docs/hayanagi-*.svg` | 教材の図版と、ヘッダーなどで使うアイコン（`assets/icon/` の写し） |
 | `assets/icon/` | アイコン（SVG、16〜1024px の PNG、`favicon.ico`）。48px 以下は線を太くした `hayanagi-icon-small.svg` から書き出す |
-| `assets/banner/` | README 冒頭のバナー（文字をアウトライン化した SVG と 2 倍解像度の PNG） |
+| `assets/banner/` | README 冒頭のバナー。白地の `hayanagi-banner` と、GitHub のダークモードで使う背景透過の `hayanagi-banner-dark`（それぞれ文字をアウトライン化した SVG と 2 倍解像度の PNG） |
 
 ## バージョンと変更履歴
 
