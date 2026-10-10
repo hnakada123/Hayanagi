@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Hayanagi で学ぶ将棋エンジンの仕組み</title>
-<meta name="description" content="C++17 で実装された USI 対応将棋エンジン Hayanagi のソースコードを題材に、将棋エンジンの設計と実装を基礎から解説する全15章の教材です。">
+<title>Hayanagi — USI 将棋エンジン</title>
+<meta name="description" content="Hayanagi は C++17 で実装した USI プロトコル対応の将棋エンジンです。通常対局用の探索と詰将棋用の詰み探索を備え、将棋 GUI ShogiBoardQ に組み込まれています。">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="hayanagi-icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
@@ -15,11 +15,12 @@
   <div class="inner">
     <a class="brand" href="index.html">
       <img src="hayanagi-icon.svg" alt="" width="36" height="36">
-      <span class="brand-text"><span class="brand-name">Hayanagi</span><span class="brand-sub">で学ぶ将棋エンジンの仕組み</span></span>
+      <span class="brand-text"><span class="brand-name">Hayanagi</span><span class="brand-sub">USI 将棋エンジン</span></span>
     </a>
     <nav class="site-nav" aria-label="サイト">
-      <a href="home.html">トップ</a>
-      <a href="#contents">目次</a>
+      <a class="nav-secondary" href="#features">機能</a>
+      <a class="nav-secondary" href="#start">使い方</a>
+      <a href="textbook.html">教材</a>
       <a href="https://github.com/hnakada123/Hayanagi">GitHub</a>
     </nav>
   </div>
@@ -27,191 +28,217 @@
 
 <main id="main">
 
-<section class="hero">
-  <div class="hero-inner">
-    <div class="hero-text">
-      <p class="eyebrow">ソースコードで読む将棋エンジン</p>
-      <h1>Hayanagi で学ぶ<br>将棋エンジンの仕組み</h1>
-      <p class="lead">
-        本書は、C++17 で実装された USI プロトコル対応将棋エンジン <strong>Hayanagi</strong>（約 4,900 行）のソースコードを題材に、
-        将棋エンジンの設計と実装を基礎から解説する教科書です。
-      </p>
-      <p class="lead">
-        データ表現、合法手生成、探索アルゴリズム、評価関数、USI プロトコルなど、
-        将棋エンジンを構成する要素をひとつずつ、実際のコードを読みながら理解していきます。
-      </p>
-      <div class="hero-actions">
-        <a class="button primary" href="chapter01.html">第1章から読む</a>
-        <a class="button" href="#contents">目次を見る</a>
-      </div>
-      <ul class="hero-facts">
-        <li><span class="fact-value">15章</span><span class="fact-label">5部構成</span></li>
-        <li><span class="fact-value">約4,900行</span><span class="fact-label">題材のソースコード</span></li>
-        <li><span class="fact-value">C++17</span><span class="fact-label">USI プロトコル対応</span></li>
-      </ul>
-    </div>
-    <svg class="hero-mark" viewBox="50 50 412 412" role="img" aria-label="Hayanagi の柳紋">
+<section class="home-hero">
+  <div class="home-hero-inner">
+    <svg class="home-mark" viewBox="50 50 412 412" role="img" aria-label="Hayanagi の柳紋">
       <circle cx="256" cy="256" r="196" fill="none" stroke="currentColor" stroke-width="20"/>
       <g transform="translate(20.48 8) scale(0.92)">
         <path d="M170 122C220 88 292 88 342 122M256 96C252 180 262 260 250 370M206 104C184 190 178 280 196 380M306 104C328 190 334 280 316 380" fill="none" stroke="currentColor" stroke-width="10" stroke-linecap="round"/>
         <path d="M255.0 140.0C250.4 156.6 259.3 181.0 274.2 192.6C278.1 174.2 269.2 149.7 255.0 140.0ZM255.0 190.0C240.8 199.7 231.9 224.2 235.8 242.6C250.7 231.0 259.6 206.6 255.0 190.0ZM256.0 240.0C251.4 256.6 260.3 281.0 275.2 292.6C279.1 274.2 270.2 249.7 256.0 240.0ZM256.0 290.0C241.8 299.7 232.9 324.2 236.8 342.6C251.7 331.0 260.6 306.6 256.0 290.0ZM254.0 335.0C248.0 351.1 254.7 376.2 268.5 389.1C274.0 371.0 267.3 345.9 254.0 335.0ZM250.0 370.0C238.6 382.9 235.9 408.7 244.1 425.7C255.8 410.8 258.5 385.0 250.0 370.0ZM200.0 135.0C185.8 144.7 176.9 169.2 180.8 187.6C195.7 176.0 204.6 151.6 200.0 135.0ZM191.0 185.0C186.4 201.6 195.3 226.0 210.2 237.6C214.1 219.2 205.2 194.7 191.0 185.0ZM186.0 235.0C171.8 244.7 162.9 269.2 166.8 287.6C181.7 276.0 190.6 251.6 186.0 235.0ZM186.0 285.0C181.4 301.6 190.3 326.0 205.2 337.6C209.1 319.2 200.2 294.7 186.0 285.0ZM190.0 335.0C175.8 344.7 166.9 369.2 170.8 387.6C185.7 376.0 194.6 351.6 190.0 335.0ZM196.0 380.0C188.6 395.5 193.1 421.1 205.7 435.1C212.8 417.7 208.3 392.1 196.0 380.0ZM312.0 135.0C307.4 151.6 316.3 176.0 331.2 187.6C335.1 169.2 326.2 144.7 312.0 135.0ZM321.0 185.0C306.8 194.7 297.9 219.2 301.8 237.6C316.7 226.0 325.6 201.6 321.0 185.0ZM326.0 235.0C321.4 251.6 330.3 276.0 345.2 287.6C349.1 269.2 340.2 244.7 326.0 235.0ZM326.0 285.0C311.8 294.7 302.9 319.2 306.8 337.6C321.7 326.0 330.6 301.6 326.0 285.0ZM322.0 335.0C317.4 351.6 326.3 376.0 341.2 387.6C345.1 369.2 336.2 344.7 322.0 335.0ZM316.0 380.0C303.7 392.1 299.2 417.7 306.3 435.1C318.9 421.1 323.4 395.5 316.0 380.0Z" fill="currentColor"/>
       </g>
     </svg>
+    <p class="eyebrow">USI プロトコル対応の将棋エンジン</p>
+    <h1 class="home-title">Hayanagi</h1>
+    <p class="home-tagline">対局・検討から詰将棋の玉方まで</p>
+    <p class="home-lead">
+      Hayanagi は C++17 で実装した将棋エンジンです。通常対局用の探索と、詰将棋用の詰み探索を備えています。
+      将棋 GUI <a href="https://github.com/hnakada123/ShogiBoardQ">ShogiBoardQ</a> に組み込まれているほか、
+      USI に対応した将棋 GUI に単独のエンジンとして登録して使えます。
+    </p>
+    <div class="hero-actions">
+      <a class="button primary" href="#start">使い方を見る</a>
+      <a class="button" href="textbook.html">仕組みを学ぶ</a>
+    </div>
+    <ul class="home-facts">
+      <li><span class="fact-value">C++17</span><span class="fact-label">外部ライブラリ不要</span></li>
+      <li><span class="fact-value">1〜128</span><span class="fact-label">探索スレッド数</span></li>
+      <li><span class="fact-value">63手</span><span class="fact-label">詰み探索の上限</span></li>
+      <li><span class="fact-value">全15章</span><span class="fact-label">ソースを読み解く教材</span></li>
+    </ul>
   </div>
 </section>
 
-<div class="index-main">
-
-<section aria-labelledby="readers">
-  <h2 id="readers">対象読者</h2>
-  <ul class="reader-list">
-    <li>C++ の基本文法を理解している方</li>
-    <li>将棋のルールを知っている方</li>
-    <li>ゲームAI・探索アルゴリズムに興味がある方</li>
-  </ul>
-</section>
-
-<section id="contents" aria-labelledby="contents-title">
-  <h2 id="contents-title">目次</h2>
-
-  <section class="part" aria-labelledby="part1">
-    <div class="part-head"><span class="part-num">第I部</span><h3 id="part1">基礎とデータ構造</h3></div>
-    <ol class="toc">
-      <li><a href="chapter01.html">
-        <span class="toc-no">第1章</span>
-        <span class="toc-title">はじめに</span>
-        <span class="desc">将棋エンジンとは何か／USIプロトコルの概要／Hayanagiの全体構成／ビルドと動作確認</span>
-      </a></li>
-      <li><a href="chapter02.html">
-        <span class="toc-no">第2章</span>
-        <span class="toc-title">型とデータ表現</span>
-        <span class="desc">盤面の座標系／駒の表現／Move構造体／駒の価値と入玉ポイント／終局状態の分類</span>
-      </a></li>
-      <li><a href="chapter03.html">
-        <span class="toc-no">第3章</span>
-        <span class="toc-title">ビットボード</span>
-        <span class="desc">81マスを2つのuint64_tで表現／基本操作／集合演算とイテレーション／コンパイラ組み込み関数</span>
-      </a></li>
-    </ol>
-  </section>
-
-  <section class="part" aria-labelledby="part2">
-    <div class="part-head"><span class="part-num">第II部</span><h3 id="part2">局面管理と合法手生成</h3></div>
-    <ol class="toc">
-      <li><a href="chapter04.html">
-        <span class="toc-no">第4章</span>
-        <span class="toc-title">局面管理 — 基礎編</span>
-        <span class="desc">盤面配列・持ち駒・手番の管理／色別・駒種別ビットボード／SFEN文字列の読み書き／Zobristハッシュ</span>
-      </a></li>
-      <li><a href="chapter05.html">
-        <span class="toc-no">第5章</span>
-        <span class="toc-title">攻撃テーブルと利き計算</span>
-        <span class="desc">事前計算テーブルの構築／ステップ型の利き／スライダー型の利き／between テーブル</span>
-      </a></li>
-      <li><a href="chapter06.html">
-        <span class="toc-no">第6章</span>
-        <span class="toc-title">合法手生成</span>
-        <span class="desc">直接生成方式の設計／ピン判定と王手検出／駒種別の手生成／駒打ちと打ち歩詰め判定</span>
-      </a></li>
-      <li><a href="chapter07.html">
-        <span class="toc-no">第7章</span>
-        <span class="toc-title">終局判定と特殊ルール</span>
-        <span class="desc">千日手／連続王手の千日手／持将棋と入玉宣言勝ち／入玉ルールバリアント／手数上限</span>
-      </a></li>
-    </ol>
-  </section>
-
-  <section class="part" aria-labelledby="part3">
-    <div class="part-head"><span class="part-num">第III部</span><h3 id="part3">探索と評価</h3></div>
-    <ol class="toc">
-      <li><a href="chapter08.html">
-        <span class="toc-no">第8章</span>
-        <span class="toc-title">探索アルゴリズム — 基礎編</span>
-        <span class="desc">反復深化とNegamax法／Alpha-Beta枝刈り／PVS／静止探索／時間管理</span>
-      </a></li>
-      <li><a href="chapter09.html">
-        <span class="toc-no">第9章</span>
-        <span class="toc-title">探索の高速化テクニック</span>
-        <span class="desc">置換表／ヌルムーブ枝刈り／LMR／着手順序の最適化／SEE</span>
-      </a></li>
-      <li><a href="chapter10.html">
-        <span class="toc-no">第10章</span>
-        <span class="toc-title">詰み探索</span>
-        <span class="desc">王手限定の専用探索／攻撃側・防御側探索／通常探索との統合</span>
-      </a></li>
-      <li><a href="chapter11.html">
-        <span class="toc-no">第11章</span>
-        <span class="toc-title">評価関数</span>
-        <span class="desc">駒得／駒の位置評価／利きの広さ／玉の安全度／テンポボーナス</span>
-      </a></li>
-    </ol>
-  </section>
-
-  <section class="part" aria-labelledby="part4">
-    <div class="part-head"><span class="part-num">第IV部</span><h3 id="part4">並列化とプロトコル</h3></div>
-    <ol class="toc">
-      <li><a href="chapter12.html">
-        <span class="toc-no">第12章</span>
-        <span class="toc-title">並列探索</span>
-        <span class="desc">ルート手分割／ワーカースレッド管理／共有置換表のアトミック操作／ノードカウンタ</span>
-      </a></li>
-      <li><a href="chapter13.html">
-        <span class="toc-no">第13章</span>
-        <span class="toc-title">定跡</span>
-        <span class="desc">やねうら王DB2016フォーマット／SFENキーによる定跡検索／エンジンとの統合</span>
-      </a></li>
-      <li><a href="chapter14.html">
-        <span class="toc-no">第14章</span>
-        <span class="toc-title">USIプロトコルの実装</span>
-        <span class="desc">コマンドループとディスパッチ／オプション管理／探索スレッド管理／Ponder・MultiPV対応</span>
-      </a></li>
-    </ol>
-  </section>
-
-  <section class="part" aria-labelledby="part5">
-    <div class="part-head"><span class="part-num">第V部</span><h3 id="part5">発展</h3></div>
-    <ol class="toc">
-      <li><a href="chapter15.html">
-        <span class="toc-no">第15章</span>
-        <span class="toc-title">まとめと発展</span>
-        <span class="desc">設計判断の振り返り／強化の方向性（NNUE、Magic Bitboard、MCTS等）／参考文献</span>
-      </a></li>
-    </ol>
-  </section>
-</section>
-
-<section aria-labelledby="source-files">
-  <h2 id="source-files">ソースコード構成</h2>
-  <div class="table-wrap">
-  <table>
-    <thead>
-      <tr><th>ファイル</th><th>行数</th><th>役割</th></tr>
-    </thead>
-    <tbody>
-      <tr><td><code>types.h</code></td><td>304</td><td>型定義・定数・駒操作ユーティリティ</td></tr>
-      <tr><td><code>bitboard.h</code></td><td>114</td><td>81マスビットボード</td></tr>
-      <tr><td><code>position.h</code></td><td>162</td><td>局面管理ヘッダ</td></tr>
-      <tr><td><code>position.cpp</code></td><td>1,686</td><td>局面管理・合法手生成・終局判定</td></tr>
-      <tr><td><code>search.h</code></td><td>126</td><td>探索アルゴリズムヘッダ</td></tr>
-      <tr><td><code>search.cpp</code></td><td>1,482</td><td>探索・評価関数・置換表</td></tr>
-      <tr><td><code>usi_engine.h</code></td><td>61</td><td>USIエンジンヘッダ</td></tr>
-      <tr><td><code>usi_engine.cpp</code></td><td>863</td><td>USIプロトコル処理</td></tr>
-      <tr><td><code>book.h</code></td><td>28</td><td>定跡ヘッダ</td></tr>
-      <tr><td><code>book.cpp</code></td><td>59</td><td>定跡読み込み・検索</td></tr>
-      <tr><td><code>main.cpp</code></td><td>12</td><td>エントリポイント</td></tr>
-    </tbody>
-  </table>
+<section class="home-section" id="features" aria-labelledby="features-title">
+  <div class="home-section-inner">
+    <h2 id="features-title">主な機能</h2>
+    <p class="section-lead">ルールの処理から探索、GUI への組み込みまでをひとつのソースで扱います。</p>
+    <ul class="feature-grid">
+      <li class="feature">
+        <span class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M9.2 3.5v17M14.8 3.5v17M3.5 9.2h17M3.5 14.8h17"/></svg></span>
+        <h3>ルールに忠実な合法手生成</h3>
+        <p>成り・打ち駒・二歩・行き所のない駒・打ち歩詰めを処理します。王手の回避やピンされた駒の制限は、後からふるい落とさずビットボードで直接生成します。千日手、連続王手の千日手、持将棋、入玉ルールの切り替えにも対応しています。</p>
+        <ul class="tag-list"><li><code>perft</code></li><li><code>EnteringKingRule</code></li><li><code>MaxMovesToDraw</code></li></ul>
+      </li>
+      <li class="feature">
+        <span class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="4.5" r="2"/><circle cx="5.5" cy="19" r="2"/><circle cx="12" cy="19" r="2"/><circle cx="18.5" cy="19" r="2"/><path d="M12 6.5V17M12 8.5c-4 0-6.5 2.5-6.5 8.5M12 8.5c4 0 6.5 2.5 6.5 8.5"/></svg></span>
+        <h3>通常探索</h3>
+        <p>反復深化の negamax + alpha-beta を土台に、PVS、静止探索、置換表、null move 枝刈り、LMR、SEE による着手順序、aspiration window を組み合わせています。短手数の詰みは、王手だけを読む専用の探索で先に見つけます。</p>
+        <ul class="tag-list"><li><code>go depth</code></li><li><code>go nodes</code></li><li><code>go infinite</code></li><li><code>MultiPV</code></li></ul>
+      </li>
+      <li class="feature">
+        <span class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg></span>
+        <h3>詰み探索</h3>
+        <p>王手の連続による強制詰みを、攻方と玉方の両方から調べます。詰みなら玉方の最長抵抗を含む全手順を、不詰ならその証明を返し、時間切れや手数の上限とは区別します。</p>
+        <ul class="tag-list"><li><code>go mate</code></li><li><code>go tsume</code></li><li><code>bench tsume</code></li></ul>
+      </li>
+      <li class="feature">
+        <span class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h15M15 3l3 3-3 3M3 12h18M18 9l3 3-3 3M3 18h15M15 15l3 3-3 3"/></svg></span>
+        <h3>マルチスレッド</h3>
+        <p><code>Threads</code> で 1〜128 スレッドを指定でき、通常探索、探索前の詰み確認、詰み探索、<code>perft</code> の計算を分担します。通常探索の置換表は、スレッド間で共有するロックフリーの表です。</p>
+        <ul class="tag-list"><li><code>Threads</code></li><li><code>Hash</code></li></ul>
+      </li>
+      <li class="feature">
+        <span class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg></span>
+        <h3>対局と検討の設定</h3>
+        <p>持ち時間・秒読みと、相手の手番中の先読みに対応します。探索量を絞る棋力調整、定跡や自動投了を止める解析モードも使えます。定跡はやねうら王の DB2016 形式を読み込みます。</p>
+        <ul class="tag-list"><li><code>USI_Ponder</code></li><li><code>USI_Strength</code></li><li><code>USI_AnalyseMode</code></li><li><code>USI_OwnBook</code></li></ul>
+      </li>
+      <li class="feature">
+        <span class="feature-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8.5 4.5L12 12 3.5 7.5z"/><path d="M3.5 12L12 16.5 20.5 12"/><path d="M3.5 16.5L12 21l8.5-4.5"/></svg></span>
+        <h3>GUI に組み込める</h3>
+        <p>局面処理と詰み探索は、Qt などに依存しない静的ライブラリ <code>hayanagi_tsume</code> にまとまっています。ShogiBoardQ の詰将棋対局では、問題の判定と玉方の応手に使われています。</p>
+        <ul class="tag-list"><li><code>hayanagi_tsume</code></li><li><code>add_subdirectory</code></li></ul>
+      </li>
+    </ul>
   </div>
-  <p class="table-note">行数は執筆時点のものです。最新の構成はリポジトリの <code>src/</code> を参照してください。</p>
 </section>
 
-</div>
+<section class="home-section alt" id="start" aria-labelledby="start-title">
+  <div class="home-section-inner">
+    <h2 id="start-title">使い方</h2>
+    <p class="section-lead">手軽なのは、将棋 GUI の ShogiBoardQ から使う方法です。</p>
+    <ol class="steps">
+      <li>
+        <h3>実行ファイルを用意する</h3>
+        <p>ShogiBoardQ の配布物に、<code>hayanagi</code>（Windows 版は <code>hayanagi.exe</code>）と定跡ファイルが同梱されています。<a href="#build">ソースからビルド</a>することもできます。</p>
+      </li>
+      <li>
+        <h3>エンジン登録で追加する</h3>
+        <p>「設定」→「エンジン設定…」の「エンジン登録」で「追加」を押し、Hayanagi の実行ファイルを選びます。</p>
+      </li>
+      <li>
+        <h3>対局・検討で選ぶ</h3>
+        <p>対局者や、検討・棋譜解析のエンジンに Hayanagi を選びます。詰将棋対局では、登録しなくても内蔵の Hayanagi が判定に使われます。</p>
+      </li>
+    </ol>
+    <p class="more-link">画面付きの手順は、ShogiBoardQ 利用ガイドの<a href="https://hnakada123.github.io/ShogiBoardQ/guide/hayanagi.html">「将棋エンジン Hayanagi」</a>で説明しています。USI に対応したほかの将棋 GUI からも、同じ実行ファイルを登録して使えます。</p>
+  </div>
+</section>
+
+<section class="home-section" id="build" aria-labelledby="build-title">
+  <div class="home-section-inner">
+    <h2 id="build-title">ビルドして動かす</h2>
+    <p class="section-lead">CMake 3.16 以上と C++17 対応コンパイラ（GCC / Clang）があればビルドできます。</p>
+    <div class="split">
+      <div>
+        <h3>ビルド</h3>
+        <p class="source-ref">ターミナル</p>
+<pre><code>git clone https://github.com/hnakada123/Hayanagi.git
+cd Hayanagi
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+./build/hayanagi --version</code></pre>
+        <p>実行ファイルは <code>build/hayanagi</code> に作られます。定跡ファイルもビルド先の <code>book/</code> に配置されます。</p>
+      </div>
+      <div>
+        <h3>USI で動かす</h3>
+        <p class="source-ref">USI コマンド</p>
+<pre><code>usi
+isready
+usinewgame
+position startpos
+go btime 60000 wtime 60000 byoyomi 1000
+perft depth 2 divide
+bench nodes 10000
+quit</code></pre>
+        <p><code>perft</code> と <code>bench</code> を内蔵しているので、GUI につなぐ前に手元で動作を確かめられます。</p>
+      </div>
+    </div>
+
+    <h3>詰将棋を解かせる</h3>
+    <p>標準 USI の <code>go mate</code> で、現在の手番を攻方として解きます。制限時間はミリ秒で指定し、攻方の玉がない局面も扱えます。</p>
+    <p class="source-ref">USI コマンド</p>
+<pre><code>position sfen 9/9/6R1+R/5k3/9/7+S1/9/9/9 b 2b4g3s4n4l18p 1
+go mate 5000</code></pre>
+    <p class="source-ref">応答</p>
+<pre><code>checkmate 3c5c+ 4d4e 1c4c P*4d 4c4d</code></pre>
+    <p>詰みの場合は玉方の最長抵抗を含む全手順を返します。不詰を証明できたときは <code>checkmate nomate</code>、時間切れでは <code>checkmate timeout</code> を返します。</p>
+  </div>
+</section>
+
+<section class="home-section alt" id="options" aria-labelledby="options-title">
+  <div class="home-section-inner">
+    <h2 id="options-title">主な設定</h2>
+    <p class="section-lead">USI のオプションとして GUI から変更できます。</p>
+    <div class="table-wrap">
+      <table class="options-table">
+        <thead>
+          <tr><th>オプション</th><th>既定値</th><th>内容</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>Threads</code></td><td>1（1〜128）</td><td>探索に使うスレッド数</td></tr>
+          <tr><td><code>Hash</code> / <code>USI_Hash</code></td><td>16 MB</td><td>通常探索の置換表の大きさ。どちらも同じ設定です</td></tr>
+          <tr><td><code>MultiPV</code></td><td>1（1〜32）</td><td>出力する候補手の数</td></tr>
+          <tr><td><code>USI_Ponder</code></td><td>false</td><td>相手の手番中の先読み</td></tr>
+          <tr><td><code>USI_LimitStrength</code><br><code>USI_Strength</code></td><td>false<br>1（-15〜6）</td><td>探索の深さとノード数を制限する棋力調整。負数は級、正数は段の目安です</td></tr>
+          <tr><td><code>USI_AnalyseMode</code></td><td>false</td><td>棋力制限・定跡による即答・自動投了・先読み要求を止める解析用のモード</td></tr>
+          <tr><td><code>USI_OwnBook</code><br><code>BookFile</code></td><td>true<br><code>hayanagi_book.db</code></td><td>定跡を使うかと、読むファイル。<code>no_book</code> を選ぶと定跡を使いません</td></tr>
+          <tr><td><code>EnteringKingRule</code></td><td><code>CSARule24</code></td><td>入玉宣言の基準（24点法・27点法・トライルールなど）</td></tr>
+          <tr><td><code>TsumeMode</code></td><td>false</td><td>片玉の局面で独自拡張の <code>go tsume</code> を使うときに有効にします</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="more-link">すべてのコマンドとオプションは <a href="https://github.com/hnakada123/Hayanagi#readme">README</a> にまとめています。</p>
+  </div>
+</section>
+
+<section class="home-section" id="learn" aria-labelledby="learn-title">
+  <div class="home-section-inner">
+    <div class="learn-card">
+      <div>
+        <p class="eyebrow">解説教材</p>
+        <h2 id="learn-title">Hayanagi で学ぶ<br>将棋エンジンの仕組み</h2>
+        <p>Hayanagi のソースコードを題材にした全15章の教材です。データ表現、ビットボード、局面管理、合法手生成、終局判定、探索と評価、並列化、定跡、USI プロトコルを、図とコード例で解説します。</p>
+        <div class="hero-actions">
+          <a class="button primary" href="textbook.html">教材を読む</a>
+          <a class="button" href="chapter01.html">第1章から始める</a>
+        </div>
+      </div>
+      <ol class="part-list">
+        <li><span class="part-num">第I部</span>基礎とデータ構造</li>
+        <li><span class="part-num">第II部</span>局面管理と合法手生成</li>
+        <li><span class="part-num">第III部</span>探索と評価</li>
+        <li><span class="part-num">第IV部</span>並列化とプロトコル</li>
+        <li><span class="part-num">第V部</span>発展</li>
+      </ol>
+    </div>
+  </div>
+</section>
+
+<section class="home-section alt" id="limits" aria-labelledby="limits-title">
+  <div class="home-section-inner">
+    <h2 id="limits-title">知っておきたいこと</h2>
+    <ul class="limit-list">
+      <li>評価関数は、駒得・駒の働き・利き・玉の安全度などを見る簡易なものです。</li>
+      <li>詰み探索は深さ優先のため、おおむね15手以上の長手数の詰将棋を解くのには向きません。</li>
+      <li>棋力設定の段級位は対局による校正前の目安で、人間の同じ段級位と一致する保証はありません。</li>
+      <li>USI には引き分けを返す <code>bestmove</code> がないため、千日手や持将棋で終局と判定した局面では <code>bestmove resign</code> を返します。</li>
+    </ul>
+    <ul class="link-grid">
+      <li><a href="https://github.com/hnakada123/Hayanagi#readme"><span class="title">README</span><span class="desc">USI コマンドとオプションの全一覧</span></a></li>
+      <li><a href="https://github.com/hnakada123/Hayanagi/blob/main/BENCHMARK.md"><span class="title">BENCHMARK.md</span><span class="desc">詰み探索の計測結果</span></a></li>
+      <li><a href="https://github.com/hnakada123/Hayanagi/releases"><span class="title">リリース</span><span class="desc">バージョンごとの変更点</span></a></li>
+      <li><a href="https://github.com/hnakada123/ShogiBoardQ"><span class="title">ShogiBoardQ</span><span class="desc">Hayanagi を組み込んだ将棋 GUI</span></a></li>
+    </ul>
+  </div>
+</section>
+
 </main>
 
 <footer class="site-footer">
   <div class="inner">
-    <a class="footer-brand" href="index.html"><img src="hayanagi-icon.svg" alt="" width="28" height="28"><span>Hayanagi で学ぶ将棋エンジンの仕組み</span></a>
-    <p class="footer-note"><a href="home.html">Hayanagi のトップページ</a> ／ ソースコード: <a href="https://github.com/hnakada123/Hayanagi">github.com/hnakada123/Hayanagi</a></p>
+    <a class="footer-brand" href="index.html"><img src="hayanagi-icon.svg" alt="" width="28" height="28"><span>Hayanagi</span></a>
+    <p class="footer-note"><a href="textbook.html">解説教材</a> ／ ソースコード: <a href="https://github.com/hnakada123/Hayanagi">github.com/hnakada123/Hayanagi</a></p>
   </div>
 </footer>
 </body>
