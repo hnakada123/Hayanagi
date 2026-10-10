@@ -4,18 +4,32 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>第8章 探索アルゴリズム — 基礎編 — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="hayanagi-icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
+<script src="script.js" defer></script>
 </head>
 <body>
+<a class="skip-link" href="#main">本文へスキップ</a>
 <header class="site-header">
   <div class="inner">
-    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
-    <nav><a href="index.html">目次</a></nav>
+    <a class="brand" href="index.html">
+      <img src="hayanagi-icon.svg" alt="" width="36" height="36">
+      <span class="brand-text"><span class="brand-name">Hayanagi</span><span class="brand-sub">で学ぶ将棋エンジンの仕組み</span></span>
+    </a>
+    <nav class="site-nav" aria-label="サイト">
+      <a href="index.html#contents">目次</a>
+      <a href="https://github.com/hnakada123/Hayanagi">GitHub</a>
+    </nav>
   </div>
 </header>
-<div class="wrapper">
+<div class="layout">
+<main class="content" id="main">
 
-<h1>第8章 探索アルゴリズム — 基礎編</h1>
+<header class="chapter-header">
+<p class="chapter-part">第III部 探索と評価</p>
+<h1><span class="chapter-num">第8章</span> 探索アルゴリズム — 基礎編</h1>
+</header>
 
 <p>
 将棋エンジンの心臓部は<strong>探索</strong>です。
@@ -36,7 +50,7 @@
 </ul>
 
 <!-- ================================================================ -->
-<h2>8.1 探索の全体像 — <code>find_best_move()</code></h2>
+<h2 id="sec-8-1"><span class="sec-num">8.1</span> 探索の全体像 — <code>find_best_move()</code></h2>
 
 <p>
 探索の起点は <code>Search::find_best_move()</code> です。
@@ -78,7 +92,7 @@
 </ol>
 
 <!-- ================================================================ -->
-<h2>8.2 反復深化（Iterative Deepening）</h2>
+<h2 id="sec-8-2"><span class="sec-num">8.2</span> 反復深化（Iterative Deepening）</h2>
 
 <p>
 反復深化とは、深さ 1 の探索から始めて、深さ 2、3、4 … と探索深度を 1 ずつ増やしながら繰り返す手法です。
@@ -131,7 +145,7 @@ for (int depth = 1; depth &lt;= options.max_depth; ++depth) {
 </p>
 
 <!-- ================================================================ -->
-<h2>8.3 Negamax 法の原理</h2>
+<h2 id="sec-8-3"><span class="sec-num">8.3</span> Negamax 法の原理</h2>
 
 <p>
 二人零和完全情報ゲームの探索には<strong>ミニマックス法</strong>が基本となります。
@@ -162,7 +176,7 @@ Hayanagi の <code>negamax()</code> 関数もこの原理に基づいていま�
 </p>
 
 <!-- ================================================================ -->
-<h2>8.4 Alpha-Beta 枝刈り</h2>
+<h2 id="sec-8-4"><span class="sec-num">8.4</span> Alpha-Beta 枝刈り</h2>
 
 <p>
 単純な Negamax は全ての手を最深まで調べるため、分岐数が大きい将棋では現実的ではありません。
@@ -254,7 +268,7 @@ Hayanagi の実際のコードでは、置換表参照・ヌルムーブ枝刈�
 </p>
 
 <!-- ================================================================ -->
-<h2>8.5 Principal Variation Search (PVS)</h2>
+<h2 id="sec-8-5"><span class="sec-num">8.5</span> Principal Variation Search (PVS)</h2>
 
 <p>
 Alpha-Beta 枝刈りの効率は、<strong>最善手を最初に調べるほど</strong>高くなります。
@@ -324,7 +338,7 @@ Alpha-Beta 枝刈りの効率は、<strong>最善手を最初に調べるほど<
 }</code></pre>
 
 <!-- ================================================================ -->
-<h2>8.6 静止探索（Quiescence Search）</h2>
+<h2 id="sec-8-6"><span class="sec-num">8.6</span> 静止探索（Quiescence Search）</h2>
 
 <p>
 Alpha-Beta 探索は指定された深さに達すると評価関数を呼び出しますが、
@@ -409,7 +423,7 @@ Alpha-Beta 探索は指定された深さに達すると評価関数を呼び出
 </ol>
 
 <!-- ================================================================ -->
-<h2>8.7 時間管理 — <code>should_stop()</code></h2>
+<h2 id="sec-8-7"><span class="sec-num">8.7</span> 時間管理 — <code>should_stop()</code></h2>
 
 <p>
 実際の対局では、エンジンは制限時間内に指し手を返さなければなりません。
@@ -459,7 +473,7 @@ Hayanagi は <code>should_stop()</code> 関数で停止判定を行います。
 </p>
 
 <!-- ================================================================ -->
-<h2>8.8 ノード制限</h2>
+<h2 id="sec-8-8"><span class="sec-num">8.8</span> ノード制限</h2>
 
 <p>
 ノード制限は主にベンチマーク（<code>bench nodes N</code>）やテスト時に使用されます。
@@ -480,7 +494,7 @@ Hayanagi は <code>should_stop()</code> 関数で停止判定を行います。
 </p>
 
 <!-- ================================================================ -->
-<h2>8.9 終局スコアの計算</h2>
+<h2 id="sec-8-9"><span class="sec-num">8.9</span> 終局スコアの計算</h2>
 
 <p>
 探索中に終局状態（詰み・千日手・入玉宣言など）に到達した場合のスコア計算も重要です。
@@ -508,10 +522,11 @@ Hayanagi は <code>should_stop()</code> 関数で停止判定を行います。
 </p>
 
 <!-- ================================================================ -->
-<h2>8.10 まとめ</h2>
+<h2 id="sec-8-10"><span class="sec-num">8.10</span> まとめ</h2>
 
 <p>本章で解説した探索の基礎を整理します。</p>
 
+<div class="table-wrap">
 <table>
   <thead>
     <tr><th>手法</th><th>役割</th><th>Hayanagi での実装箇所</th></tr>
@@ -525,16 +540,27 @@ Hayanagi は <code>should_stop()</code> 関数で停止判定を行います。
     <tr><td>時間管理</td><td>制限時間・ノード上限・外部停止に対応</td><td><code>should_stop()</code></td></tr>
   </tbody>
 </table>
+</div>
 
 <p>
 次章では、これらの基礎アルゴリズムを実用的な速度にするための高速化テクニック
 — 置換表、ヌルムーブ枝刈り、LMR、着手順序の最適化、SEE — を解説します。
 </p>
 
-  <div class="chapter-nav">
-    <span><a href="chapter07.html">&larr; 前章</a></span>
-    <span><a href="chapter09.html">次章 &rarr;</a></span>
-  </div>
+<nav class="chapter-nav" aria-label="章の移動">
+  <a class="prev" href="chapter07.html"><span class="label">&larr; 前の章</span><span class="title">第7章 終局判定と特殊ルール</span></a>
+  <a class="next" href="chapter09.html"><span class="label">次の章 &rarr;</span><span class="title">第9章 探索の高速化テクニック</span></a>
+</nav>
+
+</main>
+<aside class="page-toc" aria-label="この章の内容" hidden></aside>
 </div>
+
+<footer class="site-footer">
+  <div class="inner">
+    <a class="footer-brand" href="index.html"><img src="hayanagi-icon.svg" alt="" width="28" height="28"><span>Hayanagi で学ぶ将棋エンジンの仕組み</span></a>
+    <p class="footer-note">ソースコード: <a href="https://github.com/hnakada123/Hayanagi">github.com/hnakada123/Hayanagi</a></p>
+  </div>
+</footer>
 </body>
 </html>

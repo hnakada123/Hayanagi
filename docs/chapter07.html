@@ -4,18 +4,32 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>第7章 終局判定と特殊ルール — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="hayanagi-icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
+<script src="script.js" defer></script>
 </head>
 <body>
+<a class="skip-link" href="#main">本文へスキップ</a>
 <header class="site-header">
   <div class="inner">
-    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
-    <nav><a href="index.html">目次</a></nav>
+    <a class="brand" href="index.html">
+      <img src="hayanagi-icon.svg" alt="" width="36" height="36">
+      <span class="brand-text"><span class="brand-name">Hayanagi</span><span class="brand-sub">で学ぶ将棋エンジンの仕組み</span></span>
+    </a>
+    <nav class="site-nav" aria-label="サイト">
+      <a href="index.html#contents">目次</a>
+      <a href="https://github.com/hnakada123/Hayanagi">GitHub</a>
+    </nav>
   </div>
 </header>
-<div class="wrapper">
+<div class="layout">
+<main class="content" id="main">
 
-<h1>第7章 終局判定と特殊ルール</h1>
+<header class="chapter-header">
+<p class="chapter-part">第II部 局面管理と合法手生成</p>
+<h1><span class="chapter-num">第7章</span> 終局判定と特殊ルール</h1>
+</header>
 
 <p>
 将棋には詰みだけでなく、千日手、連続王手の千日手、入玉宣言勝ち、持将棋など、
@@ -23,7 +37,7 @@
 </p>
 
 <!-- ============================================================ -->
-<h2>7.1 terminal_status() の処理フロー</h2>
+<h2 id="sec-7-1"><span class="sec-num">7.1</span> terminal_status() の処理フロー</h2>
 
 <p>
 <code>terminal_status()</code> は、現在の局面が終局状態かどうかを判定する中心的な関数です。
@@ -108,7 +122,7 @@ TerminalStatus Position::terminal_status() const {
 </p>
 
 <!-- ============================================================ -->
-<h2>7.2 千日手判定 is_repetition_draw()</h2>
+<h2 id="sec-7-2"><span class="sec-num">7.2</span> 千日手判定 is_repetition_draw()</h2>
 
 <p>
 千日手とは、同一局面が4回出現した場合に引き分けとなるルールです。
@@ -163,7 +177,7 @@ bool Position::is_repetition_draw() const {
 </p>
 
 <!-- ============================================================ -->
-<h2>7.3 連続王手の千日手 is_perpetual_check_loss_for_opponent()</h2>
+<h2 id="sec-7-3"><span class="sec-num">7.3</span> 連続王手の千日手 is_perpetual_check_loss_for_opponent()</h2>
 
 <p>
 千日手のうち、一方が連続して王手をかけ続けている場合は、
@@ -224,7 +238,7 @@ bool Position::is_perpetual_check_loss_for_opponent() const {
 </p>
 
 <!-- ============================================================ -->
-<h2>7.4 入玉宣言勝ち can_declare_win()</h2>
+<h2 id="sec-7-4"><span class="sec-num">7.4</span> 入玉宣言勝ち can_declare_win()</h2>
 
 <p>
 CSA（コンピュータ将棋協会）のルールでは、一定条件を満たした場合に
@@ -303,7 +317,7 @@ int Position::declaration_points(Color color) const {
 </p>
 
 <!-- ============================================================ -->
-<h2>7.5 持将棋判定 is_impasse_position()</h2>
+<h2 id="sec-7-5"><span class="sec-num">7.5</span> 持将棋判定 is_impasse_position()</h2>
 
 <p>
 持将棋とは、双方の玉が互いの敵陣に入り込み、
@@ -343,7 +357,7 @@ bool Position::is_impasse_position() const {
 </p>
 
 <!-- ============================================================ -->
-<h2>7.6 入玉ルールバリアント（EnteringKingRule）</h2>
+<h2 id="sec-7-6"><span class="sec-num">7.6</span> 入玉ルールバリアント（EnteringKingRule）</h2>
 
 <p>
 Hayanagi は6種類の入玉ルールをサポートしています。
@@ -359,6 +373,7 @@ enum class EnteringKingRule : int {
     TryRule,
 };</code></pre>
 
+<div class="table-wrap">
 <table>
   <thead>
     <tr><th>ルール</th><th>説明</th><th>宣言閾値</th><th>持将棋閾値</th></tr>
@@ -372,6 +387,7 @@ enum class EnteringKingRule : int {
     <tr><td><code>TryRule</code></td><td>トライルール</td><td>-</td><td>-</td></tr>
   </tbody>
 </table>
+</div>
 
 <h3>CSA Rule 24 と Rule 27 の違い</h3>
 
@@ -452,7 +468,7 @@ bool Position::is_try_rule_win(Color color) const {
 </p>
 
 <!-- ============================================================ -->
-<h2>7.7 手数上限（max_moves_to_draw）</h2>
+<h2 id="sec-7-7"><span class="sec-num">7.7</span> 手数上限（max_moves_to_draw）</h2>
 
 <p>
 <code>PositionRules</code> の <code>max_moves_to_draw</code> フィールドで手数上限を設定できます。
@@ -481,7 +497,7 @@ struct PositionRules {
 </p>
 
 <!-- ============================================================ -->
-<h2>7.8 terminal_status() と探索の連携</h2>
+<h2 id="sec-7-8"><span class="sec-num">7.8</span> terminal_status() と探索の連携</h2>
 
 <p>
 <code>terminal_status()</code> は合法手の有無を判定しません。
@@ -491,10 +507,20 @@ struct PositionRules {
 合法手生成はそれが本当に必要な場合にのみ実行されます。
 </p>
 
-  <div class="chapter-nav">
-    <span><a href="chapter06.html">&larr; 前章</a></span>
-    <span><a href="chapter08.html">次章 &rarr;</a></span>
-  </div>
+<nav class="chapter-nav" aria-label="章の移動">
+  <a class="prev" href="chapter06.html"><span class="label">&larr; 前の章</span><span class="title">第6章 合法手生成</span></a>
+  <a class="next" href="chapter08.html"><span class="label">次の章 &rarr;</span><span class="title">第8章 探索アルゴリズム — 基礎編</span></a>
+</nav>
+
+</main>
+<aside class="page-toc" aria-label="この章の内容" hidden></aside>
 </div>
+
+<footer class="site-footer">
+  <div class="inner">
+    <a class="footer-brand" href="index.html"><img src="hayanagi-icon.svg" alt="" width="28" height="28"><span>Hayanagi で学ぶ将棋エンジンの仕組み</span></a>
+    <p class="footer-note">ソースコード: <a href="https://github.com/hnakada123/Hayanagi">github.com/hnakada123/Hayanagi</a></p>
+  </div>
+</footer>
 </body>
 </html>

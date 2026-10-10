@@ -4,18 +4,32 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>第12章 並列探索 — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="hayanagi-icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
+<script src="script.js" defer></script>
 </head>
 <body>
+<a class="skip-link" href="#main">本文へスキップ</a>
 <header class="site-header">
   <div class="inner">
-    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
-    <nav><a href="index.html">目次</a></nav>
+    <a class="brand" href="index.html">
+      <img src="hayanagi-icon.svg" alt="" width="36" height="36">
+      <span class="brand-text"><span class="brand-name">Hayanagi</span><span class="brand-sub">で学ぶ将棋エンジンの仕組み</span></span>
+    </a>
+    <nav class="site-nav" aria-label="サイト">
+      <a href="index.html#contents">目次</a>
+      <a href="https://github.com/hnakada123/Hayanagi">GitHub</a>
+    </nav>
   </div>
 </header>
-<div class="wrapper">
+<div class="layout">
+<main class="content" id="main">
 
-<h1>第12章 並列探索</h1>
+<header class="chapter-header">
+<p class="chapter-part">第IV部 並列化とプロトコル</p>
+<h1><span class="chapter-num">第12章</span> 並列探索</h1>
+</header>
 
 <p>
 現代のCPUはマルチコアが標準であり、将棋エンジンもこれを活用して探索速度を向上させることが求められます。
@@ -24,7 +38,7 @@
 </p>
 
 <!-- ============================================================ -->
-<h2>12.1 並列探索の動機と課題</h2>
+<h2 id="sec-12-1"><span class="sec-num">12.1</span> 並列探索の動機と課題</h2>
 
 <p>
 探索を並列化する動機は明確です。4コアのCPUであれば理想的には4倍の速度で探索でき、
@@ -41,7 +55,7 @@
 </ul>
 
 <!-- ============================================================ -->
-<h2>12.2 Hayanagiのアプローチ: Root Move Splitting</h2>
+<h2 id="sec-12-2"><span class="sec-num">12.2</span> Hayanagiのアプローチ: Root Move Splitting</h2>
 
 <p>
 Hayanagiは「Root Move Splitting」と呼ばれる手法を採用しています。
@@ -138,7 +152,7 @@ Root Move Splitting ではスレッド間でアルファ値を共有しないた
 </p>
 
 <!-- ============================================================ -->
-<h2>12.3 Threads オプションとスレッド管理</h2>
+<h2 id="sec-12-3"><span class="sec-num">12.3</span> Threads オプションとスレッド管理</h2>
 
 <p>
 スレッド数はUSIオプション <code>Threads</code> で設定され、<code>SearchOptions::threads</code> に格納されます。
@@ -189,7 +203,7 @@ if (thread_count &gt; 1) {
 </p>
 
 <!-- ============================================================ -->
-<h2>12.4 共有置換表のスレッドセーフティ</h2>
+<h2 id="sec-12-4"><span class="sec-num">12.4</span> 共有置換表のスレッドセーフティ</h2>
 
 <p>
 Hayanagiの置換表（トランスポジションテーブル）は全スレッドで共有されます。
@@ -260,7 +274,7 @@ atomic_entry.key.store(entry.key, std::memory_order_release);</code></pre>
 </ul>
 
 <!-- ============================================================ -->
-<h2>12.5 ノードカウンタの共有</h2>
+<h2 id="sec-12-5"><span class="sec-num">12.5</span> ノードカウンタの共有</h2>
 
 <p>
 探索ノード数の正確なカウントは、ノード制限（<code>go nodes N</code>）の判定や
@@ -295,7 +309,7 @@ std::uint64_t Search::current_nodes() const {
 </p>
 
 <!-- ============================================================ -->
-<h2>12.6 並列探索の限界と考察</h2>
+<h2 id="sec-12-6"><span class="sec-num">12.6</span> 並列探索の限界と考察</h2>
 
 <p>
 Root Move Splitting は実装の単純さが大きな利点ですが、いくつかの限界があります。
@@ -350,7 +364,7 @@ ABDADA（探索木の内部ノードレベルで作業を分配する手法）�
 </p>
 
 <!-- ============================================================ -->
-<h2>12.7 まとめ</h2>
+<h2 id="sec-12-7"><span class="sec-num">12.7</span> まとめ</h2>
 
 <p>
 Hayanagiの並列探索は以下の設計で構成されています。
@@ -370,10 +384,20 @@ Root Move Splitting は最も単純な並列探索手法のひとつですが、
 少数のスレッドでは十分な速度向上を実現できます。
 </p>
 
-  <div class="chapter-nav">
-    <span><a href="chapter11.html">&larr; 前章</a></span>
-    <span><a href="chapter13.html">次章 &rarr;</a></span>
-  </div>
+<nav class="chapter-nav" aria-label="章の移動">
+  <a class="prev" href="chapter11.html"><span class="label">&larr; 前の章</span><span class="title">第11章 評価関数</span></a>
+  <a class="next" href="chapter13.html"><span class="label">次の章 &rarr;</span><span class="title">第13章 定跡</span></a>
+</nav>
+
+</main>
+<aside class="page-toc" aria-label="この章の内容" hidden></aside>
 </div>
+
+<footer class="site-footer">
+  <div class="inner">
+    <a class="footer-brand" href="index.html"><img src="hayanagi-icon.svg" alt="" width="28" height="28"><span>Hayanagi で学ぶ将棋エンジンの仕組み</span></a>
+    <p class="footer-note">ソースコード: <a href="https://github.com/hnakada123/Hayanagi">github.com/hnakada123/Hayanagi</a></p>
+  </div>
+</footer>
 </body>
 </html>

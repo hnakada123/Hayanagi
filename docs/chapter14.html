@@ -4,18 +4,32 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>第14章 USIプロトコルの実装 — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="hayanagi-icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
+<script src="script.js" defer></script>
 </head>
 <body>
+<a class="skip-link" href="#main">本文へスキップ</a>
 <header class="site-header">
   <div class="inner">
-    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
-    <nav><a href="index.html">目次</a></nav>
+    <a class="brand" href="index.html">
+      <img src="hayanagi-icon.svg" alt="" width="36" height="36">
+      <span class="brand-text"><span class="brand-name">Hayanagi</span><span class="brand-sub">で学ぶ将棋エンジンの仕組み</span></span>
+    </a>
+    <nav class="site-nav" aria-label="サイト">
+      <a href="index.html#contents">目次</a>
+      <a href="https://github.com/hnakada123/Hayanagi">GitHub</a>
+    </nav>
   </div>
 </header>
-<div class="wrapper">
+<div class="layout">
+<main class="content" id="main">
 
-<h1>第14章 USIプロトコルの実装</h1>
+<header class="chapter-header">
+<p class="chapter-part">第IV部 並列化とプロトコル</p>
+<h1><span class="chapter-num">第14章</span> USIプロトコルの実装</h1>
+</header>
 
 <p>
 USI（Universal Shogi Interface）は、将棋 GUI とエンジンが標準入出力を通じて通信するためのプロトコルです。
@@ -24,7 +38,7 @@ USI（Universal Shogi Interface）は、将棋 GUI とエンジンが標準入�
 </p>
 
 <!-- ============================================================ -->
-<h2>14.1 USI プロトコルの通信フロー</h2>
+<h2 id="sec-14-1"><span class="sec-num">14.1</span> USI プロトコルの通信フロー</h2>
 
 <p>
 USI プロトコルにおける典型的な通信フローは以下の通りです。
@@ -59,7 +73,7 @@ GUI → Engine: quit</code></pre>
 </p>
 
 <!-- ============================================================ -->
-<h2>14.2 UsiEngine クラスの設計</h2>
+<h2 id="sec-14-2"><span class="sec-num">14.2</span> UsiEngine クラスの設計</h2>
 
 <p>
 <code>UsiEngine</code> クラスの宣言を見てみましょう（<code>usi_engine.h</code>）。
@@ -111,7 +125,7 @@ private:
 </ul>
 
 <!-- ============================================================ -->
-<h2>14.3 loop() — メインコマンドループ</h2>
+<h2 id="sec-14-3"><span class="sec-num">14.3</span> loop() — メインコマンドループ</h2>
 
 <p>
 エンジンのエントリポイントとなるのが <code>loop()</code> です。
@@ -134,7 +148,7 @@ private:
 </p>
 
 <!-- ============================================================ -->
-<h2>14.4 handle_line() — コマンドディスパッチ</h2>
+<h2 id="sec-14-4"><span class="sec-num">14.4</span> handle_line() — コマンドディスパッチ</h2>
 
 <p>
 受信した行を解析し、対応する処理に振り分けます。
@@ -197,7 +211,7 @@ private:
 </p>
 
 <!-- ============================================================ -->
-<h2>14.5 set_option() — オプション管理</h2>
+<h2 id="sec-14-5"><span class="sec-num">14.5</span> set_option() — オプション管理</h2>
 
 <p>
 <code>setoption name &lt;名前&gt; value &lt;値&gt;</code> コマンドを処理します。
@@ -251,6 +265,7 @@ private:
 
 <p>主なオプションの一覧です。</p>
 
+<div class="table-wrap">
 <table>
   <thead>
     <tr><th>オプション名</th><th>型</th><th>説明</th></tr>
@@ -269,6 +284,7 @@ private:
     <tr><td>BookDir / BookFile</td><td>string/combo</td><td>定跡ファイルの指定</td></tr>
   </tbody>
 </table>
+</div>
 
 <p>
 <code>Hash</code> の変更時は探索を停止してからリサイズを行うなど、安全性に配慮しています。
@@ -277,7 +293,7 @@ private:
 </p>
 
 <!-- ============================================================ -->
-<h2>14.6 set_position() — position コマンドの処理</h2>
+<h2 id="sec-14-6"><span class="sec-num">14.6</span> set_position() — position コマンドの処理</h2>
 
 <pre><code>bool UsiEngine::set_position(const std::string&amp; line) {
     const auto tokens = split_tokens(line);
@@ -305,7 +321,7 @@ private:
 </p>
 
 <!-- ============================================================ -->
-<h2>14.7 parse_go_options() — go コマンドのパース</h2>
+<h2 id="sec-14-7"><span class="sec-num">14.7</span> parse_go_options() — go コマンドのパース</h2>
 
 <pre><code>SearchOptions UsiEngine::parse_go_options(const std::string&amp; line) const {
     SearchOptions options;
@@ -353,7 +369,7 @@ private:
 </p>
 
 <!-- ============================================================ -->
-<h2>14.8 探索のスレッド管理</h2>
+<h2 id="sec-14-8"><span class="sec-num">14.8</span> 探索のスレッド管理</h2>
 
 <h3>14.8.1 start_search() — ワーカースレッドの起動</h3>
 
@@ -447,7 +463,7 @@ private:
 </p>
 
 <!-- ============================================================ -->
-<h2>14.9 Ponder モード</h2>
+<h2 id="sec-14-9"><span class="sec-num">14.9</span> Ponder モード</h2>
 
 <p>
 Ponder（先読み）は、相手の思考中にエンジンが予測手に対する探索を進める機能です。
@@ -489,7 +505,7 @@ Ponder（先読み）は、相手の思考中にエンジンが予測手に対�
 </p>
 
 <!-- ============================================================ -->
-<h2>14.10 report_bestmove() と print_info()</h2>
+<h2 id="sec-14-10"><span class="sec-num">14.10</span> report_bestmove() と print_info()</h2>
 
 <h3>report_bestmove()</h3>
 
@@ -555,7 +571,7 @@ MultiPV モードでは <code>multipv</code> フィールドも付加されま�
 </p>
 
 <!-- ============================================================ -->
-<h2>14.11 MultiPV 対応</h2>
+<h2 id="sec-14-11"><span class="sec-num">14.11</span> MultiPV 対応</h2>
 
 <p>
 MultiPV は、1 つの局面に対して複数の候補手とその評価を表示する機能です。
@@ -566,7 +582,7 @@ MultiPV は、1 つの局面に対して複数の候補手とその評価を表�
 </p>
 
 <!-- ============================================================ -->
-<h2>14.12 bench と perft の実装概要</h2>
+<h2 id="sec-14-12"><span class="sec-num">14.12</span> bench と perft の実装概要</h2>
 
 <h3>bench — ベンチマーク</h3>
 
@@ -588,10 +604,20 @@ bench current      // 現在の局面のみ</code></pre>
 既知の正解値との比較で合法手生成のバグを検出できます。
 </p>
 
-  <div class="chapter-nav">
-    <span><a href="chapter13.html">&larr; 前章</a></span>
-    <span><a href="chapter15.html">次章 &rarr;</a></span>
-  </div>
+<nav class="chapter-nav" aria-label="章の移動">
+  <a class="prev" href="chapter13.html"><span class="label">&larr; 前の章</span><span class="title">第13章 定跡</span></a>
+  <a class="next" href="chapter15.html"><span class="label">次の章 &rarr;</span><span class="title">第15章 まとめと発展</span></a>
+</nav>
+
+</main>
+<aside class="page-toc" aria-label="この章の内容" hidden></aside>
 </div>
+
+<footer class="site-footer">
+  <div class="inner">
+    <a class="footer-brand" href="index.html"><img src="hayanagi-icon.svg" alt="" width="28" height="28"><span>Hayanagi で学ぶ将棋エンジンの仕組み</span></a>
+    <p class="footer-note">ソースコード: <a href="https://github.com/hnakada123/Hayanagi">github.com/hnakada123/Hayanagi</a></p>
+  </div>
+</footer>
 </body>
 </html>

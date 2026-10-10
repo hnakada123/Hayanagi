@@ -988,7 +988,8 @@ python3 tests/bench_tsume.py build/hayanagi [--baseline /path/to/previous/hayana
 | `tests/bench_threads.py` | 通常探索・perft のスレッド数別ベンチマーク |
 | `BENCHMARK.md` | ベンチマークの計測結果 |
 | `docs/index.html`, `docs/chapter*.html` | 将棋エンジンの仕組みを解説するHTML教材（全15章） |
-| `docs/style.css`, `docs/*.png` | 教材のスタイルシートと図版 |
+| `docs/style.css`, `docs/script.js` | 教材のスタイルシートと、章ページの「この章の内容」を見出しから組み立てるスクリプト |
+| `docs/*.png`, `docs/hayanagi-*.svg` | 教材の図版と、ヘッダーなどで使うアイコン（`assets/icon/` の写し） |
 | `assets/icon/` | アイコン（SVG、16〜1024px の PNG、`favicon.ico`）。48px 以下は線を太くした `hayanagi-icon-small.svg` から書き出す |
 | `assets/banner/` | README 冒頭のバナー（文字をアウトライン化した SVG と 2 倍解像度の PNG） |
 

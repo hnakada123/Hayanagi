@@ -4,18 +4,32 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>第15章 まとめと発展 — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="hayanagi-icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
+<script src="script.js" defer></script>
 </head>
 <body>
+<a class="skip-link" href="#main">本文へスキップ</a>
 <header class="site-header">
   <div class="inner">
-    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
-    <nav><a href="index.html">目次</a></nav>
+    <a class="brand" href="index.html">
+      <img src="hayanagi-icon.svg" alt="" width="36" height="36">
+      <span class="brand-text"><span class="brand-name">Hayanagi</span><span class="brand-sub">で学ぶ将棋エンジンの仕組み</span></span>
+    </a>
+    <nav class="site-nav" aria-label="サイト">
+      <a href="index.html#contents">目次</a>
+      <a href="https://github.com/hnakada123/Hayanagi">GitHub</a>
+    </nav>
   </div>
 </header>
-<div class="wrapper">
+<div class="layout">
+<main class="content" id="main">
 
-<h1>第15章 まとめと発展</h1>
+<header class="chapter-header">
+<p class="chapter-part">第V部 発展</p>
+<h1><span class="chapter-num">第15章</span> まとめと発展</h1>
+</header>
 
 <p>
 ここまで 14 章にわたって、Hayanagi の内部構造を詳しく見てきました。
@@ -24,7 +38,7 @@
 </p>
 
 <!-- ============================================================ -->
-<h2>15.1 Hayanagi の設計判断の振り返り</h2>
+<h2 id="sec-15-1"><span class="sec-num">15.1</span> Hayanagi の設計判断の振り返り</h2>
 
 <h3>15.1.1 直接合法手生成を選んだ理由</h3>
 
@@ -99,7 +113,7 @@ Hayanagi の全ソースコードは約 <strong>4,900 行</strong>です。
 </p>
 
 <!-- ============================================================ -->
-<h2>15.2 強化の方向性</h2>
+<h2 id="sec-15-2"><span class="sec-num">15.2</span> 強化の方向性</h2>
 
 <p>
 Hayanagi をさらに強くするために考えられる発展的なテーマを紹介します。
@@ -170,7 +184,7 @@ Stockfish などのトップエンジンで有効性が確認されています�
 </p>
 
 <!-- ============================================================ -->
-<h2>15.3 参考文献・関連リソース</h2>
+<h2 id="sec-15-3"><span class="sec-num">15.3</span> 参考文献・関連リソース</h2>
 
 <h3>オープンソースエンジン</h3>
 
@@ -203,7 +217,7 @@ Stockfish などのトップエンジンで有効性が確認されています�
 </ul>
 
 <!-- ============================================================ -->
-<h2>15.4 おわりに</h2>
+<h2 id="sec-15-4"><span class="sec-num">15.4</span> おわりに</h2>
 
 <p>
 本書では Hayanagi のソースコードを 1 行 1 行追いながら、
@@ -219,10 +233,20 @@ NNUE や MCTS といった最新技術、あるいはまだ発見されていな
 本書が、読者の皆さんが将棋エンジン開発の第一歩を踏み出すきっかけとなれば幸いです。
 </p>
 
-  <div class="chapter-nav">
-    <span><a href="chapter14.html">&larr; 前章</a></span>
-    <span></span>
-  </div>
+<nav class="chapter-nav" aria-label="章の移動">
+  <a class="prev" href="chapter14.html"><span class="label">&larr; 前の章</span><span class="title">第14章 USIプロトコルの実装</span></a>
+  <a class="next" href="index.html"><span class="label">表紙 &rarr;</span><span class="title">目次に戻る</span></a>
+</nav>
+
+</main>
+<aside class="page-toc" aria-label="この章の内容" hidden></aside>
 </div>
+
+<footer class="site-footer">
+  <div class="inner">
+    <a class="footer-brand" href="index.html"><img src="hayanagi-icon.svg" alt="" width="28" height="28"><span>Hayanagi で学ぶ将棋エンジンの仕組み</span></a>
+    <p class="footer-note">ソースコード: <a href="https://github.com/hnakada123/Hayanagi">github.com/hnakada123/Hayanagi</a></p>
+  </div>
+</footer>
 </body>
 </html>

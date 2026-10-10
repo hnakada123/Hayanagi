@@ -4,17 +4,32 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>第3章 ビットボード — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="hayanagi-icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
+<script src="script.js" defer></script>
 </head>
 <body>
+<a class="skip-link" href="#main">本文へスキップ</a>
 <header class="site-header">
   <div class="inner">
-    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
+    <a class="brand" href="index.html">
+      <img src="hayanagi-icon.svg" alt="" width="36" height="36">
+      <span class="brand-text"><span class="brand-name">Hayanagi</span><span class="brand-sub">で学ぶ将棋エンジンの仕組み</span></span>
+    </a>
+    <nav class="site-nav" aria-label="サイト">
+      <a href="index.html#contents">目次</a>
+      <a href="https://github.com/hnakada123/Hayanagi">GitHub</a>
+    </nav>
   </div>
 </header>
-<div class="wrapper">
+<div class="layout">
+<main class="content" id="main">
 
-<h1>第3章 ビットボード</h1>
+<header class="chapter-header">
+<p class="chapter-part">第I部 基礎とデータ構造</p>
+<h1><span class="chapter-num">第3章</span> ビットボード</h1>
+</header>
 
 <p>
 前章では、盤面を <code>int board[81]</code> で表現する方法を学びました。
@@ -37,7 +52,7 @@
 </div>
 
 <!-- ============================================================ -->
-<h2>3.1 なぜビットボードを使うのか</h2>
+<h2 id="sec-3-1"><span class="sec-num">3.1</span> なぜビットボードを使うのか</h2>
 
 <p>
 ビットボードとは、盤面の各マスを1ビットに対応させた整数値で、
@@ -48,6 +63,7 @@
 
 <p>ビットボードの最大の利点は、<strong>集合演算がビット演算1回で完了する</strong>ことです。</p>
 
+<div class="table-wrap">
 <table>
   <thead>
     <tr><th>集合演算</th><th>ビット演算</th><th>例</th></tr>
@@ -62,6 +78,7 @@
     <tr><td>要素の取り出し</td><td><code>ctz + reset</code></td><td>集合から1マスずつ処理</td></tr>
   </tbody>
 </table>
+</div>
 
 <p>
 配列で81マスを走査するとO(81)かかる処理が、
@@ -229,7 +246,7 @@ NOT は単体で使うことは少なく、上記の AND NOT のように他の�
 </div>
 
 <!-- ============================================================ -->
-<h2>3.2 81マスの表現：lo + hi の設計</h2>
+<h2 id="sec-3-2"><span class="sec-num">3.2</span> 81マスの表現：lo + hi の設計</h2>
 
 <p>
 チェス（64マス）では1つの <code>uint64_t</code>（64ビット符号なし整数）でビットボードを表現できますが、
@@ -297,6 +314,7 @@ Hayanagiでは <strong>2つの <code>uint64_t</code></strong> を使い、81マ�
 以下の表で、各マスのマス番号・格納先・ビット位置を確認できます。
 </p>
 
+<div class="table-wrap">
 <table>
   <thead>
     <tr>
@@ -326,6 +344,7 @@ Hayanagiでは <strong>2つの <code>uint64_t</code></strong> を使い、81マ�
     <tr><td>九</td><td>8</td><td>72</td><td>73</td><td>74</td><td>75</td><td>76</td><td>77</td><td>78</td><td>79</td><td>80</td><td><code>hi</code> bit 8〜16</td></tr>
   </tbody>
 </table>
+</div>
 
 <p>
 例えば「5五」は row=4, col=4 なので、マス番号は 4×9+4 = <strong>40</strong>、<code>lo</code> のビット40 に対応します。
@@ -342,7 +361,7 @@ sq 63 は lo のビット63（最上位ビット）に、sq 64〜71 は hi の�
 </div>
 
 <!-- ============================================================ -->
-<h2>3.3 kHiMask によるマスキング</h2>
+<h2 id="sec-3-3"><span class="sec-num">3.3</span> kHiMask によるマスキング</h2>
 
 <p>
 <code>hi</code> は64ビットの変数ですが、実際に使うのは下位17ビットだけです。
@@ -368,7 +387,7 @@ sq 63 は lo のビット63（最上位ビット）に、sq 64〜71 は hi の�
 </p>
 
 <!-- ============================================================ -->
-<h2>3.4 基本操作</h2>
+<h2 id="sec-3-4"><span class="sec-num">3.4</span> 基本操作</h2>
 
 <h3>3.4.1 any() / none() — 空判定</h3>
 
@@ -612,7 +631,7 @@ void Position::remove_piece(int square) {
 </div>
 
 <!-- ============================================================ -->
-<h2>3.5 pop_lsb() — 最下位ビットの取り出し</h2>
+<h2 id="sec-3-5"><span class="sec-num">3.5</span> pop_lsb() — 最下位ビットの取り出し</h2>
 
 <p>
 ビットボードの最も重要な操作の1つが <code>pop_lsb()</code> です。
@@ -681,7 +700,7 @@ int sq3 = pawns.pop_lsb();  // sq3 = 38, マス38のビットがクリア
 // pawns.none() == true</code></pre>
 
 <!-- ============================================================ -->
-<h2>3.6 count() — 要素数のカウント</h2>
+<h2 id="sec-3-6"><span class="sec-num">3.6</span> count() — 要素数のカウント</h2>
 
 <p class="source-ref">src/bitboard.h（抜粋）</p>
 <pre><code>int count() const {
@@ -706,7 +725,7 @@ x86では <code>popcnt</code> 命令に変換されます。
 </p>
 
 <!-- ============================================================ -->
-<h2>3.7 集合演算オペレータ</h2>
+<h2 id="sec-3-7"><span class="sec-num">3.7</span> 集合演算オペレータ</h2>
 
 <p>
 ビットボード同士の集合演算は、ビット演算オペレータで提供されています。
@@ -801,7 +820,7 @@ Bitboard captures = attacks &amp; opponent_pieces;
 </div>
 
 <!-- ============================================================ -->
-<h2>3.8 BitboardIterator — ビットボードの走査</h2>
+<h2 id="sec-3-8"><span class="sec-num">3.8</span> BitboardIterator — ビットボードの走査</h2>
 
 <p>
 Hayanagiの <code>Bitboard</code> にはイテレータは直接定義されていませんが、
@@ -845,7 +864,7 @@ Bitboard pawns;  // bit 47, 49, 56 がセット
 // 4回目: any() → false, ループ終了</code></pre>
 
 <!-- ============================================================ -->
-<h2>3.9 ビットボードの視覚的図解</h2>
+<h2 id="sec-3-9"><span class="sec-num">3.9</span> ビットボードの視覚的図解</h2>
 
 <p>
 81マスのビット位置と盤面の対応を視覚的に示します。
@@ -903,10 +922,10 @@ i段    │  . │  . │  . │  . │  . │  . │  . │  . │  . │
 lo = 0x 007F C000 0000 0000   (ビット54〜62がセット)
 hi = 0x 0000 0000 0000 0000   (すべて0)
 count() = 9
-</code></pre>
+</pre>
 
 <!-- ============================================================ -->
-<h2>3.10 設計上の注意点</h2>
+<h2 id="sec-3-10"><span class="sec-num">3.10</span> 設計上の注意点</h2>
 
 <h3>3.10.1 コンパイラ組み込み関数への依存</h3>
 
@@ -950,7 +969,7 @@ constexpr Bitboard kAllSquares{0xFFFFFFFFFFFFFFFFULL,
 </code></pre>
 
 <!-- ============================================================ -->
-<h2>3.11 まとめ</h2>
+<h2 id="sec-3-11"><span class="sec-num">3.11</span> まとめ</h2>
 
 <p>本章ではHayanagiのビットボード実装を学びました。</p>
 
@@ -970,11 +989,20 @@ constexpr Bitboard kAllSquares{0xFFFFFFFFFFFFFFFFULL,
 局面全体を管理する <code>Position</code> クラスを見ていきます。
 </p>
 
-<nav class="chapter-nav">
-  <a href="chapter02.html">&larr; 前章: 第2章 型とデータ表現</a>
-  <a href="chapter04.html">次章: 第4章 局面管理 — 基礎編 &rarr;</a>
+<nav class="chapter-nav" aria-label="章の移動">
+  <a class="prev" href="chapter02.html"><span class="label">&larr; 前の章</span><span class="title">第2章 型とデータ表現</span></a>
+  <a class="next" href="chapter04.html"><span class="label">次の章 &rarr;</span><span class="title">第4章 局面管理 — 基礎編</span></a>
 </nav>
 
+</main>
+<aside class="page-toc" aria-label="この章の内容" hidden></aside>
 </div>
+
+<footer class="site-footer">
+  <div class="inner">
+    <a class="footer-brand" href="index.html"><img src="hayanagi-icon.svg" alt="" width="28" height="28"><span>Hayanagi で学ぶ将棋エンジンの仕組み</span></a>
+    <p class="footer-note">ソースコード: <a href="https://github.com/hnakada123/Hayanagi">github.com/hnakada123/Hayanagi</a></p>
+  </div>
+</footer>
 </body>
 </html>

@@ -4,18 +4,32 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>第9章 探索の高速化テクニック — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="hayanagi-icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
+<script src="script.js" defer></script>
 </head>
 <body>
+<a class="skip-link" href="#main">本文へスキップ</a>
 <header class="site-header">
   <div class="inner">
-    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
-    <nav><a href="index.html">目次</a></nav>
+    <a class="brand" href="index.html">
+      <img src="hayanagi-icon.svg" alt="" width="36" height="36">
+      <span class="brand-text"><span class="brand-name">Hayanagi</span><span class="brand-sub">で学ぶ将棋エンジンの仕組み</span></span>
+    </a>
+    <nav class="site-nav" aria-label="サイト">
+      <a href="index.html#contents">目次</a>
+      <a href="https://github.com/hnakada123/Hayanagi">GitHub</a>
+    </nav>
   </div>
 </header>
-<div class="wrapper">
+<div class="layout">
+<main class="content" id="main">
 
-<h1>第9章 探索の高速化テクニック</h1>
+<header class="chapter-header">
+<p class="chapter-part">第III部 探索と評価</p>
+<h1><span class="chapter-num">第9章</span> 探索の高速化テクニック</h1>
+</header>
 
 <p>
 第8章では Alpha-Beta 探索と PVS の原理を学びました。
@@ -33,7 +47,7 @@
 </ul>
 
 <!-- ================================================================ -->
-<h2>9.1 置換表（Transposition Table）</h2>
+<h2 id="sec-9-1"><span class="sec-num">9.1</span> 置換表（Transposition Table）</h2>
 
 <p>
 将棋の探索木では、手順前後（transposition）により同じ局面に異なる経路から到達することが頻繁に起こります。
@@ -95,6 +109,7 @@ payload の内部構造は次のとおりです。
          | (static_cast&lt;std::uint64_t&gt;(entry.generation) &lt;&lt; 46); // bit 46-53: 世代
 }</code></pre>
 
+<div class="table-wrap">
 <table>
   <thead>
     <tr><th>ビット範囲</th><th>幅</th><th>内容</th></tr>
@@ -107,6 +122,7 @@ payload の内部構造は次のとおりです。
     <tr><td>46 - 53</td><td>8 bit</td><td>世代番号</td></tr>
   </tbody>
 </table>
+</div>
 
 <p>
 1 エントリあたりわずか 16 バイト（key 8 バイト + payload 8 バイト）で済むため、
@@ -255,7 +271,7 @@ if (shared_tt().probe(key, tt_entry)) {
 }</code></pre>
 
 <!-- ================================================================ -->
-<h2>9.2 ヌルムーブ枝刈り（Null-Move Pruning）</h2>
+<h2 id="sec-9-2"><span class="sec-num">9.2</span> ヌルムーブ枝刈り（Null-Move Pruning）</h2>
 
 <p>
 <strong>ヌルムーブ枝刈り</strong>は「もし自分がパス（何もしない）しても相手が beta を超えられないなら、
@@ -313,7 +329,7 @@ if (can_try_null_move(position, depth, beta, static_eval)) {
 </ol>
 
 <!-- ================================================================ -->
-<h2>9.3 Late Move Reduction (LMR)</h2>
+<h2 id="sec-9-3"><span class="sec-num">9.3</span> Late Move Reduction (LMR)</h2>
 
 <p>
 <strong>LMR</strong>は「着手順序の後ろの方にある静かな手は、おそらく最善手ではない」という仮定に基づき、
@@ -348,7 +364,7 @@ LMR で縮小された探索が alpha を超えた場合は、通常深度のヌ
 </p>
 
 <!-- ================================================================ -->
-<h2>9.4 着手順序の最適化（Move Ordering）</h2>
+<h2 id="sec-9-4"><span class="sec-num">9.4</span> 着手順序の最適化（Move Ordering）</h2>
 
 <p>
 Alpha-Beta 枝刈りの効率は着手順序に大きく依存します。
@@ -405,6 +421,7 @@ Hayanagi の <code>move_order_score()</code> は各手にスコアを付け、�
 
 <p>優先度を整理すると、次の階層構造になっています。</p>
 
+<div class="table-wrap">
 <table>
   <thead>
     <tr><th>優先度</th><th>種類</th><th>スコア範囲</th></tr>
@@ -419,6 +436,7 @@ Hayanagi の <code>move_order_score()</code> は各手にスコアを付け、�
     <tr><td>7</td><td>悪い捕獲手（SEE &lt; 0）</td><td>負の値になりうる</td></tr>
   </tbody>
 </table>
+</div>
 
 <p>
 置換表の最善手が圧倒的に高いスコア（400万）を持つ点に注目してください。
@@ -426,7 +444,7 @@ Hayanagi の <code>move_order_score()</code> は各手にスコアを付け、�
 </p>
 
 <!-- ================================================================ -->
-<h2>9.5 SEE（Static Exchange Evaluation）</h2>
+<h2 id="sec-9-5"><span class="sec-num">9.5</span> SEE（Static Exchange Evaluation）</h2>
 
 <p>
 <strong>SEE</strong>は「ある駒を取ったとき、取り返しの連鎖が終わった後に駒得になるか損になるか」を
@@ -460,7 +478,7 @@ if (!in_check &amp;&amp; captured != 0
 }</code></pre>
 
 <!-- ================================================================ -->
-<h2>9.6 キラー手とヒストリーの記録</h2>
+<h2 id="sec-9-6"><span class="sec-num">9.6</span> キラー手とヒストリーの記録</h2>
 
 <h3>9.6.1 キラー手（Killer Moves）</h3>
 
@@ -524,7 +542,7 @@ if (alpha &gt;= beta) {
 </p>
 
 <!-- ================================================================ -->
-<h2>9.7 探索結果の置換表への記録</h2>
+<h2 id="sec-9-7"><span class="sec-num">9.7</span> 探索結果の置換表への記録</h2>
 
 <p>
 探索が完了すると、結果を置換表に記録します。<code>store_tt()</code> は bound の種類を自動判定します。
@@ -556,10 +574,11 @@ if (alpha &gt;= beta) {
 </p>
 
 <!-- ================================================================ -->
-<h2>9.8 まとめ</h2>
+<h2 id="sec-9-8"><span class="sec-num">9.8</span> まとめ</h2>
 
 <p>本章で解説した高速化テクニックを整理します。</p>
 
+<div class="table-wrap">
 <table>
   <thead>
     <tr><th>テクニック</th><th>効果</th><th>主要パラメータ</th></tr>
@@ -574,6 +593,7 @@ if (alpha &gt;= beta) {
     <tr><td>ヒストリー</td><td>探索全体で有効な手を学習</td><td>depth^2 * 8, 1/16 減衰</td></tr>
   </tbody>
 </table>
+</div>
 
 <p>
 これらのテクニックは個別に効果を発揮するだけでなく、互いに補強し合います。
@@ -585,10 +605,20 @@ LMR で節約した時間がさらに深い探索を可能にする — この�
 次章では、通常探索とは別系統の<strong>詰み探索</strong>（王手限定の専用探索）を解説します。
 </p>
 
-  <div class="chapter-nav">
-    <span><a href="chapter08.html">&larr; 前章</a></span>
-    <span><a href="chapter10.html">次章 &rarr;</a></span>
-  </div>
+<nav class="chapter-nav" aria-label="章の移動">
+  <a class="prev" href="chapter08.html"><span class="label">&larr; 前の章</span><span class="title">第8章 探索アルゴリズム — 基礎編</span></a>
+  <a class="next" href="chapter10.html"><span class="label">次の章 &rarr;</span><span class="title">第10章 詰み探索</span></a>
+</nav>
+
+</main>
+<aside class="page-toc" aria-label="この章の内容" hidden></aside>
 </div>
+
+<footer class="site-footer">
+  <div class="inner">
+    <a class="footer-brand" href="index.html"><img src="hayanagi-icon.svg" alt="" width="28" height="28"><span>Hayanagi で学ぶ将棋エンジンの仕組み</span></a>
+    <p class="footer-note">ソースコード: <a href="https://github.com/hnakada123/Hayanagi">github.com/hnakada123/Hayanagi</a></p>
+  </div>
+</footer>
 </body>
 </html>

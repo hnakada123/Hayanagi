@@ -4,18 +4,32 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>第5章 攻撃テーブルと利き計算 — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="hayanagi-icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
+<script src="script.js" defer></script>
 </head>
 <body>
+<a class="skip-link" href="#main">本文へスキップ</a>
 <header class="site-header">
   <div class="inner">
-    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
-    <nav><a href="index.html">目次</a></nav>
+    <a class="brand" href="index.html">
+      <img src="hayanagi-icon.svg" alt="" width="36" height="36">
+      <span class="brand-text"><span class="brand-name">Hayanagi</span><span class="brand-sub">で学ぶ将棋エンジンの仕組み</span></span>
+    </a>
+    <nav class="site-nav" aria-label="サイト">
+      <a href="index.html#contents">目次</a>
+      <a href="https://github.com/hnakada123/Hayanagi">GitHub</a>
+    </nav>
   </div>
 </header>
-<div class="wrapper">
+<div class="layout">
+<main class="content" id="main">
 
-<h1>第5章 攻撃テーブルと利き計算</h1>
+<header class="chapter-header">
+<p class="chapter-part">第II部 局面管理と合法手生成</p>
+<h1><span class="chapter-num">第5章</span> 攻撃テーブルと利き計算</h1>
+</header>
 
 <p>
 前章で局面データの管理方法を学びました。本章では、そのデータを使って
@@ -25,7 +39,7 @@
 </p>
 
 <!-- ======================================== -->
-<h2>5.1 Tables 構造体の全体像</h2>
+<h2 id="sec-5-1"><span class="sec-num">5.1</span> Tables 構造体の全体像</h2>
 
 <p>
 Hayanagi は起動時に事前計算テーブルを構築し、以降はそれを参照するだけで利き計算を行います。
@@ -64,7 +78,7 @@ Hayanagi は起動時に事前計算テーブルを構築し、以降はそれ�
 }</code></pre>
 
 <!-- ======================================== -->
-<h2>5.2 build_tables() による事前計算</h2>
+<h2 id="sec-5-2"><span class="sec-num">5.2</span> build_tables() による事前計算</h2>
 
 <p>
 <code>build_tables()</code> は以下の順序でテーブルを構築します:
@@ -77,7 +91,7 @@ Hayanagi は起動時に事前計算テーブルを構築し、以降はそれ�
 </ol>
 
 <!-- ======================================== -->
-<h2>5.3 square_bb[81] — 単一マスビットボード</h2>
+<h2 id="sec-5-3"><span class="sec-num">5.3</span> square_bb[81] — 単一マスビットボード</h2>
 
 <p>
 <code>square_bb[sq]</code> はマス <code>sq</code> のビットだけが立ったビットボードです。
@@ -95,7 +109,7 @@ Hayanagi は起動時に事前計算テーブルを構築し、以降はそれ�
 </p>
 
 <!-- ======================================== -->
-<h2>5.4 file_bb[9] — 筋ビットボード</h2>
+<h2 id="sec-5-4"><span class="sec-num">5.4</span> file_bb[9] — 筋ビットボード</h2>
 
 <p>
 <code>file_bb[col]</code> は指定した筋（col = 0..8）に属する全9マスのビットボードです。
@@ -110,7 +124,7 @@ if (piece == PieceType::Pawn &amp;&amp;
 }</code></pre>
 
 <!-- ======================================== -->
-<h2>5.5 step_from / step_to — ステップ型駒の利きテーブル</h2>
+<h2 id="sec-5-5"><span class="sec-num">5.5</span> step_from / step_to — ステップ型駒の利きテーブル</h2>
 
 <p>
 将棋の駒は大きく2種類に分かれます:
@@ -195,7 +209,7 @@ for (const auto&amp; delta : kBishopStep) {
 }</code></pre>
 
 <!-- ======================================== -->
-<h2>5.6 rays / ray_squares / ray_lengths — レイ</h2>
+<h2 id="sec-5-6"><span class="sec-num">5.6</span> rays / ray_squares / ray_lengths — レイ</h2>
 
 <p>
 スライダー型駒の利きを計算するためには、各マスから8方向に伸びる「レイ（光線）」の情報が必要です。
@@ -265,7 +279,7 @@ i | . | . | . | . | S | . | . | . | SW|  ← South, SouthWest
 </p>
 
 <!-- ======================================== -->
-<h2>5.7 between テーブル — 2マス間のマス集合</h2>
+<h2 id="sec-5-7"><span class="sec-num">5.7</span> between テーブル — 2マス間のマス集合</h2>
 
 <p>
 <code>between[from][to]</code> は、マス <code>from</code> と <code>to</code> の間にある全マスのビットボードです
@@ -316,7 +330,7 @@ e | . | . | . | . | . | . | . | . |   |  ← to (含まない)
 </ul>
 
 <!-- ======================================== -->
-<h2>5.8 attacks_from() — 任意の駒の利きビットボード取得</h2>
+<h2 id="sec-5-8"><span class="sec-num">5.8</span> attacks_from() — 任意の駒の利きビットボード取得</h2>
 
 <p>
 <code>attacks_from()</code> は、指定マスの指定駒種について、
@@ -351,7 +365,7 @@ e | . | . | . | . | . | . | . | . |   |  ← to (含まない)
 </p>
 
 <!-- ======================================== -->
-<h2>5.9 rook_attacks(), bishop_attacks(), lance_attacks()</h2>
+<h2 id="sec-5-9"><span class="sec-num">5.9</span> rook_attacks(), bishop_attacks(), lance_attacks()</h2>
 
 <p>
 スライダー型駒の利きは、盤上の他の駒（occupied ビットボード）に依存するため、
@@ -402,7 +416,7 @@ Bitboard Position::lance_attacks(int from, Color color,
 </p>
 
 <!-- ======================================== -->
-<h2>5.10 attackers_to() — あるマスへの全攻撃駒</h2>
+<h2 id="sec-5-10"><span class="sec-num">5.10</span> attackers_to() — あるマスへの全攻撃駒</h2>
 
 <p>
 <code>attackers_to(square, by)</code> は、色 <code>by</code> の駒のうち、マス <code>square</code> に利いている駒の集合を返します。
@@ -482,7 +496,7 @@ Bitboard Position::lance_attacks(int from, Color color,
 </p>
 
 <!-- ======================================== -->
-<h2>5.11 is_square_attacked_after_move() — 移動後の被攻撃判定</h2>
+<h2 id="sec-5-11"><span class="sec-num">5.11</span> is_square_attacked_after_move() — 移動後の被攻撃判定</h2>
 
 <p>
 「ある手を指した後に、特定のマスが攻撃されているか」を判定する関数です。
@@ -557,10 +571,11 @@ Bitboard Position::lance_attacks(int from, Color color,
 </p>
 
 <!-- ======================================== -->
-<h2>5.12 まとめ</h2>
+<h2 id="sec-5-12"><span class="sec-num">5.12</span> まとめ</h2>
 
 <p>本章で解説した攻撃テーブルと利き計算の全体像を整理します。</p>
 
+<div class="table-wrap">
 <table>
   <thead>
     <tr><th>テーブル / 関数</th><th>内容</th><th>主な用途</th></tr>
@@ -577,16 +592,27 @@ Bitboard Position::lance_attacks(int from, Color color,
     <tr><td><code>is_square_attacked_after_move()</code></td><td>仮想的な移動後の利き判定</td><td>王手回避の合法性検証</td></tr>
   </tbody>
 </table>
+</div>
 
 <p>
 これらの事前計算テーブルと利き計算関数を組み合わせることで、
 次章で解説する合法手生成が効率的に実現されます。
 </p>
 
-  <div class="chapter-nav">
-    <span><a href="chapter04.html">&larr; 前章</a></span>
-    <span><a href="chapter06.html">次章 &rarr;</a></span>
-  </div>
+<nav class="chapter-nav" aria-label="章の移動">
+  <a class="prev" href="chapter04.html"><span class="label">&larr; 前の章</span><span class="title">第4章 局面管理 — 基礎編</span></a>
+  <a class="next" href="chapter06.html"><span class="label">次の章 &rarr;</span><span class="title">第6章 合法手生成</span></a>
+</nav>
+
+</main>
+<aside class="page-toc" aria-label="この章の内容" hidden></aside>
 </div>
+
+<footer class="site-footer">
+  <div class="inner">
+    <a class="footer-brand" href="index.html"><img src="hayanagi-icon.svg" alt="" width="28" height="28"><span>Hayanagi で学ぶ将棋エンジンの仕組み</span></a>
+    <p class="footer-note">ソースコード: <a href="https://github.com/hnakada123/Hayanagi">github.com/hnakada123/Hayanagi</a></p>
+  </div>
+</footer>
 </body>
 </html>

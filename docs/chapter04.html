@@ -4,18 +4,32 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>第4章 局面管理 — 基礎編 — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="hayanagi-icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
+<script src="script.js" defer></script>
 </head>
 <body>
+<a class="skip-link" href="#main">本文へスキップ</a>
 <header class="site-header">
   <div class="inner">
-    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
-    <nav><a href="index.html">目次</a></nav>
+    <a class="brand" href="index.html">
+      <img src="hayanagi-icon.svg" alt="" width="36" height="36">
+      <span class="brand-text"><span class="brand-name">Hayanagi</span><span class="brand-sub">で学ぶ将棋エンジンの仕組み</span></span>
+    </a>
+    <nav class="site-nav" aria-label="サイト">
+      <a href="index.html#contents">目次</a>
+      <a href="https://github.com/hnakada123/Hayanagi">GitHub</a>
+    </nav>
   </div>
 </header>
-<div class="wrapper">
+<div class="layout">
+<main class="content" id="main">
 
-<h1>第4章 局面管理 — 基礎編</h1>
+<header class="chapter-header">
+<p class="chapter-part">第II部 局面管理と合法手生成</p>
+<h1><span class="chapter-num">第4章</span> 局面管理 — 基礎編</h1>
+</header>
 
 <p>
 前章まででビットボードと型の基礎を学びました。本章では、それらを組み合わせて「局面（Position）」全体を管理する仕組みを見ていきます。
@@ -24,7 +38,7 @@
 </p>
 
 <!-- ======================================== -->
-<h2>4.1 Position クラスの全体設計</h2>
+<h2 id="sec-4-1"><span class="sec-num">4.1</span> Position クラスの全体設計</h2>
 
 <p>
 <code>Position</code> クラスは <code>position.h</code> に宣言されています。
@@ -62,7 +76,7 @@ public:
 }</code></pre>
 
 <!-- ======================================== -->
-<h2>4.2 盤面配列 board_[81]</h2>
+<h2 id="sec-4-2"><span class="sec-num">4.2</span> 盤面配列 board_[81]</h2>
 
 <p>
 盤面は <code>int</code> 型の 81 要素配列で表現されます。
@@ -93,7 +107,7 @@ row 0 が1段目（先手の成りゾーン側）、col 0 が9筋に対応しま
 </p>
 
 <!-- ======================================== -->
-<h2>4.3 持ち駒 hands_[2][8]</h2>
+<h2 id="sec-4-3"><span class="sec-num">4.3</span> 持ち駒 hands_[2][8]</h2>
 
 <p>
 持ち駒は2色 x 8駒種の2次元配列で枚数を管理します。
@@ -115,7 +129,7 @@ row 0 が1段目（先手の成りゾーン側）、col 0 が9筋に対応しま
 </p>
 
 <!-- ======================================== -->
-<h2>4.4 色別ビットボードと駒種別ビットボード</h2>
+<h2 id="sec-4-4"><span class="sec-num">4.4</span> 色別ビットボードと駒種別ビットボード</h2>
 
 <p>
 高速な利き計算・合法手生成のため、<code>board_[]</code> と並行してビットボードを管理します。
@@ -138,7 +152,7 @@ Bitboard occupied_;                                     // 全駒の合成</code
 <pre><code>std::array&lt;int, 2&gt; king_square_ = {-1, -1};</code></pre>
 
 <!-- ======================================== -->
-<h2>4.5 盤面操作: clear(), add_piece(), remove_piece()</h2>
+<h2 id="sec-4-5"><span class="sec-num">4.5</span> 盤面操作: clear(), add_piece(), remove_piece()</h2>
 
 <p>
 盤面データの一貫性を保つため、駒の配置・除去はすべて専用関数を経由します。
@@ -212,7 +226,7 @@ Zobrist ハッシュキーも XOR で更新します。玉の場合は <code>kin
 </p>
 
 <!-- ======================================== -->
-<h2>4.6 SFEN 文字列の読み込み — set_sfen()</h2>
+<h2 id="sec-4-6"><span class="sec-num">4.6</span> SFEN 文字列の読み込み — set_sfen()</h2>
 
 <p>
 SFEN（Shogi Forsyth-Edwards Notation）は将棋の局面を1行の文字列で表現する標準形式です。
@@ -295,7 +309,7 @@ if (tokens[2] != "-") {
 </p>
 
 <!-- ======================================== -->
-<h2>4.7 SFEN 出力 — to_sfen()</h2>
+<h2 id="sec-4-7"><span class="sec-num">4.7</span> SFEN 出力 — to_sfen()</h2>
 
 <p>
 <code>to_sfen()</code> は現在の局面から SFEN 文字列を生成します。<code>set_sfen()</code> の逆変換で、ラウンドトリップが保証されています。
@@ -332,7 +346,7 @@ if (tokens[2] != "-") {
 }</code></pre>
 
 <!-- ======================================== -->
-<h2>4.8 USI 指し手の適用 — apply_usi_move()</h2>
+<h2 id="sec-4-8"><span class="sec-num">4.8</span> USI 指し手の適用 — apply_usi_move()</h2>
 
 <p>
 USI プロトコルでは指し手を <code>"7g7f"</code>（移動）や <code>"P*3d"</code>（駒打ち）のような文字列で表現します。
@@ -358,7 +372,7 @@ USI プロトコルでは指し手を <code>"7g7f"</code>（移動）や <code>"
 </p>
 
 <!-- ======================================== -->
-<h2>4.9 do_move() の処理フロー</h2>
+<h2 id="sec-4-9"><span class="sec-num">4.9</span> do_move() の処理フロー</h2>
 
 <p>
 <code>do_move()</code> はバリデーション後に <code>do_move_unchecked()</code> を呼びます。
@@ -417,7 +431,7 @@ USI プロトコルでは指し手を <code>"7g7f"</code>（移動）や <code>"
 </p>
 
 <!-- ======================================== -->
-<h2>4.10 Zobrist ハッシュ</h2>
+<h2 id="sec-4-10"><span class="sec-num">4.10</span> Zobrist ハッシュ</h2>
 
 <p>
 Zobrist ハッシュは、局面を 64 ビットの整数値（ハッシュキー）で高速に識別する手法です。
@@ -500,7 +514,7 @@ void Position::remove_hand_piece(Color color, PieceType type) {
 }</code></pre>
 
 <!-- ======================================== -->
-<h2>4.11 HistoryNode 連結リスト — 千日手検出</h2>
+<h2 id="sec-4-11"><span class="sec-num">4.11</span> HistoryNode 連結リスト — 千日手検出</h2>
 
 <p>
 将棋では同一局面が4回出現すると千日手（引き分け）となります。
@@ -556,10 +570,11 @@ void Position::append_history() {
 </p>
 
 <!-- ======================================== -->
-<h2>4.12 まとめ</h2>
+<h2 id="sec-4-12"><span class="sec-num">4.12</span> まとめ</h2>
 
 <p>本章のポイントを整理します。</p>
 
+<div class="table-wrap">
 <table>
   <thead>
     <tr><th>要素</th><th>実装</th><th>目的</th></tr>
@@ -575,16 +590,27 @@ void Position::append_history() {
     <tr><td>履歴</td><td><code>shared_ptr</code> 連結リスト</td><td>千日手検出（4回同一局面）</td></tr>
   </tbody>
 </table>
+</div>
 
 <p>
 次章では、この局面データの上に構築される<strong>攻撃テーブルと利き計算</strong>を解説します。
 合法手生成の前提となる重要な事前計算の仕組みです。
 </p>
 
-  <div class="chapter-nav">
-    <span><a href="chapter03.html">&larr; 前章</a></span>
-    <span><a href="chapter05.html">次章 &rarr;</a></span>
-  </div>
+<nav class="chapter-nav" aria-label="章の移動">
+  <a class="prev" href="chapter03.html"><span class="label">&larr; 前の章</span><span class="title">第3章 ビットボード</span></a>
+  <a class="next" href="chapter05.html"><span class="label">次の章 &rarr;</span><span class="title">第5章 攻撃テーブルと利き計算</span></a>
+</nav>
+
+</main>
+<aside class="page-toc" aria-label="この章の内容" hidden></aside>
 </div>
+
+<footer class="site-footer">
+  <div class="inner">
+    <a class="footer-brand" href="index.html"><img src="hayanagi-icon.svg" alt="" width="28" height="28"><span>Hayanagi で学ぶ将棋エンジンの仕組み</span></a>
+    <p class="footer-note">ソースコード: <a href="https://github.com/hnakada123/Hayanagi">github.com/hnakada123/Hayanagi</a></p>
+  </div>
+</footer>
 </body>
 </html>

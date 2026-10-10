@@ -4,17 +4,32 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>第2章 型とデータ表現 — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="hayanagi-icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
+<script src="script.js" defer></script>
 </head>
 <body>
+<a class="skip-link" href="#main">本文へスキップ</a>
 <header class="site-header">
   <div class="inner">
-    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
+    <a class="brand" href="index.html">
+      <img src="hayanagi-icon.svg" alt="" width="36" height="36">
+      <span class="brand-text"><span class="brand-name">Hayanagi</span><span class="brand-sub">で学ぶ将棋エンジンの仕組み</span></span>
+    </a>
+    <nav class="site-nav" aria-label="サイト">
+      <a href="index.html#contents">目次</a>
+      <a href="https://github.com/hnakada123/Hayanagi">GitHub</a>
+    </nav>
   </div>
 </header>
-<div class="wrapper">
+<div class="layout">
+<main class="content" id="main">
 
-<h1>第2章 型とデータ表現</h1>
+<header class="chapter-header">
+<p class="chapter-part">第I部 基礎とデータ構造</p>
+<h1><span class="chapter-num">第2章</span> 型とデータ表現</h1>
+</header>
 
 <p>
 将棋エンジンの設計は、盤面・駒・指し手をどのようなデータ構造で表現するかから始まります。
@@ -23,7 +38,7 @@
 </p>
 
 <!-- ============================================================ -->
-<h2>2.1 定数定義</h2>
+<h2 id="sec-2-1"><span class="sec-num">2.1</span> 定数定義</h2>
 
 <p>
 まず、ファイル冒頭で定義されるグローバル定数を確認します。
@@ -40,6 +55,7 @@ constexpr const char* kStartposSfen =
     "lnsgkgsnl/1r5b1/ppppppppp/9/9/9/PPPPPPPPP/1B5R1/LNSGKGSNL b - 1";
 </code></pre>
 
+<div class="table-wrap">
 <table>
   <thead>
     <tr><th>定数</th><th>値</th><th>用途</th></tr>
@@ -54,9 +70,10 @@ constexpr const char* kStartposSfen =
     <tr><td><code>kStartposSfen</code></td><td>-</td><td>平手初期局面のSFEN文字列</td></tr>
   </tbody>
 </table>
+</div>
 
 <!-- ============================================================ -->
-<h2>2.2 盤面の座標系</h2>
+<h2 id="sec-2-2"><span class="sec-num">2.2</span> 盤面の座標系</h2>
 
 <p>
 Hayanagiでは、81マスの盤面を<strong>1次元配列 <code>int board[81]</code></strong>で表現します。
@@ -148,6 +165,7 @@ inline std::optional&lt;int&gt; square_from_usi(const std::string&amp; text) {
 
 <p>以下に代表的なマスの対応表を示します。</p>
 
+<div class="table-wrap">
 <table>
   <thead>
     <tr><th>USI記法</th><th>筋</th><th>段</th><th>row</th><th>col</th><th>square</th></tr>
@@ -160,9 +178,10 @@ inline std::optional&lt;int&gt; square_from_usi(const std::string&amp; text) {
     <tr><td><code>9i</code></td><td>9筋</td><td>i段（九段）</td><td>8</td><td>0</td><td>72</td></tr>
   </tbody>
 </table>
+</div>
 
 <!-- ============================================================ -->
-<h2>2.3 Color（手番）</h2>
+<h2 id="sec-2-3"><span class="sec-num">2.3</span> Color（手番）</h2>
 
 <p>
 手番は <code>Color</code> 列挙型で表現します。先手が <code>Black = 0</code>、後手が <code>White = 1</code> です。
@@ -186,7 +205,7 @@ inline Color opposite(Color color) {
 </p>
 
 <!-- ============================================================ -->
-<h2>2.4 PieceType（駒種）</h2>
+<h2 id="sec-2-4"><span class="sec-num">2.4</span> PieceType（駒種）</h2>
 
 <p>
 駒の種類は <code>PieceType</code> 列挙型で定義されています。
@@ -213,6 +232,7 @@ inline Color opposite(Color color) {
 };
 </code></pre>
 
+<div class="table-wrap">
 <table>
   <thead>
     <tr><th>値</th><th>定数名</th><th>日本語名</th><th>成駒元</th></tr>
@@ -235,6 +255,7 @@ inline Color opposite(Color color) {
     <tr><td>14</td><td><code>Dragon</code></td><td>龍</td><td>飛 (7)</td></tr>
   </tbody>
 </table>
+</div>
 
 <div class="note">
 <strong>成駒の番号付け</strong><br>
@@ -244,7 +265,7 @@ inline Color opposite(Color color) {
 </div>
 
 <!-- ============================================================ -->
-<h2>2.5 駒の符号エンコーディング</h2>
+<h2 id="sec-2-5"><span class="sec-num">2.5</span> 駒の符号エンコーディング</h2>
 
 <p>
 Hayanagiでは、盤面上の駒を<strong>符号付き整数</strong>で表現します。
@@ -280,6 +301,7 @@ inline PieceType piece_type(int piece) {
 
 <p>具体例を以下に示します。</p>
 
+<div class="table-wrap">
 <table>
   <thead>
     <tr><th>値</th><th>意味</th><th><code>piece_color()</code></th><th><code>piece_type()</code></th></tr>
@@ -292,9 +314,10 @@ inline PieceType piece_type(int piece) {
     <tr><td><code>0</code></td><td>空マス</td><td>-</td><td>Empty</td></tr>
   </tbody>
 </table>
+</div>
 
 <!-- ============================================================ -->
-<h2>2.6 Move構造体</h2>
+<h2 id="sec-2-6"><span class="sec-num">2.6</span> Move構造体</h2>
 
 <p>
 指し手は <code>Move</code> 構造体で表現されます。
@@ -315,6 +338,7 @@ inline PieceType piece_type(int piece) {
 };
 </code></pre>
 
+<div class="table-wrap">
 <table>
   <thead>
     <tr><th>フィールド</th><th>型</th><th>説明</th></tr>
@@ -327,6 +351,7 @@ inline PieceType piece_type(int piece) {
     <tr><td><code>drop</code></td><td><code>bool</code></td><td>駒を打つ手なら <code>true</code></td></tr>
   </tbody>
 </table>
+</div>
 
 <p>
 例えば「7七の歩を7六へ移動する手」は以下のように表されます。
@@ -361,7 +386,7 @@ m.drop = true;
 </div>
 
 <!-- ============================================================ -->
-<h2>2.7 成り判定と成り処理</h2>
+<h2 id="sec-2-7"><span class="sec-num">2.7</span> 成り判定と成り処理</h2>
 
 <p>
 駒が成れるかどうか、成った結果の駒種、不成に戻した駒種を扱う関数群です。
@@ -465,7 +490,7 @@ inline bool is_last_two_ranks(Color color, int row) {
 </p>
 
 <!-- ============================================================ -->
-<h2>2.8 駒の価値テーブル</h2>
+<h2 id="sec-2-8"><span class="sec-num">2.8</span> 駒の価値テーブル</h2>
 
 <p>
 評価関数や手の順序付けで使われる、駒の価値を返す関数です。
@@ -481,6 +506,7 @@ inline bool is_last_two_ranks(Color color, int row) {
 }
 </code></pre>
 
+<div class="table-wrap">
 <table>
   <thead>
     <tr><th>駒種</th><th>値</th><th>備考</th></tr>
@@ -503,6 +529,7 @@ inline bool is_last_two_ranks(Color color, int row) {
     <tr><td>Dragon (14)</td><td>1150</td><td>龍（飛+150）</td></tr>
   </tbody>
 </table>
+</div>
 
 <div class="note">
 <strong>駒の価値について</strong><br>
@@ -514,7 +541,7 @@ inline bool is_last_two_ranks(Color color, int row) {
 </div>
 
 <!-- ============================================================ -->
-<h2>2.9 入玉ポイント</h2>
+<h2 id="sec-2-9"><span class="sec-num">2.9</span> 入玉ポイント</h2>
 
 <p>
 将棋には「入玉宣言勝ち」というルールがあり、互いの玉が相手陣に入った場合、
@@ -546,6 +573,7 @@ inline bool is_last_two_ranks(Color color, int row) {
 玉は0点です。<code>unpromote(type)</code> を使うことで、成駒も元駒と同じ点数になります。
 </p>
 
+<div class="table-wrap">
 <table>
   <thead>
     <tr><th>駒分類</th><th>駒種</th><th>点数</th></tr>
@@ -556,9 +584,10 @@ inline bool is_last_two_ranks(Color color, int row) {
     <tr><td>玉</td><td>玉</td><td>0点</td></tr>
   </tbody>
 </table>
+</div>
 
 <!-- ============================================================ -->
-<h2>2.10 駒の文字表現</h2>
+<h2 id="sec-2-10"><span class="sec-num">2.10</span> 駒の文字表現</h2>
 
 <p>
 SFEN文字列の読み書きや、USI形式での指し手の表示に使われる
@@ -613,7 +642,7 @@ inline std::optional&lt;PieceType&gt; piece_from_letter(char letter) {
 </code></pre>
 
 <!-- ============================================================ -->
-<h2>2.11 終局状態の表現</h2>
+<h2 id="sec-2-11"><span class="sec-num">2.11</span> 終局状態の表現</h2>
 
 <p>
 将棋には詰み以外にもさまざまな終局条件があります。
@@ -656,6 +685,7 @@ struct TerminalStatus {
 <code>is_terminal()</code> で終局しているかどうかを判定できます。
 </p>
 
+<div class="table-wrap">
 <table>
   <thead>
     <tr><th>理由</th><th>結果</th><th>説明</th></tr>
@@ -669,9 +699,10 @@ struct TerminalStatus {
     <tr><td><code>TryRule</code></td><td>Win</td><td>トライルール — 玉が相手の玉の初期位置に到達</td></tr>
   </tbody>
 </table>
+</div>
 
 <!-- ============================================================ -->
-<h2>2.12 まとめ</h2>
+<h2 id="sec-2-12"><span class="sec-num">2.12</span> まとめ</h2>
 
 <p>本章では <code>types.h</code> に定義されたHayanagiの基本型を学びました。</p>
 
@@ -689,11 +720,20 @@ struct TerminalStatus {
 次章では、盤面上の駒の集合を効率的に表現・操作するための「ビットボード」について学びます。
 </p>
 
-<nav class="chapter-nav">
-  <a href="chapter01.html">&larr; 前章: 第1章 はじめに</a>
-  <a href="chapter03.html">次章: 第3章 ビットボード &rarr;</a>
+<nav class="chapter-nav" aria-label="章の移動">
+  <a class="prev" href="chapter01.html"><span class="label">&larr; 前の章</span><span class="title">第1章 はじめに</span></a>
+  <a class="next" href="chapter03.html"><span class="label">次の章 &rarr;</span><span class="title">第3章 ビットボード</span></a>
 </nav>
 
+</main>
+<aside class="page-toc" aria-label="この章の内容" hidden></aside>
 </div>
+
+<footer class="site-footer">
+  <div class="inner">
+    <a class="footer-brand" href="index.html"><img src="hayanagi-icon.svg" alt="" width="28" height="28"><span>Hayanagi で学ぶ将棋エンジンの仕組み</span></a>
+    <p class="footer-note">ソースコード: <a href="https://github.com/hnakada123/Hayanagi">github.com/hnakada123/Hayanagi</a></p>
+  </div>
+</footer>
 </body>
 </html>

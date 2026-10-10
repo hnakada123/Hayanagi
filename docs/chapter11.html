@@ -4,18 +4,32 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>第11章 評価関数 — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="hayanagi-icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
+<script src="script.js" defer></script>
 </head>
 <body>
+<a class="skip-link" href="#main">本文へスキップ</a>
 <header class="site-header">
   <div class="inner">
-    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
-    <nav><a href="index.html">目次</a></nav>
+    <a class="brand" href="index.html">
+      <img src="hayanagi-icon.svg" alt="" width="36" height="36">
+      <span class="brand-text"><span class="brand-name">Hayanagi</span><span class="brand-sub">で学ぶ将棋エンジンの仕組み</span></span>
+    </a>
+    <nav class="site-nav" aria-label="サイト">
+      <a href="index.html#contents">目次</a>
+      <a href="https://github.com/hnakada123/Hayanagi">GitHub</a>
+    </nav>
   </div>
 </header>
-<div class="wrapper">
+<div class="layout">
+<main class="content" id="main">
 
-<h1>第11章 評価関数</h1>
+<header class="chapter-header">
+<p class="chapter-part">第III部 探索と評価</p>
+<h1><span class="chapter-num">第11章</span> 評価関数</h1>
+</header>
 
 <p>
 探索アルゴリズムがどれほど優れていても、局面の良し悪しを正確に判断できなければ強い将棋エンジンにはなりません。
@@ -24,7 +38,7 @@
 </p>
 
 <!-- ============================================================ -->
-<h2>11.1 evaluate() 関数の全体構造</h2>
+<h2 id="sec-11-1"><span class="sec-num">11.1</span> evaluate() 関数の全体構造</h2>
 
 <p>
 <code>evaluate()</code> は先手（Black）と後手（White）のスコアを個別に計算し、最終的にその差を手番側の視点で返します。
@@ -103,7 +117,7 @@
 </ol>
 
 <!-- ============================================================ -->
-<h2>11.2 駒得（Material）</h2>
+<h2 id="sec-11-2"><span class="sec-num">11.2</span> 駒得（Material）</h2>
 
 <p>
 評価の基盤となるのは駒の素点（<code>piece_value(type)</code>）です。
@@ -130,7 +144,7 @@
 }</code></pre>
 
 <!-- ============================================================ -->
-<h2>11.3 テンポボーナス</h2>
+<h2 id="sec-11-3"><span class="sec-num">11.3</span> テンポボーナス</h2>
 
 <p>
 Hayanagiでは手番を持つこと自体に <code>kTempoBonus = 12</code> の価値を与えています。
@@ -146,7 +160,7 @@ Hayanagiでは手番を持つこと自体に <code>kTempoBonus = 12</code> の�
 </p>
 
 <!-- ============================================================ -->
-<h2>11.4 駒の位置評価 piece_square_bonus()</h2>
+<h2 id="sec-11-4"><span class="sec-num">11.4</span> 駒の位置評価 piece_square_bonus()</h2>
 
 <p>
 同じ駒でも、盤上のどこにいるかによって価値が異なります。
@@ -255,7 +269,7 @@ int center_bonus(int row, int col) {
 }</code></pre>
 
 <!-- ============================================================ -->
-<h2>11.5 利きの広さ mobility_bonus()</h2>
+<h2 id="sec-11-5"><span class="sec-num">11.5</span> 利きの広さ mobility_bonus()</h2>
 
 <p>
 駒の利き（移動可能なマスの数）は、その駒の活動度を表す重要な指標です。
@@ -390,7 +404,7 @@ int count_slider_mobility(const Position&amp; position,
 </ul>
 
 <!-- ============================================================ -->
-<h2>11.6 玉の安全度 king_safety_score()</h2>
+<h2 id="sec-11-6"><span class="sec-num">11.6</span> 玉の安全度 king_safety_score()</h2>
 
 <p>
 玉の安全度は将棋の評価において極めて重要な要素です。
@@ -525,7 +539,7 @@ for (int step = 1; step &lt;= 2; ++step) {
 </p>
 
 <!-- ============================================================ -->
-<h2>11.7 全体のスコア計算</h2>
+<h2 id="sec-11-7"><span class="sec-num">11.7</span> 全体のスコア計算</h2>
 
 <p>
 最終的なスコアは以下の手順で合算されます。
@@ -547,7 +561,7 @@ for (int step = 1; step &lt;= 2; ++step) {
 </p>
 
 <!-- ============================================================ -->
-<h2>11.8 まとめ</h2>
+<h2 id="sec-11-8"><span class="sec-num">11.8</span> まとめ</h2>
 
 <p>
 Hayanagiの評価関数は、ニューラルネットワークを使わない古典的な手作り評価関数です。
@@ -563,10 +577,20 @@ Hayanagiの評価関数は、ニューラルネットワークを使わない古
   <li>テンポボーナスにより手番の有利さを反映</li>
 </ul>
 
-  <div class="chapter-nav">
-    <span><a href="chapter10.html">&larr; 前章</a></span>
-    <span><a href="chapter12.html">次章 &rarr;</a></span>
-  </div>
+<nav class="chapter-nav" aria-label="章の移動">
+  <a class="prev" href="chapter10.html"><span class="label">&larr; 前の章</span><span class="title">第10章 詰み探索</span></a>
+  <a class="next" href="chapter12.html"><span class="label">次の章 &rarr;</span><span class="title">第12章 並列探索</span></a>
+</nav>
+
+</main>
+<aside class="page-toc" aria-label="この章の内容" hidden></aside>
 </div>
+
+<footer class="site-footer">
+  <div class="inner">
+    <a class="footer-brand" href="index.html"><img src="hayanagi-icon.svg" alt="" width="28" height="28"><span>Hayanagi で学ぶ将棋エンジンの仕組み</span></a>
+    <p class="footer-note">ソースコード: <a href="https://github.com/hnakada123/Hayanagi">github.com/hnakada123/Hayanagi</a></p>
+  </div>
+</footer>
 </body>
 </html>

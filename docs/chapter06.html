@@ -4,18 +4,32 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>第6章 合法手生成 — Hayanagi で学ぶ将棋エンジンの仕組み</title>
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="hayanagi-icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
+<script src="script.js" defer></script>
 </head>
 <body>
+<a class="skip-link" href="#main">本文へスキップ</a>
 <header class="site-header">
   <div class="inner">
-    <h1><a href="index.html">Hayanagi で学ぶ将棋エンジンの仕組み</a></h1>
-    <nav><a href="index.html">目次</a></nav>
+    <a class="brand" href="index.html">
+      <img src="hayanagi-icon.svg" alt="" width="36" height="36">
+      <span class="brand-text"><span class="brand-name">Hayanagi</span><span class="brand-sub">で学ぶ将棋エンジンの仕組み</span></span>
+    </a>
+    <nav class="site-nav" aria-label="サイト">
+      <a href="index.html#contents">目次</a>
+      <a href="https://github.com/hnakada123/Hayanagi">GitHub</a>
+    </nav>
   </div>
 </header>
-<div class="wrapper">
+<div class="layout">
+<main class="content" id="main">
 
-<h1>第6章 合法手生成</h1>
+<header class="chapter-header">
+<p class="chapter-part">第II部 局面管理と合法手生成</p>
+<h1><span class="chapter-num">第6章</span> 合法手生成</h1>
+</header>
 
 <p>
 将棋エンジンの核心部分ともいえる合法手生成について解説します。
@@ -24,7 +38,7 @@
 </p>
 
 <!-- ============================================================ -->
-<h2>6.1 設計思想: 疑似合法手生成 vs 直接合法手生成</h2>
+<h2 id="sec-6-1"><span class="sec-num">6.1</span> 設計思想: 疑似合法手生成 vs 直接合法手生成</h2>
 
 <p>
 合法手生成には大きく分けて2つのアプローチがあります。
@@ -45,7 +59,7 @@ Hayanagi は<strong>直接合法手生成方式</strong>を採用しています
 </p>
 
 <!-- ============================================================ -->
-<h2>6.2 generate_legal_moves() のエントリポイント</h2>
+<h2 id="sec-6-2"><span class="sec-num">6.2</span> generate_legal_moves() のエントリポイント</h2>
 
 <p>
 <code>Position</code> クラスには、合法手生成のための複数のオーバーロードが用意されています。
@@ -93,7 +107,7 @@ std::vector&lt;Move&gt; Position::generate_legal_moves(bool include_drops,
 </p>
 
 <!-- ============================================================ -->
-<h2>6.3 MoveSelection 列挙型</h2>
+<h2 id="sec-6-3"><span class="sec-num">6.3</span> MoveSelection 列挙型</h2>
 
 <p>
 <code>MoveSelection</code> は、生成する手の種類を制御するための列挙型です。
@@ -106,6 +120,7 @@ enum class MoveSelection : int {
     Checking,
 };</code></pre>
 
+<div class="table-wrap">
 <table>
   <thead>
     <tr><th>値</th><th>用途</th><th>生成される手</th></tr>
@@ -116,6 +131,7 @@ enum class MoveSelection : int {
     <tr><td><code>Checking</code></td><td>王手生成</td><td>相手玉に王手をかける手のみ</td></tr>
   </tbody>
 </table>
+</div>
 
 <p>
 フィルタリングは <code>should_keep_generated_move()</code> で行われます（後述）。
@@ -123,7 +139,7 @@ enum class MoveSelection : int {
 </p>
 
 <!-- ============================================================ -->
-<h2>6.4 compute_pins_and_checks() — ピンと王手の同時検出</h2>
+<h2 id="sec-6-4"><span class="sec-num">6.4</span> compute_pins_and_checks() — ピンと王手の同時検出</h2>
 
 <p>
 合法手生成の前処理として、ピンされている駒と王手をかけている駒を同時に検出します。
@@ -210,7 +226,7 @@ void Position::compute_pins_and_checks(Color color,
 </p>
 
 <!-- ============================================================ -->
-<h2>6.5 両王手時の処理（玉移動のみ）</h2>
+<h2 id="sec-6-5"><span class="sec-num">6.5</span> 両王手時の処理（玉移動のみ）</h2>
 
 <p>
 両王手（double check）の場合、2つの駒から同時に王手がかかっているため、
@@ -230,7 +246,7 @@ void Position::compute_pins_and_checks(Color color,
 </p>
 
 <!-- ============================================================ -->
-<h2>6.6 単王手時の move_mask（合駒・駒取りの制限）</h2>
+<h2 id="sec-6-6"><span class="sec-num">6.6</span> 単王手時の move_mask（合駒・駒取りの制限）</h2>
 
 <p>
 王手をかけている駒が1つだけの場合（単王手）、玉以外の駒による王手回避方法は以下の2つです。
@@ -261,7 +277,7 @@ void Position::compute_pins_and_checks(Color color,
 </p>
 
 <!-- ============================================================ -->
-<h2>6.7 generate_king_moves() — 玉の移動生成</h2>
+<h2 id="sec-6-7"><span class="sec-num">6.7</span> generate_king_moves() — 玉の移動生成</h2>
 
 <p>
 玉の移動は他の駒と異なり、移動先が敵に攻撃されていないことを確認する必要があります。
@@ -295,7 +311,7 @@ void Position::generate_king_moves(Color color,
 </p>
 
 <!-- ============================================================ -->
-<h2>6.8 generate_piece_moves() — 各駒種の移動生成</h2>
+<h2 id="sec-6-8"><span class="sec-num">6.8</span> generate_piece_moves() — 各駒種の移動生成</h2>
 
 <p>
 玉以外の全駒種は <code>generate_piece_moves()</code> で統一的に処理されます。
@@ -391,7 +407,7 @@ void Position::add_move_variants(int from,
 </p>
 
 <!-- ============================================================ -->
-<h2>6.9 add_drop_moves() — 駒打ち生成</h2>
+<h2 id="sec-6-9"><span class="sec-num">6.9</span> add_drop_moves() — 駒打ち生成</h2>
 
 <p>
 持ち駒を盤上に打つ手の生成です。将棋特有の複雑なルールが反映されています。
@@ -504,7 +520,7 @@ bool Position::is_pawn_drop_mate(const Move&amp; move) const {
 </p>
 
 <!-- ============================================================ -->
-<h2>6.10 should_keep_generated_move() — 戦術手/王手手のフィルタ</h2>
+<h2 id="sec-6-10"><span class="sec-num">6.10</span> should_keep_generated_move() — 戦術手/王手手のフィルタ</h2>
 
 <p>
 生成された手を <code>MoveSelection</code> に応じてフィルタリングする関数です。
@@ -526,6 +542,7 @@ bool Position::should_keep_generated_move(const Move&amp; move,
     }
 }</code></pre>
 
+<div class="table-wrap">
 <table>
   <thead>
     <tr><th>MoveSelection</th><th>保持条件</th></tr>
@@ -536,13 +553,14 @@ bool Position::should_keep_generated_move(const Move&amp; move,
     <tr><td><code>Checking</code></td><td><code>gives_check(move)</code> が <code>true</code> の手のみ</td></tr>
   </tbody>
 </table>
+</div>
 
 <p>
 <code>Tactical</code> で <code>in_check</code> が含まれているのは、王手回避時は全手を探索する必要があるためです。
 </p>
 
 <!-- ============================================================ -->
-<h2>6.11 generate_quiescence_moves() と generate_checking_moves() の違い</h2>
+<h2 id="sec-6-11"><span class="sec-num">6.11</span> generate_quiescence_moves() と generate_checking_moves() の違い</h2>
 
 <p>
 この2つの関数は、目的の異なる手の部分集合を生成します。
@@ -569,7 +587,7 @@ bool Position::should_keep_generated_move(const Move&amp; move,
 </p>
 
 <!-- ============================================================ -->
-<h2>6.12 全体の処理フロー</h2>
+<h2 id="sec-6-12"><span class="sec-num">6.12</span> 全体の処理フロー</h2>
 
 <p>
 合法手生成の全体フローを整理すると、以下のようになります。
@@ -591,10 +609,20 @@ bool Position::should_keep_generated_move(const Move&amp; move,
 生成される手はすべて合法であることが保証されます。
 </p>
 
-  <div class="chapter-nav">
-    <span><a href="chapter05.html">&larr; 前章</a></span>
-    <span><a href="chapter07.html">次章 &rarr;</a></span>
-  </div>
+<nav class="chapter-nav" aria-label="章の移動">
+  <a class="prev" href="chapter05.html"><span class="label">&larr; 前の章</span><span class="title">第5章 攻撃テーブルと利き計算</span></a>
+  <a class="next" href="chapter07.html"><span class="label">次の章 &rarr;</span><span class="title">第7章 終局判定と特殊ルール</span></a>
+</nav>
+
+</main>
+<aside class="page-toc" aria-label="この章の内容" hidden></aside>
 </div>
+
+<footer class="site-footer">
+  <div class="inner">
+    <a class="footer-brand" href="index.html"><img src="hayanagi-icon.svg" alt="" width="28" height="28"><span>Hayanagi で学ぶ将棋エンジンの仕組み</span></a>
+    <p class="footer-note">ソースコード: <a href="https://github.com/hnakada123/Hayanagi">github.com/hnakada123/Hayanagi</a></p>
+  </div>
+</footer>
 </body>
 </html>
