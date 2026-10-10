@@ -807,6 +807,271 @@ figcaption {
   font-size: .85rem;
 }
 
+/* --- Hayanagi のトップページ（home.html） --- */
+.home-hero {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.home-hero-inner {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 4.5rem 1.5rem 3.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.home-mark {
+  display: block;
+  width: clamp(112px, 16vw, 148px);
+  height: auto;
+  margin-bottom: 1.75rem;
+  color: var(--willow);
+}
+.home-title {
+  margin: 0;
+  font-size: clamp(3rem, 9vw, 4.75rem);
+  line-height: 1.1;
+  letter-spacing: .01em;
+}
+.home-tagline {
+  margin: 1rem 0 0;
+  color: var(--heading);
+  font-family: var(--font-serif);
+  font-size: clamp(1.15rem, 2.4vw, 1.45rem);
+  font-weight: 700;
+}
+.home-lead {
+  max-width: 640px;
+  margin: 1.25rem auto 0;
+}
+.home-hero .hero-actions { justify-content: center; }
+.home-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  width: 100%;
+  max-width: 760px;
+  margin: 3rem 0 0;
+  padding: 1.75rem 0 0;
+  border-top: 1px solid var(--border);
+  list-style: none;
+}
+.home-facts li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0;
+}
+
+.home-section {
+  padding: 4.5rem 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.home-section.alt { background: var(--surface); }
+.home-section-inner {
+  max-width: var(--index-width);
+  margin: 0 auto;
+}
+.home-section h2 {
+  margin: 0 0 .5rem;
+  padding: 0;
+  border-bottom: 0;
+  font-size: clamp(1.6rem, 3vw, 2rem);
+}
+.home-section .section-lead {
+  margin: 0 0 2rem;
+  font-size: 1rem;
+}
+.home-section h3 { margin-top: 2.5rem; }
+.home-section .split h3 { margin-top: 0; }
+.more-link { margin: 1.75rem 0 0; }
+/* 狭い画面では内容の列がつぶれないよう、表ごと横にスクロールさせる */
+.options-table { min-width: 600px; }
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.feature {
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+  margin: 0;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.feature-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--willow-tint);
+  color: var(--willow);
+}
+.feature-icon svg { width: 24px; height: 24px; }
+.feature h3 {
+  margin: 0;
+  font-size: 1.12rem;
+}
+.feature p {
+  margin: 0;
+  font-size: .92rem;
+  line-height: 1.8;
+}
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  margin: auto 0 0;
+  padding: .25rem 0 0;
+  list-style: none;
+}
+.tag-list li { margin: 0; }
+.tag-list code { font-size: .76rem; }
+
+.steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+}
+.steps li {
+  margin: 0;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  counter-increment: step;
+}
+.steps li::before {
+  content: counter(step);
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  margin-bottom: 1rem;
+  border-radius: 50%;
+  background: var(--willow);
+  color: var(--on-willow);
+  font-family: var(--font-serif);
+  font-weight: 700;
+}
+.steps h3 {
+  margin: 0 0 .5rem;
+  font-size: 1.08rem;
+}
+.steps p {
+  margin: 0;
+  font-size: .92rem;
+  line-height: 1.8;
+}
+
+.split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 2rem;
+  align-items: start;
+}
+.split pre { margin-bottom: 1rem; }
+.split p { font-size: .92rem; }
+
+.learn-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 2.5rem;
+  padding: 2.5rem;
+  border: 1px solid var(--willow-line);
+  border-radius: 20px;
+  background: var(--willow-tint);
+}
+.learn-card h2 { margin-bottom: 1rem; }
+.learn-card .hero-actions { margin-top: 1.5rem; }
+.part-list {
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.part-list li {
+  display: flex;
+  align-items: baseline;
+  gap: .9rem;
+  margin: 0;
+  padding: .75rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--heading);
+  font-family: var(--font-serif);
+  font-weight: 700;
+}
+.part-list .part-num {
+  min-width: 3.5em;
+  font-family: var(--font-sans);
+}
+
+.limit-list {
+  margin: 0 0 2.5rem;
+  padding-left: 1.4rem;
+}
+.limit-list li { margin: .5rem 0; }
+
+.link-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.link-grid li { margin: 0; }
+.link-grid a {
+  display: flex;
+  flex-direction: column;
+  gap: .25rem;
+  height: 100%;
+  padding: 1.1rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--heading);
+  text-decoration: none;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.link-grid a:hover {
+  border-color: var(--willow);
+  box-shadow: var(--shadow);
+}
+.link-grid .title { font-weight: 700; }
+.link-grid .desc {
+  color: var(--muted);
+  font-size: .85rem;
+  line-height: 1.6;
+}
+
+@media (max-width: 960px) {
+  .feature-grid, .link-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .steps { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .split, .learn-card { grid-template-columns: minmax(0, 1fr); }
+  .learn-card { gap: 1.75rem; padding: 1.75rem; }
+}
+
 /* --- 狭い画面 --- */
 @media (max-width: 800px) {
   .hero-inner {
@@ -824,8 +1089,12 @@ figcaption {
 @media (max-width: 640px) {
   html { font-size: 15px; }
   .site-header .inner { padding: 0 1rem; gap: .5rem; }
-  .brand-sub { display: none; }
+  .brand-sub, .site-nav .nav-secondary { display: none; }
   .site-nav a { padding: 0 .7rem; }
+  .home-hero-inner { padding: 3rem 1rem 2.5rem; }
+  .home-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 1.5rem; }
+  .home-section { padding: 3.25rem 1rem; }
+  .feature-grid, .link-grid { grid-template-columns: minmax(0, 1fr); }
   .layout { padding: 1.75rem 1rem 3.5rem; }
   .index-main { padding: .5rem 1rem 3.5rem; }
   .hero-inner { padding: 2.5rem 1rem; }

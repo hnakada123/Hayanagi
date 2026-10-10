@@ -10,6 +10,7 @@ Hayanagi は、C++17 で実装した USI プロトコル対応の最小構成将
 - USI の `id name` は `Hayanagi 1.5.1`。`./build/hayanagi --version` でも表示できます
 - CMake の生成実行ファイル名は `hayanagi`、組み込み用の静的ライブラリは `hayanagi_tsume`
 - 合法手生成、終局判定、通常探索、詰み探索、`bench` / `perft` をひととおり実装
+- 機能・使い方・主な設定は紹介ページ [`docs/home.html`](docs/home.html) にまとめています（ブラウザーで開きます）
 
 ## 目次
 
@@ -33,6 +34,7 @@ C++の基本文法と将棋のルールを知っている方に向けて、デ�
 終局判定、探索と評価、並列化、定跡、USIプロトコルを図とコード例で解説しています。
 
 リポジトリを取得し、`docs/index.html` をブラウザーで開いてください。
+Hayanagi 自体の紹介ページ `docs/home.html` からも教材に移動できます。
 HTML・CSS・図版を同梱しているため、ビルドやWebサーバーの起動は不要です。
 
 教材内のコード例や行数には執筆時点の構成が含まれます。最新の実装は [`src/`](src/) を参照してください。
@@ -987,6 +989,7 @@ python3 tests/bench_tsume.py build/hayanagi [--baseline /path/to/previous/hayana
 | `tests/bench_tsume.py` | 詰み探索ベンチマーク |
 | `tests/bench_threads.py` | 通常探索・perft のスレッド数別ベンチマーク |
 | `BENCHMARK.md` | ベンチマークの計測結果 |
+| `docs/home.html` | Hayanagi の紹介ページ（機能・使い方・主な設定・教材への案内） |
 | `docs/index.html`, `docs/chapter*.html` | 将棋エンジンの仕組みを解説するHTML教材（全15章） |
 | `docs/style.css`, `docs/script.js` | 教材のスタイルシートと、章ページの「この章の内容」を見出しから組み立てるスクリプト |
 | `docs/*.png`, `docs/hayanagi-*.svg` | 教材の図版と、ヘッダーなどで使うアイコン（`assets/icon/` の写し） |
